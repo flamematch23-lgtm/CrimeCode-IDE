@@ -1,4 +1,5 @@
 export * from "./state"
 export { LicenseService, licenseService } from "./service"
+export type { LicenseSnapshot } from "./service"
 export { adminSession, adminGrant, adminRevoke, adminExtendTrial, adminReset } from "./admin"
 export { VALID_INTERVALS } from "./service"

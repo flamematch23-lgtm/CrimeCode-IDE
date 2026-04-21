@@ -8,8 +8,8 @@ import {
   applyAdminRevoke,
   createEmptyLicense,
   type ProInterval,
-  type ProjectedLicense,
 } from "./state"
+import type { LicenseSnapshot } from "./service"
 
 export const sha256Hex = async (input: string): Promise<string> =>
   createHash("sha256").update(input, "utf8").digest("hex")
@@ -47,22 +47,22 @@ const assertUnlocked = () => {
   if (!adminSession.isUnlocked()) throw new Error("Admin panel is locked")
 }
 
-export const adminGrant = (interval: ProInterval): ProjectedLicense => {
+export const adminGrant = (interval: ProInterval): LicenseSnapshot => {
   assertUnlocked()
   return licenseService._mutate((r) => applyAdminGrant(r, { interval }))
 }
 
-export const adminRevoke = (): ProjectedLicense => {
+export const adminRevoke = (): LicenseSnapshot => {
   assertUnlocked()
   return licenseService._mutate(applyAdminRevoke)
 }
 
-export const adminExtendTrial = (days: number): ProjectedLicense => {
+export const adminExtendTrial = (days: number): LicenseSnapshot => {
   assertUnlocked()
   return licenseService._mutate((r) => applyAdminExtendTrial(r, { days }))
 }
 
-export const adminReset = (): ProjectedLicense => {
+export const adminReset = (): LicenseSnapshot => {
   assertUnlocked()
   return licenseService._mutate(() => createEmptyLicense())
 }

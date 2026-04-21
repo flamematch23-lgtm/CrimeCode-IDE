@@ -14,6 +14,11 @@ export interface LicenseRecord {
   issuedBy: "stripe" | "admin" | null
 }
 
+/**
+ * In-process projection of a `LicenseRecord` with derived `effectiveStatus` and
+ * `trialDaysRemaining` fields. Uses real `Date` objects — this is NOT the wire
+ * shape. See `LicenseSnapshot` in `./service` for the IPC transport shape.
+ */
 export interface ProjectedLicense extends LicenseRecord {
   effectiveStatus: LicenseStatus
   trialDaysRemaining: number | null

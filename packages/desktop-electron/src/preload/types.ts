@@ -25,7 +25,16 @@ export type ContextMenuItem = {
 export type ProInterval = "monthly" | "annual" | "lifetime"
 export type LicenseStatus = "free" | "trial" | "trial_expired" | "active" | "expired" | "revoked"
 
-export interface ProjectedLicense {
+/**
+ * IPC wire shape for the license state. Date fields are ISO 8601 strings (not
+ * `Date` objects) because they cross the process boundary already serialized by
+ * the main-side `toSnapshot()` helper. Use `new Date(iso)` in the renderer to
+ * rehydrate when needed.
+ *
+ * NOTE: distinct from `ProjectedLicense` in `src/main/license/state.ts`, which
+ * is the in-process shape with real `Date` fields.
+ */
+export interface LicenseSnapshot {
   status: LicenseStatus
   interval: ProInterval | null
   timeTrialEnd: string | null
@@ -97,19 +106,19 @@ export type ElectronAPI = {
   setBackgroundColor: (color: string) => Promise<void>
 
   license: {
-    get: () => Promise<ProjectedLicense>
-    startTrial: () => Promise<ProjectedLicense>
-    openCheckout: (interval: ProInterval) => Promise<void>
-    activateToken: (payload: { interval: ProInterval; token: string }) => Promise<ProjectedLicense>
+    readonly get: () => Promise<LicenseSnapshot>
+    readonly startTrial: () => Promise<LicenseSnapshot>
+    readonly openCheckout: (interval: ProInterval) => Promise<void>
+    readonly activateToken: (payload: { interval: ProInterval; token: string }) => Promise<LicenseSnapshot>
   }
   admin: {
-    status: () => Promise<{ unlocked: boolean }>
-    unlock: (passphrase: string) => Promise<{ unlocked: boolean }>
-    lock: () => Promise<{ unlocked: boolean }>
-    grant: (interval: ProInterval) => Promise<ProjectedLicense>
-    revoke: () => Promise<ProjectedLicense>
-    extendTrial: (days: number) => Promise<ProjectedLicense>
-    reset: () => Promise<ProjectedLicense>
+    readonly status: () => Promise<{ unlocked: boolean }>
+    readonly unlock: (passphrase: string) => Promise<{ unlocked: boolean }>
+    readonly lock: () => Promise<{ unlocked: boolean }>
+    readonly grant: (interval: ProInterval) => Promise<LicenseSnapshot>
+    readonly revoke: () => Promise<LicenseSnapshot>
+    readonly extendTrial: (days: number) => Promise<LicenseSnapshot>
+    readonly reset: () => Promise<LicenseSnapshot>
   }
 
   // Enhancement 3: Native context menus
