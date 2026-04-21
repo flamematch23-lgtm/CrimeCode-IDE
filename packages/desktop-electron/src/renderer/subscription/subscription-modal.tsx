@@ -1,4 +1,4 @@
-import { For, Show, Switch, Match, createSignal } from "solid-js"
+import { For, Show, Switch, Match, createSignal, createEffect, onCleanup } from "solid-js"
 import { t as translate } from "../i18n"
 import { useLicense } from "./use-license"
 import type { ProInterval } from "../../preload/types"
@@ -20,35 +20,52 @@ export function SubscriptionModal(props: { open: boolean; onClose: () => void })
   const [err, setErr] = createSignal<string | null>(null)
 
   async function onTrial() {
+    if (busy()) return
     setBusy("trial")
     setErr(null)
     try {
       await window.api.license.startTrial()
       await refresh()
     } catch (e) {
-      setErr((e as Error).message)
+      setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
     }
   }
 
   async function onSubscribe(interval: ProInterval) {
+    if (busy()) return
     setBusy(interval)
     setErr(null)
     try {
       await window.api.license.openCheckout(interval)
     } catch (e) {
-      setErr((e as Error).message)
+      setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
     }
   }
 
+  let panel: HTMLDivElement | undefined
+  createEffect(() => {
+    if (!props.open) return
+    const prev = document.activeElement as HTMLElement | null
+    panel?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") props.onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey)
+      prev?.focus?.()
+    })
+  })
+
   return (
     <Show when={props.open}>
       <div data-component="subscription-modal" role="dialog" aria-modal="true">
         <div data-slot="backdrop" onClick={props.onClose} />
-        <div data-slot="panel">
+        <div data-slot="panel" ref={panel} tabindex="-1">
           <header>
             <h2>{t("subscription.title")}</h2>
             <button data-slot="close" onClick={props.onClose} aria-label={t("subscription.close")}>
@@ -87,7 +104,7 @@ export function SubscriptionModal(props: { open: boolean; onClose: () => void })
               {(opt) => (
                 <button
                   data-interval={opt.id}
-                  disabled={busy() === opt.id || license()?.effectiveStatus === "active"}
+                  disabled={!!busy() || license()?.effectiveStatus === "active"}
                   onClick={() => onSubscribe(opt.id)}
                 >
                   <span data-slot="label">{t(opt.labelKey)}</span>
