@@ -9,8 +9,15 @@ import { browserService } from "./browser-service"
 import { getStore } from "./store"
 import { windowStateService } from "./window-state-service"
 import { setTitlebar, snapWindow } from "./windows"
-import { licenseService } from "./license"
-import { adminSession, adminGrant, adminRevoke, adminExtendTrial, adminReset } from "./license"
+import {
+  licenseService,
+  adminSession,
+  adminGrant,
+  adminRevoke,
+  adminExtendTrial,
+  adminReset,
+  VALID_INTERVALS,
+} from "./license"
 import type { ProInterval } from "./license"
 import { CHECKOUT_BASE_URL } from "./constants"
 
@@ -39,6 +46,21 @@ type Deps = {
   installUpdate: () => Promise<void> | void
   getUpdateState: () => { ready: boolean; version?: string; notes?: string; downloadedAt?: number }
   setBackgroundColor: (color: string) => void
+}
+
+const assertValidInterval = (value: unknown): ProInterval => {
+  if (typeof value === "string" && VALID_INTERVALS.has(value)) return value as ProInterval
+  throw new Error(`Invalid interval: ${String(value)}`)
+}
+
+const assertValidTrialDays = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid days: ${String(value)}`)
+  }
+  if (Math.abs(value) > 365 * 100) {
+    throw new Error(`days out of range: ${value}`)
+  }
+  return value
 }
 
 function isPowershell(app: string) {
@@ -360,7 +382,8 @@ export function registerIpcHandlers(deps: Deps) {
 
   ipcMain.handle(
     "license-open-checkout",
-    (_event: IpcMainInvokeEvent, interval: ProInterval) => {
+    (_event: IpcMainInvokeEvent, rawInterval: unknown) => {
+      const interval = assertValidInterval(rawInterval)
       const url = `${CHECKOUT_BASE_URL}?interval=${encodeURIComponent(interval)}&returnTo=${encodeURIComponent(
         "opencode://activate",
       )}`
@@ -370,8 +393,13 @@ export function registerIpcHandlers(deps: Deps) {
 
   ipcMain.handle(
     "license-activate-token",
-    (_event: IpcMainInvokeEvent, payload: { interval: ProInterval; token: string }) => {
-      return licenseService.activateFromToken(payload)
+    (_event: IpcMainInvokeEvent, payload: unknown) => {
+      if (!payload || typeof payload !== "object") throw new Error("Invalid activate payload")
+      const raw = payload as Record<string, unknown>
+      const interval = assertValidInterval(raw.interval)
+      const token = typeof raw.token === "string" && raw.token.length > 0 ? raw.token : null
+      if (!token) throw new Error("Missing or invalid token")
+      return licenseService.activateFromToken({ interval, token })
     },
   )
 
@@ -387,16 +415,16 @@ export function registerIpcHandlers(deps: Deps) {
     return { unlocked: adminSession.isUnlocked() }
   })
 
-  ipcMain.handle("admin-grant", (_event: IpcMainInvokeEvent, interval: ProInterval) => {
-    return adminGrant(interval)
+  ipcMain.handle("admin-grant", (_event: IpcMainInvokeEvent, rawInterval: unknown) => {
+    return adminGrant(assertValidInterval(rawInterval))
   })
 
   ipcMain.handle("admin-revoke", () => {
     return adminRevoke()
   })
 
-  ipcMain.handle("admin-extend-trial", (_event: IpcMainInvokeEvent, days: number) => {
-    return adminExtendTrial(days)
+  ipcMain.handle("admin-extend-trial", (_event: IpcMainInvokeEvent, rawDays: unknown) => {
+    return adminExtendTrial(assertValidTrialDays(rawDays))
   })
 
   ipcMain.handle("admin-reset", () => {

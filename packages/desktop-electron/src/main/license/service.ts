@@ -11,7 +11,7 @@ import {
 } from "./state"
 
 const VALID_STATUSES = new Set(["free", "trial", "trial_expired", "active", "expired", "revoked"])
-const VALID_INTERVALS = new Set(["monthly", "annual", "lifetime"])
+export const VALID_INTERVALS = new Set(["monthly", "annual", "lifetime"])
 const VALID_ISSUERS = new Set(["stripe", "admin"])
 
 const readStatus = (raw: unknown): LicenseRecord["status"] =>
