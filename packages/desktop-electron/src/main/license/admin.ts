@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, timingSafeEqual } from "node:crypto"
 import { CHANNEL } from "../constants"
 import { ADMIN_PASSPHRASE_SHA256 } from "../constants"
 import { licenseService } from "./service"
@@ -16,8 +16,14 @@ export const sha256Hex = async (input: string): Promise<string> =>
 
 export const passphraseMatches = async (input: string, expectedHex: string): Promise<boolean> => {
   if (!expectedHex) return false
-  const actual = await sha256Hex(input)
-  return actual.toLowerCase() === expectedHex.toLowerCase()
+  const actualHex = await sha256Hex(input)
+  const normalizedExpected = expectedHex.toLowerCase()
+  if (actualHex.length !== normalizedExpected.length) return false
+  try {
+    return timingSafeEqual(Buffer.from(actualHex, "hex"), Buffer.from(normalizedExpected, "hex"))
+  } catch {
+    return false
+  }
 }
 
 export class AdminSession {
