@@ -22,6 +22,22 @@ export type ContextMenuItem = {
   enabled?: boolean
 }
 
+export type ProInterval = "monthly" | "annual" | "lifetime"
+export type LicenseStatus = "free" | "trial" | "trial_expired" | "active" | "expired" | "revoked"
+
+export interface ProjectedLicense {
+  status: LicenseStatus
+  interval: ProInterval | null
+  timeTrialEnd: string | null
+  timeTrialConsumed: string | null
+  timeIssued: string | null
+  timeExpiry: string | null
+  licenseToken: string | null
+  issuedBy: "stripe" | "admin" | null
+  effectiveStatus: LicenseStatus
+  trialDaysRemaining: number | null
+}
+
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
@@ -79,6 +95,22 @@ export type ElectronAPI = {
   getUpdateState: () => Promise<{ ready: boolean; version?: string; notes?: string; downloadedAt?: number }>
   onUpdateReady: (cb: (info: { version: string; notes?: string }) => void) => () => void
   setBackgroundColor: (color: string) => Promise<void>
+
+  license: {
+    get: () => Promise<ProjectedLicense>
+    startTrial: () => Promise<ProjectedLicense>
+    openCheckout: (interval: ProInterval) => Promise<void>
+    activateToken: (payload: { interval: ProInterval; token: string }) => Promise<ProjectedLicense>
+  }
+  admin: {
+    status: () => Promise<{ unlocked: boolean }>
+    unlock: (passphrase: string) => Promise<{ unlocked: boolean }>
+    lock: () => Promise<{ unlocked: boolean }>
+    grant: (interval: ProInterval) => Promise<ProjectedLicense>
+    revoke: () => Promise<ProjectedLicense>
+    extendTrial: (days: number) => Promise<ProjectedLicense>
+    reset: () => Promise<ProjectedLicense>
+  }
 
   // Enhancement 3: Native context menus
   showContextMenu: (items: ContextMenuItem[]) => Promise<string | null>
