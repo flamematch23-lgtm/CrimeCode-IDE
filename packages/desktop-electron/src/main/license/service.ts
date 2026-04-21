@@ -10,6 +10,19 @@ import {
   type ProjectedLicense,
 } from "./state"
 
+const VALID_STATUSES = new Set(["free", "trial", "trial_expired", "active", "expired", "revoked"])
+const VALID_INTERVALS = new Set(["monthly", "annual", "lifetime"])
+const VALID_ISSUERS = new Set(["stripe", "admin"])
+
+const readStatus = (raw: unknown): LicenseRecord["status"] =>
+  typeof raw === "string" && VALID_STATUSES.has(raw) ? (raw as LicenseRecord["status"]) : "free"
+
+const readInterval = (raw: unknown): LicenseRecord["interval"] =>
+  typeof raw === "string" && VALID_INTERVALS.has(raw) ? (raw as LicenseRecord["interval"]) : null
+
+const readIssuer = (raw: unknown): LicenseRecord["issuedBy"] =>
+  typeof raw === "string" && VALID_ISSUERS.has(raw) ? (raw as LicenseRecord["issuedBy"]) : null
+
 const reviveDates = (raw: unknown): LicenseRecord => {
   const base = createEmptyLicense()
   if (!raw || typeof raw !== "object") return base
@@ -21,14 +34,14 @@ const reviveDates = (raw: unknown): LicenseRecord => {
     return Number.isNaN(parsed.getTime()) ? null : parsed
   }
   return {
-    status: (record.status as LicenseRecord["status"]) ?? "free",
-    interval: (record.interval as LicenseRecord["interval"]) ?? null,
+    status: readStatus(record.status),
+    interval: readInterval(record.interval),
     timeTrialEnd: readDate("timeTrialEnd"),
     timeTrialConsumed: readDate("timeTrialConsumed"),
     timeIssued: readDate("timeIssued"),
     timeExpiry: readDate("timeExpiry"),
     licenseToken: typeof record.licenseToken === "string" ? record.licenseToken : null,
-    issuedBy: (record.issuedBy as LicenseRecord["issuedBy"]) ?? null,
+    issuedBy: readIssuer(record.issuedBy),
   }
 }
 
