@@ -45,6 +45,7 @@ import type { CommandChild } from "./cli"
 import { getSidecarPath, installCli, syncCli } from "./cli"
 import { CHANNEL, UPDATER_ENABLED } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendSqliteMigrationProgress } from "./ipc"
+import { licenseService, VALID_INTERVALS } from "./license"
 import { initLogging } from "./logging"
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
@@ -83,17 +84,20 @@ function setupApp() {
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))
+    const forwardable = urls.filter((raw) => !handleActivateDeepLink(raw))
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
-      emitDeepLinks(urls)
+      emitDeepLinks(forwardable)
     }
     focusMainWindow()
   })
 
   app.on("open-url", (event: Event, url: string) => {
     event.preventDefault()
+    const urls = [url]
+    const forwardable = urls.filter((raw) => !handleActivateDeepLink(raw))
     logger.log("deep link received via open-url", { url })
-    emitDeepLinks([url])
+    emitDeepLinks(forwardable)
   })
 
   app.on("before-quit", () => {
@@ -129,6 +133,45 @@ function setupApp() {
     perf.mark("cli_sync_started")
     await initialize()
   })
+}
+
+/**
+ * Parses an `opencode://activate?...` deep-link URL, runs license activation if
+ * the URL is well-formed, and returns whether the URL was consumed (so callers
+ * can decide whether to forward it to the renderer as a regular deep link).
+ */
+function handleActivateDeepLink(raw: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch (err) {
+    logger.warn("malformed deep link", { raw, err: String(err) })
+    return false
+  }
+  if (!(parsed.host === "activate" || parsed.pathname.startsWith("/activate"))) {
+    return false
+  }
+  const intervalRaw = parsed.searchParams.get("interval")
+  const token = parsed.searchParams.get("token")
+  if (!intervalRaw || !VALID_INTERVALS.has(intervalRaw) || !token) {
+    logger.warn("activate deep link missing or invalid params", {
+      hasInterval: !!intervalRaw,
+      intervalValid: intervalRaw ? VALID_INTERVALS.has(intervalRaw) : false,
+      hasToken: !!token,
+    })
+    return true // URL matched activate but was unusable — still consume it so it doesn't leak
+  }
+  logger.info("activating license from deep link", {
+    interval: intervalRaw,
+    tokenPrefix: token.slice(0, 8),
+  })
+  try {
+    licenseService.activateFromToken({ interval: intervalRaw as "monthly" | "annual" | "lifetime", token })
+    return true
+  } catch (err) {
+    logger.error("license activation failed", { err: String(err) })
+    return true // activation attempted; don't double-process by forwarding
+  }
 }
 
 function emitDeepLinks(urls: string[]) {

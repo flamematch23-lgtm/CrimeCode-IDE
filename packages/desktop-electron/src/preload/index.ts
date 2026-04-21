@@ -71,6 +71,22 @@ const api: ElectronAPI = {
   },
   setBackgroundColor: (color: string) => ipcRenderer.invoke("set-background-color", color),
 
+  license: {
+    get: () => ipcRenderer.invoke("license-get"),
+    startTrial: () => ipcRenderer.invoke("license-start-trial"),
+    openCheckout: (interval) => ipcRenderer.invoke("license-open-checkout", interval),
+    activateToken: (payload) => ipcRenderer.invoke("license-activate-token", payload),
+  },
+  admin: {
+    status: () => ipcRenderer.invoke("admin-status"),
+    unlock: (passphrase) => ipcRenderer.invoke("admin-unlock", passphrase),
+    lock: () => ipcRenderer.invoke("admin-lock"),
+    grant: (interval) => ipcRenderer.invoke("admin-grant", interval),
+    revoke: () => ipcRenderer.invoke("admin-revoke"),
+    extendTrial: (days) => ipcRenderer.invoke("admin-extend-trial", days),
+    reset: () => ipcRenderer.invoke("admin-reset"),
+  },
+
   // Enhancement 3: Native context menus
   showContextMenu: (items: ContextMenuItem[]) => ipcRenderer.invoke("show-context-menu", items),
 

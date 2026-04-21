@@ -1,0 +1,68 @@
+import { createHash, timingSafeEqual } from "node:crypto"
+import { CHANNEL } from "../constants"
+import { ADMIN_PASSPHRASE_SHA256 } from "../constants"
+import { licenseService } from "./service"
+import {
+  applyAdminExtendTrial,
+  applyAdminGrant,
+  applyAdminRevoke,
+  createEmptyLicense,
+  type ProInterval,
+} from "./state"
+import type { LicenseSnapshot } from "./service"
+
+export const sha256Hex = async (input: string): Promise<string> =>
+  createHash("sha256").update(input, "utf8").digest("hex")
+
+export const passphraseMatches = async (input: string, expectedHex: string): Promise<boolean> => {
+  if (!expectedHex) return false
+  const actualHex = await sha256Hex(input)
+  const normalizedExpected = expectedHex.toLowerCase()
+  if (actualHex.length !== normalizedExpected.length) return false
+  try {
+    return timingSafeEqual(Buffer.from(actualHex, "hex"), Buffer.from(normalizedExpected, "hex"))
+  } catch {
+    return false
+  }
+}
+
+export class AdminSession {
+  private unlocked = CHANNEL === "dev"
+  isUnlocked(): boolean {
+    return this.unlocked
+  }
+  async unlock(passphrase: string): Promise<boolean> {
+    if (this.unlocked) return true
+    const ok = await passphraseMatches(passphrase, ADMIN_PASSPHRASE_SHA256)
+    if (ok) this.unlocked = true
+    return ok
+  }
+  lock(): void {
+    if (CHANNEL !== "dev") this.unlocked = false
+  }
+}
+export const adminSession = new AdminSession()
+
+const assertUnlocked = () => {
+  if (!adminSession.isUnlocked()) throw new Error("Admin panel is locked")
+}
+
+export const adminGrant = (interval: ProInterval): LicenseSnapshot => {
+  assertUnlocked()
+  return licenseService._mutate((r) => applyAdminGrant(r, { interval }))
+}
+
+export const adminRevoke = (): LicenseSnapshot => {
+  assertUnlocked()
+  return licenseService._mutate(applyAdminRevoke)
+}
+
+export const adminExtendTrial = (days: number): LicenseSnapshot => {
+  assertUnlocked()
+  return licenseService._mutate((r) => applyAdminExtendTrial(r, { days }))
+}
+
+export const adminReset = (): LicenseSnapshot => {
+  assertUnlocked()
+  return licenseService._mutate(() => createEmptyLicense())
+}

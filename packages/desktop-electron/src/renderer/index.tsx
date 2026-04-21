@@ -20,6 +20,8 @@ import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
+import { SubscriptionOverlay } from "./subscription"
+import { hasProAccess, useLicense } from "./subscription/use-license"
 import { UPDATER_ENABLED } from "./updater"
 import { webviewZoom } from "./webview-zoom"
 import "./styles.css"
@@ -308,6 +310,7 @@ render(() => {
     menuTrigger = (id) => cmd.trigger(id)
 
     const theme = useTheme()
+    const { license } = useLicense()
 
     createEffect(() => {
       theme.themeId()
@@ -316,6 +319,11 @@ render(() => {
       if (bg) {
         void window.api.setBackgroundColor(bg)
       }
+    })
+
+    createEffect(() => {
+      document.body.dataset.pro = hasProAccess(license()) ? "true" : "false"
+      document.body.dataset.proStatus = license()?.effectiveStatus ?? "free"
     })
 
     return null
@@ -339,6 +347,7 @@ render(() => {
                 servers={servers()}
                 router={MemoryRouter}
               >
+                <SubscriptionOverlay />
                 <Inner />
               </AppInterface>
             )
