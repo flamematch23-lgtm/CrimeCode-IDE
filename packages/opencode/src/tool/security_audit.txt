@@ -1,0 +1,3 @@
+Performs a static security analysis of the project's dependencies or codebase.
+Use this tool to automatically identify vulnerabilities and get actionable advice on how to fix them.
+It runs dependency audits (e.g., bun audit, npm audit) to detect known CVEs in package lockfiles.

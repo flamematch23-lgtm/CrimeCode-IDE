@@ -1,0 +1,7 @@
+{
+  "name": "updates-server",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts"
+  }
+}

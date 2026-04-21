@@ -1,0 +1,5 @@
+Allows searching the codebase conceptually using semantic search.
+Use this tool when you need to find code related to a specific concept or functionality,
+but you don't know the exact keywords, filenames, or class names to use with grep or glob.
+This tool uses a vector database to find semantically similar code snippets.
+Input a natural language description of what you are looking for.

@@ -1,0 +1,5 @@
+Read from or write to the system clipboard.
+
+Use the "read" action to get the current clipboard content, or the "write" action to replace the clipboard with new text.
+
+Works on Windows (PowerShell), macOS (pbcopy/pbpaste), and Linux (xclip or xsel).

@@ -1,0 +1,26 @@
+# fly.toml — deploy the OpenCode relay to Fly.io
+#
+# Quick start:
+#   fly launch --no-deploy --copy-config --name <your-app>
+#   fly deploy
+#   # public URL becomes: wss://<your-app>.fly.dev
+#
+app = "opencode-relay"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RELAY_PORT = "3747"
+
+[http_service]
+  internal_port = 3747
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

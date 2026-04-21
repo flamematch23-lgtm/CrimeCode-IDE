@@ -1,0 +1,47 @@
+# Browser Tool
+
+A powerful browser automation tool that navigates to URLs, captures screenshots, and extracts page content. Integrated with the desktop app's preview panel for visual feedback.
+
+## Capabilities
+
+- **Navigate** to any URL with automatic screenshot capture
+- **Screenshot** the current page at any time
+- **Extract** page title and content for analysis
+- **Preview** results in the desktop app's browser panel
+- **Screenshot** is automatically shown in the chat as a markdown image
+
+## Parameters
+
+- `url`: The URL to navigate to (e.g., https://example.com)
+- `action`: What to do - "navigate" (default), "screenshot", "content", or "close"
+- `timeout`: Navigation timeout in milliseconds (default: 15000)
+
+## Usage Examples
+
+Navigate to a URL and get a screenshot:
+```
+url: "https://github.com"
+action: "navigate"
+```
+
+Get a screenshot of the current page:
+```
+action: "screenshot"
+```
+
+Extract page content:
+```
+action: "content"
+```
+
+Close the browser session:
+```
+action: "close"
+```
+
+## Notes
+
+- Screenshots are automatically embedded as markdown images in the output
+- The browser session persists across calls for efficiency
+- Always close the browser when done to free resources
+- Supports all standard web protocols (http, https)

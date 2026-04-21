@@ -1,0 +1,124 @@
+import type { Configuration } from "electron-builder"
+import fs from "fs"
+import path from "path"
+
+const channel = (() => {
+  const raw = process.env.OPENCODE_CHANNEL
+  if (raw === "dev" || raw === "beta" || raw === "prod") return raw
+  return "dev"
+})()
+
+// Optional self-signed Windows code-signing.
+// Set SIGN_CERT=path/to/cert.pfx and SIGN_PASS=... or place a cert at sidecar/cert.pfx.
+const signCert = process.env.SIGN_CERT || path.join(__dirname, "sidecar", "cert.pfx")
+const signPass = process.env.SIGN_PASS || ""
+const signEnabled = fs.existsSync(signCert)
+
+const winSign = signEnabled
+  ? ({
+      signtoolOptions: {
+        certificateFile: signCert,
+        certificatePassword: signPass,
+        signingHashAlgorithms: ["sha256"],
+        publisherName: process.env.SIGN_PUBLISHER || "OpenCode Dev (Self-signed)",
+      },
+    } satisfies Partial<NonNullable<Configuration["win"]>>)
+  : {}
+
+const getBase = (): Configuration => ({
+  artifactName: "opencode-electron-${os}-${arch}.${ext}",
+  directories: {
+    output: "dist",
+    buildResources: "resources",
+  },
+  files: ["out/**/*", "resources/**/*"],
+  asarUnpack: ["resources/opencode-cli*"],
+  extraResources: [
+    {
+      from: "native/",
+      to: "native/",
+      filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
+    },
+    {
+      from: "sidecar/",
+      to: "resources/",
+      filter: ["opencode-cli*"],
+    },
+  ],
+  mac: {
+    category: "public.app-category.developer-tools",
+    icon: `resources/icons/icon.icns`,
+    hardenedRuntime: true,
+    gatekeeperAssess: false,
+    entitlements: "resources/entitlements.plist",
+    entitlementsInherit: "resources/entitlements.plist",
+    notarize: true,
+    target: ["dmg", "zip"],
+  },
+  dmg: {
+    sign: true,
+  },
+  protocols: {
+    name: "OpenCode",
+    schemes: ["opencode"],
+  },
+  win: {
+    icon: `resources/icons/icon.ico`,
+    target: ["nsis"],
+    ...winSign,
+  },
+  nsis: {
+    oneClick: false,
+    allowToChangeInstallationDirectory: true,
+    installerIcon: `resources/icons/icon.ico`,
+    installerHeaderIcon: `resources/icons/icon.ico`,
+  },
+  linux: {
+    icon: `resources/icons`,
+    category: "Development",
+    target: ["AppImage", "deb", "rpm"],
+  },
+})
+
+function getConfig() {
+  const base = getBase()
+
+  switch (channel) {
+    case "dev": {
+      return {
+        ...base,
+        appId: "ai.opencode.desktop.dev",
+        productName: "OpenCode Dev",
+        // Dev publish target (override with PUBLISH_URL env when serving updates).
+        publish: {
+          provider: "generic",
+          url: process.env.PUBLISH_URL || "https://opencode-dev.local/updates",
+          channel: "latest",
+        },
+        rpm: { packageName: "opencode-dev" },
+      }
+    }
+    case "beta": {
+      return {
+        ...base,
+        appId: "ai.opencode.desktop.beta",
+        productName: "OpenCode Beta",
+        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
+        publish: { provider: "github", owner: "anomalyco", repo: "opencode-beta", channel: "latest" },
+        rpm: { packageName: "opencode-beta" },
+      }
+    }
+    case "prod": {
+      return {
+        ...base,
+        appId: "ai.opencode.desktop",
+        productName: "OpenCode",
+        protocols: { name: "OpenCode", schemes: ["opencode"] },
+        publish: { provider: "github", owner: "anomalyco", repo: "opencode", channel: "latest" },
+        rpm: { packageName: "opencode" },
+      }
+    }
+  }
+}
+
+export default getConfig()

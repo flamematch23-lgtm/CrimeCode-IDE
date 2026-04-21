@@ -1,0 +1,15 @@
+Executes HTTP requests and returns the response status, headers, and body.
+
+Supports GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS methods.
+
+Usage notes:
+  - Use this tool to interact with REST APIs, webhooks, or any HTTP endpoint.
+  - The url parameter must be a fully-formed valid URL including the scheme (http:// or https://).
+  - The default method is GET if not specified.
+  - For POST/PUT/PATCH, pass the request body as a JSON string or plain text via the body parameter.
+  - Custom headers can be set as key-value pairs (e.g., Authorization, Content-Type).
+  - The default timeout is 15000ms (15 seconds). Increase it for slow endpoints.
+  - Redirects are followed by default. Set follow_redirects to false for manual redirect handling.
+  - Response bodies larger than 8000 characters are truncated.
+  - JSON responses are automatically pretty-printed.
+  - This tool is for making HTTP requests only. For fetching and rendering web page content, prefer the webfetch tool instead.

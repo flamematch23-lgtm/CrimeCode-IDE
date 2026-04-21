@@ -1,0 +1,17 @@
+Executes a code snippet in the specified programming language and returns the output.
+
+Supported languages: javascript, typescript, python, bash, sh.
+
+Use this tool to:
+- Run and test small code snippets or algorithms
+- Validate logic before inserting into source files
+- Execute helper scripts inline
+- Quickly check the output of a function
+
+The code is written to a temporary file and executed via the appropriate interpreter. stdout, stderr, and exit code are returned. Execution is killed after the timeout (default 10 seconds).
+
+Requirements per language:
+- javascript: node must be installed
+- typescript: npx tsx must be available
+- python: python3 must be installed
+- bash/sh: bash must be installed (standard on macOS/Linux; Git Bash on Windows)

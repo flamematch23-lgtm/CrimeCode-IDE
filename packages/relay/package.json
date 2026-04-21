@@ -1,0 +1,15 @@
+{
+  "name": "crimecode-relay",
+  "version": "1.0.0",
+  "description": "CrimeCode LiveShare relay server for internet-based session sharing",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile=relay"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

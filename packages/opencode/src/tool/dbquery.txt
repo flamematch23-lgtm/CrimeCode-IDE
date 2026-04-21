@@ -1,0 +1,16 @@
+Executes a SQL query against a local database and returns the results.
+Supports SQLite (via file path), PostgreSQL, and MySQL (via connection strings).
+
+For SQLite: provide `dbPath` (absolute path to .db or .sqlite file).
+For PostgreSQL: provide `connectionString` like `postgresql://user:pass@host:5432/db`.
+For MySQL: provide `connectionString` like `mysql://user:pass@host:3306/db`.
+
+Use this tool to inspect database schemas, list tables, or sample data before writing queries or migrations.
+
+Useful queries:
+- SQLite list tables: `SELECT name FROM sqlite_schema WHERE type='table';`
+- SQLite inspect columns: `PRAGMA table_info('table_name');`
+- PostgreSQL list tables: `SELECT table_name FROM information_schema.tables WHERE table_schema='public';`
+- MySQL list tables: `SHOW TABLES;`
+
+Keep queries simple and use LIMIT to avoid large result sets. This tool connects in readonly mode for SQLite.

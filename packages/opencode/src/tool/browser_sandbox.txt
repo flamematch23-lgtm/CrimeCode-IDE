@@ -1,0 +1,3 @@
+Opens a URL in a headless browser sandbox (via Playwright) to test web applications.
+It waits for the page to load and captures all console messages, errors, and unhandled exceptions.
+Use this tool to visually verify UI behavior, check for client-side JavaScript errors, or debug rendering issues on a local dev server.

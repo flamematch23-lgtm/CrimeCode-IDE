@@ -1,0 +1,135 @@
+name: desktop-build
+
+on:
+  push:
+    branches:
+      - master
+      - dev
+    paths:
+      - "packages/desktop-electron/**"
+      - "packages/opencode/**"
+      - "packages/app/**"
+      - "packages/ui/**"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Build channel"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - beta
+          - prod
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  attestations: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Determine channel
+        id: channel
+        run: |
+          $channel = if (github.event.inputs.channel) { github.event.inputs.channel } elseif ($env:OPENCODE_CHANNEL) { $env:OPENCODE_CHANNEL } else { "dev" }
+          echo "channel=$channel" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Build desktop app
+        run: |
+          cd packages/desktop-electron
+          bun run build:win
+        env:
+          OPENCODE_CHANNEL: ${{ steps.channel.outputs.channel }}
+
+      - name: Build CLI
+        run: |
+          ./packages/opencode/script/build.ts
+
+      - name: Upload Windows installer
+        if: matrix.platform == 'win'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-desktop-windows-installer
+          path: packages/desktop-electron/dist/*.exe
+          retention-days: 7
+
+      - name: Upload macOS disk image
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-desktop-macos-dmg
+          path: packages/desktop-electron/dist/*.dmg
+          retention-days: 7
+
+      - name: Upload Linux packages
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-desktop-linux-packages
+          path: packages/desktop-electron/dist/*
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate release notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          # OpenCode Desktop Release
+
+          ## Installation
+          Download the appropriate installer for your platform and run it.
+
+          ## What's New
+          See CHANGELOG.md for detailed release notes.
+
+          ## Platform Support
+          - Windows 10+ (x64)
+          - macOS 11+ (Intel and Apple Silicon)
+          - Linux (AppImage, deb, rpm)
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          draft: true
+          files: artifacts/**/*.exe artifacts/**/*.dmg artifacts/**/*.AppImage artifacts/**/*.deb artifacts/**/*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,36 @@
+name: crimecode
+metadata:
+  template: azd-init
+
+services:
+  opencode-server:
+    project: ./packages/opencode
+    host: containerapp
+    docker:
+      path: ./packages/opencode/Dockerfile
+      context: .
+
+  api:
+    project: ./packages/function
+    host: containerapp
+    docker:
+      path: ./packages/function/Dockerfile
+      context: .
+
+  console:
+    project: ./packages/console/app
+    language: js
+    host: staticwebapp
+    dist: .output/public
+
+  docs:
+    project: ./packages/web
+    language: js
+    host: staticwebapp
+    dist: dist
+
+  app:
+    project: ./packages/app
+    language: js
+    host: staticwebapp
+    dist: dist

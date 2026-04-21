@@ -1,0 +1,85 @@
+@import "@opencode-ai/ui/styles/tailwind";
+
+@layer components {
+  [data-component="getting-started"] {
+    container-type: inline-size;
+    container-name: getting-started;
+  }
+
+  [data-component="getting-started-actions"] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem; /* gap-3 */
+  }
+
+  [data-component="getting-started-actions"] > [data-component="button"] {
+    width: 100%;
+  }
+
+  @container getting-started (min-width: 17rem) {
+    [data-component="getting-started-actions"] {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    [data-component="getting-started-actions"] > [data-component="button"] {
+      width: auto;
+    }
+  }
+}
+
+/* Enhanced UI Animations */
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(251, 146, 60, 0);
+  }
+}
+
+.animate-fade-in-slide {
+  animation: fadeInSlide 0.3s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.4s ease-out;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s infinite;
+}
+
+.transition-smooth {
+  transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

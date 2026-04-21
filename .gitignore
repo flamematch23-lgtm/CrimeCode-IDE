@@ -1,0 +1,45 @@
+.DS_Store
+node_modules
+.worktrees
+.sst
+.env
+.idea
+.vscode
+.codex
+*~
+playground
+tmp
+dist
+ts-dist
+.turbo
+**/.serena
+.serena/
+/result
+refs
+Session.vim
+/opencode.json
+a.out
+target
+.scripts
+.direnv/
+
+# Local dev files
+opencode-dev
+logs/
+*.bun-build
+tsconfig.tsbuildinfo
+
+# Binary artifacts (never commit — GitHub rejects files over 100MB)
+.dist/
+*.exe
+*.dll
+packages/desktop-electron/sidecar/opencode-cli.exe
+packages/relay/relay.exe
+
+# Windows-reserved device names accidentally created by shell redirects
+/nul
+
+# Certificates / secrets — never commit private keys
+*.pfx
+*.pem
+*.key

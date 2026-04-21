@@ -1,0 +1,9 @@
+Read and write environment variables in .env files.
+
+Supports four actions:
+- list: show all keys in the .env file (values are masked by default)
+- get: read a single variable's value
+- set: add or update a variable
+- delete: remove a variable
+
+The .env file is auto-detected from the current working directory (.env, .env.local, .env.development) unless an explicit path is provided.
