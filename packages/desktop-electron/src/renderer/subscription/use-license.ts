@@ -1,30 +1,26 @@
-import { createResource, createSignal, onCleanup, onMount } from "solid-js"
+import { createResource, createRoot, createSignal, onCleanup } from "solid-js"
 import type { LicenseSnapshot } from "../../preload/types"
 
+export type { LicenseSnapshot }
+
 /**
- * Polls `window.api.license.get()` once on mount and every 60s afterwards.
- * Exposes a `refresh()` callback that components should call after any mutation
- * (e.g. start trial, admin grant) so UI updates immediately.
+ * Module-level singleton: one poller and one createResource shared by all
+ * `useLicense()` callers. Components should call `refresh()` after any
+ * mutation (start trial, admin grant, etc.) so the snapshot updates immediately.
  */
-export function useLicense() {
-  const [refreshKey, setRefreshKey] = createSignal(0)
-  const [license, { refetch }] = createResource(refreshKey, () => window.api.license.get())
-
-  let interval: ReturnType<typeof setInterval> | null = null
-  onMount(() => {
-    interval = setInterval(() => setRefreshKey((k) => k + 1), 60_000)
-  })
-  onCleanup(() => {
-    if (interval) clearInterval(interval)
-  })
-
+const shared = createRoot(() => {
+  const [key, setKey] = createSignal(0)
+  const [license] = createResource(key, () => window.api.license.get())
+  const id = setInterval(() => setKey((k) => k + 1), 60_000)
+  onCleanup(() => clearInterval(id))
   return {
     license,
-    refresh: () => {
-      setRefreshKey((k) => k + 1)
-      return refetch()
-    },
+    refresh: () => setKey((k) => k + 1),
   }
+})
+
+export function useLicense() {
+  return shared
 }
 
 export const hasProAccess = (license: LicenseSnapshot | undefined): boolean => {
