@@ -20,6 +20,7 @@ import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
+import { SubscriptionOverlay } from "./subscription"
 import { UPDATER_ENABLED } from "./updater"
 import { webviewZoom } from "./webview-zoom"
 import "./styles.css"
@@ -339,6 +340,7 @@ render(() => {
                 servers={servers()}
                 router={MemoryRouter}
               >
+                <SubscriptionOverlay />
                 <Inner />
               </AppInterface>
             )

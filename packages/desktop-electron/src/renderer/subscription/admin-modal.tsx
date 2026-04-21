@@ -1,12 +1,7 @@
 import { For, Show, createEffect, createResource, createSignal, onCleanup } from "solid-js"
-import { t as translate } from "../i18n"
+import { t } from "../i18n"
 import { useLicense } from "./use-license"
 import type { ProInterval } from "../../preload/types"
-
-// TODO(Task 9): admin.* i18n keys are added in Task 9. Until then,
-// the strict `keyof Dictionary` signature of `translate` rejects them at
-// compile time, so wrap once and cast the key string.
-const t = (key: string, params?: Record<string, string | number>) => translate(key as never, params)
 
 const INTERVALS: ProInterval[] = ["monthly", "annual", "lifetime"]
 

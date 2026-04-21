@@ -1,14 +1,13 @@
 import { For, Show, Switch, Match, createSignal, createEffect, onCleanup } from "solid-js"
-import { t as translate } from "../i18n"
+import { t } from "../i18n"
 import { useLicense } from "./use-license"
 import type { ProInterval } from "../../preload/types"
 
-// TODO(Task 9): subscription.* i18n keys are added in Task 9. Until then,
-// the strict `keyof Dictionary` signature of `translate` rejects them at
-// compile time, so wrap once and cast the key string.
-const t = (key: string, params?: Record<string, string | number>) => translate(key as never, params)
-
-const INTERVALS: { id: ProInterval; labelKey: string; noTrial?: boolean }[] = [
+const INTERVALS: ReadonlyArray<{
+  id: ProInterval
+  labelKey: Parameters<typeof t>[0]
+  noTrial?: boolean
+}> = [
   { id: "monthly", labelKey: "subscription.interval.monthly" },
   { id: "annual", labelKey: "subscription.interval.annual" },
   { id: "lifetime", labelKey: "subscription.interval.lifetime", noTrial: true },
