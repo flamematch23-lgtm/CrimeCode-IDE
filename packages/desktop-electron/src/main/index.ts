@@ -45,6 +45,7 @@ import type { CommandChild } from "./cli"
 import { getSidecarPath, installCli, syncCli } from "./cli"
 import { CHANNEL, UPDATER_ENABLED } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendSqliteMigrationProgress } from "./ipc"
+import { licenseService } from "./license"
 import { initLogging } from "./logging"
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
@@ -83,6 +84,20 @@ function setupApp() {
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))
+    for (const raw of urls) {
+      try {
+        const parsed = new URL(raw)
+        if (parsed.host === "activate" || parsed.pathname.startsWith("/activate")) {
+          const interval = parsed.searchParams.get("interval") as "monthly" | "annual" | "lifetime" | null
+          const token = parsed.searchParams.get("token")
+          if (interval && token) {
+            licenseService.activateFromToken({ interval, token })
+          }
+        }
+      } catch {
+        /* ignore malformed */
+      }
+    }
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
       emitDeepLinks(urls)
@@ -92,6 +107,21 @@ function setupApp() {
 
   app.on("open-url", (event: Event, url: string) => {
     event.preventDefault()
+    const urls = [url]
+    for (const raw of urls) {
+      try {
+        const parsed = new URL(raw)
+        if (parsed.host === "activate" || parsed.pathname.startsWith("/activate")) {
+          const interval = parsed.searchParams.get("interval") as "monthly" | "annual" | "lifetime" | null
+          const token = parsed.searchParams.get("token")
+          if (interval && token) {
+            licenseService.activateFromToken({ interval, token })
+          }
+        }
+      } catch {
+        /* ignore malformed */
+      }
+    }
     logger.log("deep link received via open-url", { url })
     emitDeepLinks([url])
   })

@@ -9,6 +9,10 @@ import { browserService } from "./browser-service"
 import { getStore } from "./store"
 import { windowStateService } from "./window-state-service"
 import { setTitlebar, snapWindow } from "./windows"
+import { licenseService } from "./license"
+import { adminSession, adminGrant, adminRevoke, adminExtendTrial, adminReset } from "./license"
+import type { ProInterval } from "./license"
+import { CHECKOUT_BASE_URL } from "./constants"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -347,6 +351,57 @@ export function registerIpcHandlers(deps: Deps) {
       }))
     },
   )
+
+  ipcMain.handle("license-get", () => licenseService.get())
+
+  ipcMain.handle("license-start-trial", () => {
+    return licenseService.startTrial()
+  })
+
+  ipcMain.handle(
+    "license-open-checkout",
+    (_event: IpcMainInvokeEvent, interval: ProInterval) => {
+      const url = `${CHECKOUT_BASE_URL}?interval=${encodeURIComponent(interval)}&returnTo=${encodeURIComponent(
+        "opencode://activate",
+      )}`
+      void shell.openExternal(url)
+    },
+  )
+
+  ipcMain.handle(
+    "license-activate-token",
+    (_event: IpcMainInvokeEvent, payload: { interval: ProInterval; token: string }) => {
+      return licenseService.activateFromToken(payload)
+    },
+  )
+
+  ipcMain.handle("admin-status", () => ({ unlocked: adminSession.isUnlocked() }))
+
+  ipcMain.handle("admin-unlock", async (_event: IpcMainInvokeEvent, passphrase: string) => {
+    const ok = await adminSession.unlock(passphrase)
+    return { unlocked: ok }
+  })
+
+  ipcMain.handle("admin-lock", () => {
+    adminSession.lock()
+    return { unlocked: adminSession.isUnlocked() }
+  })
+
+  ipcMain.handle("admin-grant", (_event: IpcMainInvokeEvent, interval: ProInterval) => {
+    return adminGrant(interval)
+  })
+
+  ipcMain.handle("admin-revoke", () => {
+    return adminRevoke()
+  })
+
+  ipcMain.handle("admin-extend-trial", (_event: IpcMainInvokeEvent, days: number) => {
+    return adminExtendTrial(days)
+  })
+
+  ipcMain.handle("admin-reset", () => {
+    return adminReset()
+  })
 }
 
 export function sendSqliteMigrationProgress(win: BrowserWindow, progress: SqliteMigrationProgress) {
