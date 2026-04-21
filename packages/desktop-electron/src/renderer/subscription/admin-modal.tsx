@@ -12,7 +12,10 @@ const INTERVALS: ProInterval[] = ["monthly", "annual", "lifetime"]
 
 export function AdminModal(props: { open: boolean; onClose: () => void }) {
   const { license, refresh } = useLicense()
-  const [status, { refetch }] = createResource(() => window.api.admin.status())
+  const [status, { refetch }] = createResource(
+    () => props.open,
+    () => window.api.admin.status(),
+  )
   const [passphrase, setPassphrase] = createSignal("")
   const [err, setErr] = createSignal<string | null>(null)
   const [busy, setBusy] = createSignal(false)
@@ -25,6 +28,7 @@ export function AdminModal(props: { open: boolean; onClose: () => void }) {
       const result = await window.api.admin.unlock(passphrase())
       if (!result.unlocked) setErr(t("admin.error.wrongPassphrase"))
       await refetch()
+      refresh()
       setPassphrase("")
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -39,6 +43,7 @@ export function AdminModal(props: { open: boolean; onClose: () => void }) {
     setErr(null)
     try {
       await fn()
+      await refetch()
       refresh()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -54,6 +59,7 @@ export function AdminModal(props: { open: boolean; onClose: () => void }) {
     try {
       await window.api.admin.lock()
       await refetch()
+      refresh()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -64,6 +70,7 @@ export function AdminModal(props: { open: boolean; onClose: () => void }) {
   let panel: HTMLDivElement | undefined
   createEffect(() => {
     if (!props.open) return
+    setErr(null)
     const prev = document.activeElement as HTMLElement | null
     panel?.focus()
     const onKey = (e: KeyboardEvent) => {
@@ -72,7 +79,7 @@ export function AdminModal(props: { open: boolean; onClose: () => void }) {
     document.addEventListener("keydown", onKey)
     onCleanup(() => {
       document.removeEventListener("keydown", onKey)
-      prev?.focus?.()
+      prev?.focus()
     })
   })
 
