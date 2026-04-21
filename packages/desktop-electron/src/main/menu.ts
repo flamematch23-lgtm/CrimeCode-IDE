@@ -1,6 +1,6 @@
 import { BrowserWindow, Menu, shell } from "electron"
 
-import { UPDATER_ENABLED } from "./constants"
+import { ADMIN_PASSPHRASE_SHA256, CHANNEL, UPDATER_ENABLED } from "./constants"
 import { createMainWindow } from "./windows"
 
 type Deps = {
@@ -30,6 +30,13 @@ export function createMenu(deps: Deps) {
         {
           label: "Install CLI...",
           click: () => deps.installCli(),
+        },
+        { type: "separator" },
+        { label: "Subscription...", click: () => deps.trigger("open-subscription") },
+        {
+          label: "Admin Panel...",
+          visible: CHANNEL === "dev" || ADMIN_PASSPHRASE_SHA256.length > 0,
+          click: () => deps.trigger("open-admin-panel"),
         },
         {
           label: "Reload Webview",
@@ -71,6 +78,13 @@ export function createMenu(deps: Deps) {
       {
         label: "Install CLI...",
         click: () => deps.installCli(),
+      },
+      { type: "separator" },
+      { label: "Subscription...", click: () => deps.trigger("open-subscription") },
+      {
+        label: "Admin Panel...",
+        visible: CHANNEL === "dev" || ADMIN_PASSPHRASE_SHA256.length > 0,
+        click: () => deps.trigger("open-admin-panel"),
       },
       {
         label: "Reload Webview",
