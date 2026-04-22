@@ -1,0 +1,151 @@
+name: Release Desktop Windows
+
+# Build and publish the CrimeCode Desktop Windows installer on every tag push.
+# Trigger examples:
+#   git tag v1.0.0 && git push origin v1.0.0
+# Or manually from Actions → "Release Desktop Windows" → Run workflow.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag (e.g. v1.0.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # required to create GitHub Releases and upload assets
+
+jobs:
+  build-windows:
+    name: Build + Release (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for git rev-parse HEAD in build.ts
+
+      - name: Derive tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.3.13
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # ────────────────────────────────────────────────────────────────────
+      # 1. Build the OpenCode CLI (the "sidecar" binary the desktop ships)
+      # ────────────────────────────────────────────────────────────────────
+      - name: Build OpenCode CLI (sidecar)
+        shell: bash
+        env:
+          OPENCODE_CHANNEL: prod
+        run: |
+          bun run --cwd packages/opencode build
+          # The build script outputs dist/opencode-cli-win-x64.exe (or similar)
+          ls packages/opencode/dist/
+
+      - name: Stage sidecar into desktop-electron
+        shell: bash
+        run: |
+          mkdir -p packages/desktop-electron/sidecar
+          # Find the Windows binary produced by the opencode build
+          SIDECAR=$(ls packages/opencode/dist/*.exe 2>/dev/null | grep -iE "(win|x64|windows)" | head -1)
+          if [ -z "$SIDECAR" ]; then
+            SIDECAR=$(ls packages/opencode/dist/*.exe 2>/dev/null | head -1)
+          fi
+          if [ -z "$SIDECAR" ]; then
+            echo "::error::No .exe found in packages/opencode/dist/"
+            ls -R packages/opencode/dist/ || true
+            exit 1
+          fi
+          echo "Using sidecar: $SIDECAR"
+          cp "$SIDECAR" packages/desktop-electron/sidecar/opencode-cli.exe
+          ls -la packages/desktop-electron/sidecar/
+
+      # ────────────────────────────────────────────────────────────────────
+      # 2. Decode Windows code-signing certificate (optional)
+      # ────────────────────────────────────────────────────────────────────
+      - name: Decode code-signing cert
+        if: ${{ env.SIGN_CERT_BASE64 != '' }}
+        shell: pwsh
+        env:
+          SIGN_CERT_BASE64: ${{ secrets.SIGN_CERT_BASE64 }}
+        run: |
+          if ($env:SIGN_CERT_BASE64) {
+            $bytes = [Convert]::FromBase64String($env:SIGN_CERT_BASE64)
+            $certPath = Join-Path $PWD "packages\desktop-electron\sidecar\cert.pfx"
+            [IO.File]::WriteAllBytes($certPath, $bytes)
+            Write-Host "Certificate decoded to $certPath"
+          }
+
+      # ────────────────────────────────────────────────────────────────────
+      # 3. Build the Windows installer (electron-vite + electron-builder NSIS)
+      # ────────────────────────────────────────────────────────────────────
+      - name: Build Windows installer
+        shell: bash
+        env:
+          OPENCODE_CHANNEL: prod
+          OPENCODE_ADMIN_PASSPHRASE_SHA256: ${{ secrets.OPENCODE_ADMIN_PASSPHRASE_SHA256 }}
+          OPENCODE_CHECKOUT_BASE_URL: "https://t.me/OpCrime1312"
+          SIGN_PASS: ${{ secrets.SIGN_PASS }}
+          SIGN_PUBLISHER: ${{ secrets.SIGN_PUBLISHER }}
+          SKIP_SIDECAR_STASH: "1" # CI has no OneDrive locks, stash not needed
+        run: |
+          bun run --cwd packages/desktop-electron build:win
+
+      - name: List release artifacts
+        shell: bash
+        run: |
+          ls -la packages/desktop-electron/dist/
+          echo "---"
+          du -h packages/desktop-electron/dist/*.exe 2>/dev/null || true
+
+      # ────────────────────────────────────────────────────────────────────
+      # 4. Publish to GitHub Releases
+      # ────────────────────────────────────────────────────────────────────
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: CrimeCode Desktop ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            packages/desktop-electron/dist/*.exe
+            packages/desktop-electron/dist/*.exe.blockmap
+            packages/desktop-electron/dist/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "## 🚀 Release ${{ steps.tag.outputs.tag }} published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Installer download:" >> $GITHUB_STEP_SUMMARY
+          echo "- https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/opencode-electron-win-x64.exe" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Latest always:" >> $GITHUB_STEP_SUMMARY
+          echo "- https://github.com/${{ github.repository }}/releases/latest/download/opencode-electron-win-x64.exe" >> $GITHUB_STEP_SUMMARY

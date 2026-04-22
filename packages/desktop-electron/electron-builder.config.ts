@@ -39,11 +39,15 @@ const getBase = (): Configuration => ({
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
     },
-    {
-      from: "sidecar/",
-      to: "resources/",
-      filter: ["opencode-cli*"],
-    },
+    ...(process.env.SKIP_SIDECAR_PACK === "1"
+      ? []
+      : [
+          {
+            from: "sidecar/",
+            to: ".",
+            filter: ["opencode-cli*"],
+          },
+        ]),
   ],
   mac: {
     category: "public.app-category.developer-tools",
@@ -104,7 +108,7 @@ function getConfig() {
         appId: "ai.opencode.desktop.beta",
         productName: "OpenCode Beta",
         protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode-beta", channel: "latest" },
+        publish: { provider: "github", owner: "flamematch23-lgtm", repo: "CrimeCode-IDE", channel: "beta" },
         rpm: { packageName: "opencode-beta" },
       }
     }
@@ -114,7 +118,7 @@ function getConfig() {
         appId: "ai.opencode.desktop",
         productName: "OpenCode",
         protocols: { name: "OpenCode", schemes: ["opencode"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode", channel: "latest" },
+        publish: { provider: "github", owner: "flamematch23-lgtm", repo: "CrimeCode-IDE", channel: "latest" },
         rpm: { packageName: "opencode" },
       }
     }
