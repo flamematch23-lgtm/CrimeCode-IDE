@@ -35,6 +35,10 @@ RUN bun install --production --ignore-scripts
 # --single filters targets to the current platform (linux-x64).
 # --skip-embed-web-ui strips the embedded web UI (the API server doesn't
 # serve HTML; the web frontend is a separate Cloudflare Pages deploy).
+# OPENCODE_CHANNEL=prod + OPENCODE_VERSION short-circuit the git lookups
+# inside build.ts (the .git dir is excluded from the Docker context).
+ENV OPENCODE_CHANNEL=prod
+ENV OPENCODE_VERSION=1.0.0
 RUN bun run --cwd packages/opencode script/build.ts -- --single --skip-embed-web-ui
 
 # Verify the binary exists and works.
