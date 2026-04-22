@@ -129,8 +129,8 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
         >
           <form data-auth-gate="form" onSubmit={handleSubmit} style={formStyle}>
             <div style={cardStyle}>
-              <h1 style={titleStyle}>Sign in to OpenCode</h1>
-              <p style={subtitleStyle}>Connect to your self-hosted OpenCode server.</p>
+              <h1 style={titleStyle}>Sign in to CrimeCode</h1>
+              <p style={subtitleStyle}>Connect to your self-hosted CrimeCode server.</p>
 
               <label style={labelStyle}>
                 <span>Server URL</span>
