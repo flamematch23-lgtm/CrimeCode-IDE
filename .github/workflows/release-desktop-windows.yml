@@ -70,14 +70,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p packages/desktop-electron/sidecar
-          # Find the Windows binary produced by the opencode build
-          SIDECAR=$(ls packages/opencode/dist/*.exe 2>/dev/null | grep -iE "(win|x64|windows)" | head -1)
+          # CLI build output lives at packages/opencode/dist/opencode-windows-x64/bin/opencode.exe
+          SIDECAR=$(find packages/opencode/dist -name "opencode.exe" -path "*windows-x64*" 2>/dev/null | head -1)
           if [ -z "$SIDECAR" ]; then
-            SIDECAR=$(ls packages/opencode/dist/*.exe 2>/dev/null | head -1)
+            SIDECAR=$(find packages/opencode/dist -name "opencode.exe" 2>/dev/null | head -1)
           fi
           if [ -z "$SIDECAR" ]; then
-            echo "::error::No .exe found in packages/opencode/dist/"
-            ls -R packages/opencode/dist/ || true
+            echo "::error::opencode.exe not found under packages/opencode/dist/"
+            find packages/opencode/dist -type f | head -50 || true
             exit 1
           fi
           echo "Using sidecar: $SIDECAR"
