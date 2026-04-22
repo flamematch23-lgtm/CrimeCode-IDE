@@ -15,6 +15,17 @@
 !patches/
 !patches/**
 
+# build.ts reads TEAM_MEMBERS + CODEOWNERS; keep them but skip workflows/
+!.github/
+!.github/TEAM_MEMBERS
+!.github/CODEOWNERS
+!.github/VOUCHED.td
+.github/workflows/
+.github/actions/
+.github/ISSUE_TEMPLATE/
+.github/pull_request_template.md
+.github/publish-python-sdk.yml
+
 # Server packages (runtime dependencies of @opencode-ai/opencode)
 !packages/
 !packages/opencode/
