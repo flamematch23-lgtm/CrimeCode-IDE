@@ -88,4 +88,10 @@ export const dict = {
   "gate.paymentInfo": "Crypto payment via Telegram",
   "gate.telegramPrimary": "Contact @OpCrime1312",
   "gate.telegramSecondary": "Contact @JollyFraud",
+
+  "checkout.contact.title": "Choose contact for crypto payment",
+  "checkout.contact.subtitle": "Send a PM on Telegram to start payment",
+  "checkout.contact.opcrime": "@OpCrime1312",
+  "checkout.contact.jollyfraud": "@JollyFraud",
+  "checkout.contact.cancel": "Cancel",
 }

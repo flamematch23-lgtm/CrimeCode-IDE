@@ -19,7 +19,8 @@ import {
   VALID_INTERVALS,
 } from "./license"
 import type { ProInterval } from "./license"
-import { CHECKOUT_BASE_URL } from "./constants"
+// CHECKOUT_BASE_URL retained in constants for retrocompat; checkout now opens
+// a Telegram DM to one of the support contacts for crypto payments.
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -382,11 +383,21 @@ export function registerIpcHandlers(deps: Deps) {
 
   ipcMain.handle(
     "license-open-checkout",
-    (_event: IpcMainInvokeEvent, rawInterval: unknown) => {
-      const interval = assertValidInterval(rawInterval)
-      const url = `${CHECKOUT_BASE_URL}?interval=${encodeURIComponent(interval)}&returnTo=${encodeURIComponent(
-        "opencode://activate",
-      )}`
+    (_event: IpcMainInvokeEvent, rawPayload: unknown) => {
+      if (!rawPayload || typeof rawPayload !== "object") {
+        throw new Error("Invalid checkout payload")
+      }
+      const raw = rawPayload as Record<string, unknown>
+      const interval = assertValidInterval(raw.interval)
+      const contact = raw.contact
+      if (contact !== "opcrime" && contact !== "jollyfraud") {
+        throw new Error("Invalid contact")
+      }
+      const handle = contact === "opcrime" ? "OpCrime1312" : "JollyFraud"
+      const message =
+        `Hi! I want to purchase CrimeCode Pro - ${interval} plan via crypto payment. ` +
+        `Please provide details.`
+      const url = `https://t.me/${handle}?text=${encodeURIComponent(message)}`
       void shell.openExternal(url)
     },
   )

@@ -108,7 +108,7 @@ export type ElectronAPI = {
   license: {
     readonly get: () => Promise<LicenseSnapshot>
     readonly startTrial: () => Promise<LicenseSnapshot>
-    readonly openCheckout: (interval: ProInterval) => Promise<void>
+    readonly openCheckout: (payload: { interval: ProInterval; contact: "opcrime" | "jollyfraud" }) => Promise<void>
     readonly activateToken: (payload: { interval: ProInterval; token: string }) => Promise<LicenseSnapshot>
   }
   admin: {

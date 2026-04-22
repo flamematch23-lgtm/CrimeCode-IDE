@@ -32,12 +32,12 @@ export function SubscriptionModal(props: { open: boolean; onClose: () => void })
     }
   }
 
-  async function onSubscribe(interval: ProInterval) {
+  async function onSubscribe(interval: ProInterval, contact: "opcrime" | "jollyfraud") {
     if (busy()) return
     setBusy(interval)
     setErr(null)
     try {
-      await window.api.license.openCheckout(interval)
+      await window.api.license.openCheckout({ interval, contact })
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -101,16 +101,31 @@ export function SubscriptionModal(props: { open: boolean; onClose: () => void })
           <section data-slot="plans">
             <For each={INTERVALS}>
               {(opt) => (
-                <button
-                  data-interval={opt.id}
-                  disabled={!!busy() || license()?.effectiveStatus === "active"}
-                  onClick={() => onSubscribe(opt.id)}
-                >
-                  <span data-slot="label">{t(opt.labelKey)}</span>
-                  <Show when={!opt.noTrial}>
-                    <span data-slot="badge">{t("subscription.trialBadge")}</span>
-                  </Show>
-                </button>
+                <div data-slot="plan-row" data-interval={opt.id}>
+                  <div data-slot="plan-meta">
+                    <span data-slot="label">{t(opt.labelKey)}</span>
+                    <Show when={!opt.noTrial}>
+                      <span data-slot="badge">{t("subscription.trialBadge")}</span>
+                    </Show>
+                  </div>
+                  <div data-slot="contact-picker">
+                    <span data-slot="contact-label">{t("checkout.contact.subtitle")}</span>
+                    <button
+                      data-contact="opcrime"
+                      disabled={!!busy() || license()?.effectiveStatus === "active"}
+                      onClick={() => onSubscribe(opt.id, "opcrime")}
+                    >
+                      {t("checkout.contact.opcrime")}
+                    </button>
+                    <button
+                      data-contact="jollyfraud"
+                      disabled={!!busy() || license()?.effectiveStatus === "active"}
+                      onClick={() => onSubscribe(opt.id, "jollyfraud")}
+                    >
+                      {t("checkout.contact.jollyfraud")}
+                    </button>
+                  </div>
+                </div>
               )}
             </For>
           </section>

@@ -38,12 +38,12 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
   const [tokenValue, setTokenValue] = createSignal("")
   const [tokenInterval, setTokenInterval] = createSignal<ProInterval>("monthly")
 
-  async function onSubscribe(interval: ProInterval) {
+  async function onSubscribe(interval: ProInterval, contact: "opcrime" | "jollyfraud") {
     if (busy()) return
     setBusy(interval)
     setErr(null)
     try {
-      await window.api.license.openCheckout(interval)
+      await window.api.license.openCheckout({ interval, contact })
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -121,18 +121,32 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
             <section data-slot="plans">
               <For each={PLANS}>
                 {(plan) => (
-                  <button
-                    data-slot="plan-card"
-                    data-interval={plan.id}
-                    disabled={!!busy()}
-                    onClick={() => onSubscribe(plan.id)}
-                  >
-                    <span data-slot="plan-title">{t(plan.titleKey)}</span>
-                    <span data-slot="plan-price">{t(plan.priceKey)}</span>
-                    <Show when={plan.badgeKey}>
-                      {(key) => <span data-slot="plan-badge">{t(key())}</span>}
-                    </Show>
-                  </button>
+                  <div data-slot="plan-card" data-interval={plan.id}>
+                    <div data-slot="plan-header">
+                      <span data-slot="plan-title">{t(plan.titleKey)}</span>
+                      <span data-slot="plan-price">{t(plan.priceKey)}</span>
+                      <Show when={plan.badgeKey}>
+                        {(key) => <span data-slot="plan-badge">{t(key())}</span>}
+                      </Show>
+                    </div>
+                    <div data-slot="contact-picker">
+                      <span data-slot="contact-label">{t("checkout.contact.subtitle")}</span>
+                      <button
+                        data-contact="opcrime"
+                        disabled={!!busy()}
+                        onClick={() => onSubscribe(plan.id, "opcrime")}
+                      >
+                        {t("checkout.contact.opcrime")}
+                      </button>
+                      <button
+                        data-contact="jollyfraud"
+                        disabled={!!busy()}
+                        onClick={() => onSubscribe(plan.id, "jollyfraud")}
+                      >
+                        {t("checkout.contact.jollyfraud")}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </For>
             </section>
