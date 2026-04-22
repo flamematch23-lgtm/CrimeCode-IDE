@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">OpenWorm</h1>
+  <h1 align="center">CrimeCode</h1>
 </p>
 <p align="center">The uncensored AI coding agent by WormGPT. No restrictions. No limits.</p>
 <p align="center">
