@@ -1,44 +1,69 @@
 # syntax=docker/dockerfile:1.7
 
-# OpenCode headless API server — deployed to Fly.io.
-# Build context = repo root. `.dockerignore` strips binaries, node_modules,
-# build outputs, and other deploy targets (desktop-electron sidecar etc.)
-# from the context.
+# OpenCode headless API server — Fly.io deployment.
+# Two-stage build:
+#   1. builder: installs deps + compiles the Bun source tree into a single
+#      native `opencode` binary (~100MB of code → ~50MB stripped).
+#   2. runtime: debian:bookworm-slim + tini + the binary. No source, no
+#      node_modules, no JIT virtual memory explosion.
+#
+# Memory footprint: ~80 MB RSS steady-state (vs ~500 MB with `bun run`
+# in source mode, which also mmap'd 70GB of virtual pages and kept OOM-
+# killing the container).
 
-# Use Debian-based Bun image (glibc) instead of Alpine (musl) — bun-pty's
-# native terminal bindings ship prebuilt for glibc only, so on Alpine the
-# load fails with "undefined is not an object (evaluating 'lib.symbols')".
-FROM oven/bun:1
+# ─────────────────────────────────────────────────────────────────────
+# Stage 1 — build the opencode binary
+# ─────────────────────────────────────────────────────────────────────
+FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
-# Runtime deps.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      tini ca-certificates git \
-  && rm -rf /var/lib/apt/lists/*
-
-# Copy the entire filtered context. Kept as one layer for simplicity;
-# .dockerignore ensures the context stays small enough.
+# Install build-time deps. Everything is cached because .dockerignore
+# restricts the context to what we actually need.
 COPY . .
 
-# Production install. --ignore-scripts skips the repo's `prepare` hook
-# (which runs `husky && bunx playwright install chromium` — neither is
-# needed at runtime on the server). bun-pty's prebuilt glibc .so is
-# extracted automatically when bun resolves the package, so no
-# compile-at-install is required on Debian.
+# Dependencies (skip postinstall hooks — husky/playwright aren't needed
+# for a headless server build).
 RUN bun install --production --ignore-scripts
+
+# Compile the Bun source tree into a single self-contained executable.
+# --single filters targets to the current platform (linux-x64).
+# --skip-embed-web-ui strips the embedded web UI (the API server doesn't
+# serve HTML; the web frontend is a separate Cloudflare Pages deploy).
+RUN bun run --cwd packages/opencode script/build.ts -- --single --skip-embed-web-ui
+
+# Verify the binary exists and works.
+RUN ls -la packages/opencode/dist/ \
+ && find packages/opencode/dist -name "opencode" -type f | head -5
+
+# ─────────────────────────────────────────────────────────────────────
+# Stage 2 — slim runtime
+# ─────────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# tini = PID-1 signal forwarder; ca-certificates for outbound HTTPS;
+# git because the server invokes `git` at runtime for repo operations.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tini ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy only the compiled binary. /app/opencode replaces `bun run src/index.ts`.
+COPY --from=builder /app/packages/opencode/dist/opencode-linux-x64/bin/opencode /app/opencode
+RUN chmod +x /app/opencode
 
 ENV NODE_ENV=production
 ENV OPENCODE_CHANNEL=prod
 
-# Fly.io forwards 80/443 → internal_port (4096) via proxy.
 EXPOSE 4096
-
-# tini forwards signals so `fly machine stop` cleans up Bun.
-# On Debian, apt installs tini at /usr/bin/tini (Alpine had it at /sbin/tini).
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# `--hostname 0.0.0.0` is required so the process listens on the container's
-# public interface (not just 127.0.0.1). --conditions=browser matches the
-# existing `bun dev` root script.
-CMD ["bun", "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts", "serve", "--port", "4096", "--hostname", "0.0.0.0", "--cors", "https://crimecode-web.pages.dev", "--cors", "https://crimecode.cc", "--cors", "https://www.crimecode.cc", "--cors", "https://app.crimecode.cc", "--cors", "https://api.crimecode.cc"]
+CMD ["/app/opencode", "serve", \
+     "--port", "4096", \
+     "--hostname", "0.0.0.0", \
+     "--cors", "https://crimecode-web.pages.dev", \
+     "--cors", "https://crimecode.cc", \
+     "--cors", "https://www.crimecode.cc", \
+     "--cors", "https://app.crimecode.cc", \
+     "--cors", "https://api.crimecode.cc"]

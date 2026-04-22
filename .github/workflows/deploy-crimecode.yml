@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
@@ -60,13 +60,20 @@ jobs:
 
       - name: Health check
         run: |
+          # Server is password-gated; 200 (no auth) and 401 (auth required)
+          # both prove the process is listening. Anything else = dead.
           for i in 1 2 3 4 5; do
-            if curl -sf https://crimecode-api.fly.dev/ > /dev/null; then
-              echo "API responsive"
-              exit 0
-            fi
-            echo "Attempt $i failed; retrying in 10s..."
-            sleep 10
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://crimecode-api.fly.dev/ || echo 000)
+            case "$code" in
+              200|401)
+                echo "API responsive (HTTP $code)"
+                exit 0
+                ;;
+              *)
+                echo "Attempt $i: HTTP $code; retrying in 10s..."
+                sleep 10
+                ;;
+            esac
           done
           echo "API health check failed after 5 attempts"
           exit 1
@@ -82,9 +89,9 @@ jobs:
       contents: read
       deployments: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: oven-sh/setup-bun@v1
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.13
 
