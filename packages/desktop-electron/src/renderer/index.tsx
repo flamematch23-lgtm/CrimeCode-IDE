@@ -21,6 +21,7 @@ import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
 import { SubscriptionOverlay } from "./subscription"
+import { SubscriptionGate } from "./subscription/subscription-gate"
 import { hasProAccess, useLicense } from "./subscription/use-license"
 import { UPDATER_ENABLED } from "./updater"
 import { webviewZoom } from "./webview-zoom"
@@ -348,7 +349,9 @@ render(() => {
                 router={MemoryRouter}
               >
                 <SubscriptionOverlay />
-                <Inner />
+                <SubscriptionGate>
+                  <Inner />
+                </SubscriptionGate>
               </AppInterface>
             )
           }}

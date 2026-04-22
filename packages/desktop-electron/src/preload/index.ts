@@ -74,7 +74,7 @@ const api: ElectronAPI = {
   license: {
     get: () => ipcRenderer.invoke("license-get"),
     startTrial: () => ipcRenderer.invoke("license-start-trial"),
-    openCheckout: (interval) => ipcRenderer.invoke("license-open-checkout", interval),
+    openCheckout: (payload) => ipcRenderer.invoke("license-open-checkout", payload),
     activateToken: (payload) => ipcRenderer.invoke("license-activate-token", payload),
   },
   admin: {
