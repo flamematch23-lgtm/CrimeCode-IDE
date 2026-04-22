@@ -7,11 +7,18 @@ const channel = (() => {
   return "dev"
 })()
 
+const checkoutBaseUrl = process.env.OPENCODE_CHECKOUT_BASE_URL ?? "https://opencode.ai/billing/pro"
+const adminPassphraseSha256 = (process.env.OPENCODE_ADMIN_PASSPHRASE_SHA256 ?? "").toLowerCase()
+
+const sharedDefine = {
+  "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+  "import.meta.env.OPENCODE_CHECKOUT_BASE_URL": JSON.stringify(checkoutBaseUrl),
+  "import.meta.env.OPENCODE_ADMIN_PASSPHRASE_SHA256": JSON.stringify(adminPassphraseSha256),
+}
+
 export default defineConfig({
   main: {
-    define: {
-      "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
-    },
+    define: sharedDefine,
     build: {
       rollupOptions: {
         input: { index: "src/main/index.ts" },
