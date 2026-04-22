@@ -35,7 +35,8 @@ ENV OPENCODE_CHANNEL=prod
 EXPOSE 4096
 
 # tini forwards signals so `fly machine stop` cleans up Bun.
-ENTRYPOINT ["/sbin/tini", "--"]
+# On Debian, apt installs tini at /usr/bin/tini (Alpine had it at /sbin/tini).
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # `--hostname 0.0.0.0` is required so the process listens on the container's
 # public interface (not just 127.0.0.1). --conditions=browser matches the
