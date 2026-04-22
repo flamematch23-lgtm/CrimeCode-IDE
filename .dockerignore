@@ -1,0 +1,82 @@
+# .dockerignore — exclude EVERYTHING by default, then whitelist only what
+# the API server needs. Keeps the build context under ~10 MB.
+
+*
+
+# Workspace root files required by `bun install`
+!package.json
+!bun.lock
+!bunfig.toml
+!turbo.json
+!tsconfig.json
+!Dockerfile.api
+
+# Server packages (runtime dependencies of @opencode-ai/opencode)
+!packages/
+!packages/opencode/
+!packages/opencode/**
+!packages/util/
+!packages/util/**
+!packages/sdk/
+!packages/sdk/**
+!packages/plugin/
+!packages/plugin/**
+!packages/script/
+!packages/script/**
+
+# Workspace package.json files only — required by `bun install` to resolve the
+# workspace graph, but we don't ship the source for these on the server.
+!packages/app/package.json
+!packages/ui/package.json
+!packages/console/
+!packages/console/core/package.json
+!packages/console/function/package.json
+!packages/console/app/package.json
+!packages/console/mail/package.json
+!packages/console/resource/package.json
+!packages/enterprise/package.json
+!packages/slack/package.json
+!packages/desktop/package.json
+!packages/desktop-electron/package.json
+!packages/relay/package.json
+!packages/updates-server/package.json
+!packages/web/package.json
+!packages/storybook/package.json
+!packages/docs/package.json
+!packages/extensions/package.json
+!packages/identity/package.json
+!packages/containers/package.json
+!packages/function/package.json
+
+# Re-exclude junk inside the whitelisted dirs (explicit paths to be safe)
+**/node_modules
+**/node_modules/
+**/dist
+**/dist/
+**/out
+**/out/
+**/.turbo
+**/.turbo/
+**/tsconfig.tsbuildinfo
+**/target
+**/target/
+**/.bun-build
+*.log
+packages/opencode/dist
+packages/opencode/dist/
+packages/opencode/test
+packages/opencode/test/
+packages/opencode/migration
+packages/opencode/migration/
+packages/opencode/specs
+packages/opencode/specs/
+packages/opencode/node_modules
+packages/opencode/node_modules/
+packages/util/dist
+packages/util/dist/
+packages/util/test
+packages/util/test/
+packages/sdk/js/test
+packages/sdk/js/test/
+packages/sdk/js/dist
+packages/sdk/js/dist/

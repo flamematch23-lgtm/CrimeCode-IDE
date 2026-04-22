@@ -1,0 +1,41 @@
+# fly.toml — deploy the OpenCode headless API server to Fly.io
+#
+# Quick start:
+#   cd <repo root>
+#   fly apps create crimecode-api                                       # once
+#   fly secrets set OPENCODE_SERVER_PASSWORD=<random> -a crimecode-api  # once
+#   fly deploy --config deploy/api/fly.toml --dockerfile deploy/api/Dockerfile
+#
+# Public URL: https://crimecode-api.fly.dev (HTTPS, automatic certs)
+# The free-tier allowance covers ~1 shared-cpu-1x machine with 512mb memory
+# running 24/7 (within Fly's monthly free-tier). Scale up with `fly scale`.
+
+app = "crimecode-api"
+primary_region = "fra"  # Frankfurt — low latency for EU users. See `fly platform regions` for alternatives.
+
+[build]
+  # Build context is the repo root. Fly copies only files not in .dockerignore.
+  # Path relative to fly.toml location.
+  dockerfile = "../../Dockerfile.api"
+
+[env]
+  OPENCODE_CHANNEL = "prod"
+  # OPENCODE_SERVER_PASSWORD is set via `fly secrets set` and NEVER committed.
+
+[http_service]
+  internal_port = 4096
+  force_https = true
+  auto_stop_machines = "off"   # keep the machine always-on for 24/7 availability
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 150
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

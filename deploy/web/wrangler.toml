@@ -1,0 +1,26 @@
+# wrangler.toml — Cloudflare Pages config for the OpenCode web app
+#
+# Quick start (one-time setup):
+#   1. Get a Cloudflare API Token:
+#        https://dash.cloudflare.com/profile/api-tokens → "Create Token"
+#        Use the "Edit Cloudflare Workers" template (includes Pages write).
+#   2. export CLOUDFLARE_API_TOKEN=<token>
+#        export CLOUDFLARE_ACCOUNT_ID=<account_id from dashboard>
+#   3. Build the web app:
+#        VITE_API_URL=https://crimecode-api.fly.dev \
+#          bun run --cwd packages/app build
+#   4. Deploy:
+#        bunx wrangler pages deploy packages/app/dist \
+#          --project-name=crimecode-web \
+#          --branch=main
+#
+# Public URL: https://crimecode-web.pages.dev
+
+name = "crimecode-web"
+compatibility_date = "2026-04-22"
+
+# Cloudflare Pages does not use this file at runtime for static sites —
+# it's kept here as a checked-in reference of the deploy target. The
+# `wrangler pages deploy` command reads CLI args + env vars instead.
+
+pages_build_output_dir = "../../packages/app/dist"
