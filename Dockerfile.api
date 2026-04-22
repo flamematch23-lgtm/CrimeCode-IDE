@@ -5,19 +5,26 @@
 # build outputs, and other deploy targets (desktop-electron sidecar etc.)
 # from the context.
 
-FROM oven/bun:1-alpine
+# Use Debian-based Bun image (glibc) instead of Alpine (musl) — bun-pty's
+# native terminal bindings ship prebuilt for glibc only, so on Alpine the
+# load fails with "undefined is not an object (evaluating 'lib.symbols')".
+FROM oven/bun:1
 
 WORKDIR /app
 
-# Runtime deps that bun-alpine doesn't ship.
-RUN apk add --no-cache tini ca-certificates git
+# Runtime deps.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tini ca-certificates git \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy the entire filtered context. Kept as one layer for simplicity;
 # .dockerignore ensures the context stays small enough.
 COPY . .
 
-# Production install — no optional platform-specific binaries.
-RUN bun install --production --ignore-scripts
+# Production install. We DO NOT pass --ignore-scripts because bun-pty and
+# other native modules need their postinstall hooks to place prebuilt
+# binaries into node_modules.
+RUN bun install --production
 
 ENV NODE_ENV=production
 ENV OPENCODE_CHANNEL=prod
