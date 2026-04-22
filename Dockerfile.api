@@ -21,10 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # .dockerignore ensures the context stays small enough.
 COPY . .
 
-# Production install. We DO NOT pass --ignore-scripts because bun-pty and
-# other native modules need their postinstall hooks to place prebuilt
-# binaries into node_modules.
-RUN bun install --production
+# Production install. --ignore-scripts skips the repo's `prepare` hook
+# (which runs `husky && bunx playwright install chromium` — neither is
+# needed at runtime on the server). bun-pty's prebuilt glibc .so is
+# extracted automatically when bun resolves the package, so no
+# compile-at-install is required on Debian.
+RUN bun install --production --ignore-scripts
 
 ENV NODE_ENV=production
 ENV OPENCODE_CHANNEL=prod
