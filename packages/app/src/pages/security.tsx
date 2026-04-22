@@ -5,6 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { useServer } from "@/context/server"
 import { usePlatform } from "@/context/platform"
 
 type Node = {
@@ -250,7 +251,25 @@ export default function Security() {
   const navigate = useNavigate()
   const gsdk = useGlobalSDK()
   const platform = usePlatform()
-  const fetcher = platform.fetch ?? fetch
+  const rawFetcher = platform.fetch ?? fetch
+
+  /**
+   * Fetcher that auto-injects HTTP Basic Auth when the connected server has
+   * credentials attached. Required because /security/* endpoints don't flow
+   * through the SDK client and the raw `fetch` would drop the auth header.
+   */
+  const server = useServer()
+  const fetcher = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const current = server.current
+    const http = current && current.type === "http" ? current.http : null
+    if (!http?.username || !http?.password) return rawFetcher(input, init)
+    const headers = new Headers(init?.headers ?? {})
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", "Basic " + btoa(`${http.username}:${http.password}`))
+    }
+    return rawFetcher(input, { ...init, headers })
+  }) as typeof fetch
+
   const [cat, setCat] = createSignal<Category>("all")
   const [copied, setCopied] = createSignal<string | null>(null)
   const [open, setOpen] = createSignal<Set<string>>(new Set())
