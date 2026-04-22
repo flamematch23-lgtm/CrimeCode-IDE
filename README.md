@@ -5,3 +5,5 @@
 
 
 **CrimeCode** is a powerful AI coding agent. uncensored models built in. Use WormGPT, Claude, Grok, and 15+ other providers from a single terminal or web interface.
+
+Web APP: https://crimecode-web.pages.dev/
