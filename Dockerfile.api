@@ -31,4 +31,4 @@ ENTRYPOINT ["/sbin/tini", "--"]
 # `--hostname 0.0.0.0` is required so the process listens on the container's
 # public interface (not just 127.0.0.1). --conditions=browser matches the
 # existing `bun dev` root script.
-CMD ["bun", "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts", "serve", "--port", "4096", "--hostname", "0.0.0.0"]
+CMD ["bun", "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts", "serve", "--port", "4096", "--hostname", "0.0.0.0", "--cors", "https://crimecode-web.pages.dev", "--cors", "https://crimecode.cc", "--cors", "https://app.crimecode.cc", "--cors", "https://www.crimecode.cc"]
