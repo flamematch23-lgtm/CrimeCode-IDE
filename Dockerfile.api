@@ -18,6 +18,11 @@ FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
+# build.ts shells out to `git` to stamp the binary with commit + branch.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 # Install build-time deps. Everything is cached because .dockerignore
 # restricts the context to what we actually need.
 COPY . .
