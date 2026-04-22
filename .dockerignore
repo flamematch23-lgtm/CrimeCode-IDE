@@ -66,21 +66,12 @@
 **/target/
 **/.bun-build
 *.log
+# Only exclude built artifacts and node_modules — keep source / migrations / specs
 packages/opencode/dist
 packages/opencode/dist/
-packages/opencode/test
-packages/opencode/test/
-packages/opencode/migration
-packages/opencode/migration/
-packages/opencode/specs
-packages/opencode/specs/
 packages/opencode/node_modules
 packages/opencode/node_modules/
 packages/util/dist
 packages/util/dist/
-packages/util/test
-packages/util/test/
-packages/sdk/js/test
-packages/sdk/js/test/
 packages/sdk/js/dist
 packages/sdk/js/dist/
