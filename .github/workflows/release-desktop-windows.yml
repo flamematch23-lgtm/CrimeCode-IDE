@@ -112,6 +112,11 @@ jobs:
           SIGN_PASS: ${{ secrets.SIGN_PASS }}
           SIGN_PUBLISHER: ${{ secrets.SIGN_PUBLISHER }}
           SKIP_SIDECAR_STASH: "1" # CI has no OneDrive locks, stash not needed
+          # electron-builder auto-publishes on tag; give it a GH token OR
+          # pass --publish never to disable implicit upload. We use the
+          # softprops/action-gh-release step below, so disable implicit.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_DRAFT: "true" # treat as draft so implicit publish doesn't clash
         run: |
           bun run --cwd packages/desktop-electron build:win
 
