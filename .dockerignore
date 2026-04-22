@@ -11,6 +11,10 @@
 !tsconfig.json
 !Dockerfile.api
 
+# Bun patch files referenced by package.json
+!patches/
+!patches/**
+
 # Server packages (runtime dependencies of @opencode-ai/opencode)
 !packages/
 !packages/opencode/
