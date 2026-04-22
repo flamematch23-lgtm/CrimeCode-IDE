@@ -8,6 +8,7 @@ import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
+import { AuthGate } from "./pages/auth-gate"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 
@@ -128,18 +129,27 @@ const platform: Platform = {
 }
 
 if (root instanceof HTMLElement) {
-  const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
   render(
     () => (
-      <PlatformProvider value={platform}>
-        <AppBaseProviders>
-          <AppInterface
-            defaultServer={ServerConnection.Key.make(getDefaultUrl())}
-            servers={[server]}
-            disableHealthCheck
-          />
-        </AppBaseProviders>
-      </PlatformProvider>
+      <AuthGate>
+        {(creds) => {
+          const server: ServerConnection.Http = {
+            type: "http",
+            http: { url: creds.url, username: creds.username, password: creds.password },
+          }
+          return (
+            <PlatformProvider value={platform}>
+              <AppBaseProviders>
+                <AppInterface
+                  defaultServer={ServerConnection.Key.make(creds.url)}
+                  servers={[server]}
+                  disableHealthCheck
+                />
+              </AppBaseProviders>
+            </PlatformProvider>
+          )
+        }}
+      </AuthGate>
     ),
     root,
   )
