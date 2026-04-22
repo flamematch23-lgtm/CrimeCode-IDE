@@ -1,14 +1,14 @@
 import { ComponentProps } from "solid-js"
 
-const icon = "./crimecode-icon.png"
-const logo = "./crimecode-logo.png"
+const icon = "/crimecode-icon.png"
+const logo = "/crimecode-logo.png"
 
 export const Mark = (props: { class?: string }) => {
   return (
     <img
       data-component="logo-mark"
       src={icon}
-      alt="OpenCode"
+      alt="CrimeCode"
       classList={{ [props.class ?? ""]: !!props.class }}
       draggable={false}
     />
@@ -21,7 +21,7 @@ export const Splash = (props: Pick<ComponentProps<"img">, "ref" | "class">) => {
       ref={props.ref}
       data-component="logo-splash"
       src={logo}
-      alt="OpenCode"
+      alt="CrimeCode"
       classList={{ [props.class ?? ""]: !!props.class }}
       draggable={false}
     />
@@ -29,5 +29,5 @@ export const Splash = (props: Pick<ComponentProps<"img">, "ref" | "class">) => {
 }
 
 export const Logo = (props: { class?: string }) => {
-  return <img src={logo} alt="OpenCode" classList={{ [props.class ?? ""]: !!props.class }} draggable={false} />
+  return <img src={logo} alt="CrimeCode" classList={{ [props.class ?? ""]: !!props.class }} draggable={false} />
 }
