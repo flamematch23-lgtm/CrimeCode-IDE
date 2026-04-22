@@ -98,32 +98,9 @@ export namespace Server {
           status: 500,
         })
       })
-      .use((c, next) => {
-        // Allow CORS preflight requests to succeed without auth.
-        // Browser clients sending Authorization headers will preflight with OPTIONS.
-        if (c.req.method === "OPTIONS") return next()
-        const password = Flag.OPENCODE_SERVER_PASSWORD
-        if (!password) return next()
-        const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
-        return basicAuth({ username, password })(c, next)
-      })
-      .use(async (c, next) => {
-        const skipLogging = c.req.path === "/log"
-        if (!skipLogging) {
-          log.info("request", {
-            method: c.req.method,
-            path: c.req.path,
-          })
-        }
-        const timer = log.time("request", {
-          method: c.req.method,
-          path: c.req.path,
-        })
-        await next()
-        if (!skipLogging) {
-          timer.stop()
-        }
-      })
+      // CORS must run BEFORE basicAuth so that 401 responses still carry the
+      // Access-Control-Allow-Origin header; otherwise browsers surface the
+      // 401 as "TypeError: Failed to fetch" with no diagnostic detail.
       .use(
         cors({
           maxAge: 86_400,
@@ -156,6 +133,32 @@ export namespace Server {
           },
         }),
       )
+      .use((c, next) => {
+        // Allow CORS preflight requests to succeed without auth.
+        // Browser clients sending Authorization headers will preflight with OPTIONS.
+        if (c.req.method === "OPTIONS") return next()
+        const password = Flag.OPENCODE_SERVER_PASSWORD
+        if (!password) return next()
+        const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+        return basicAuth({ username, password })(c, next)
+      })
+      .use(async (c, next) => {
+        const skipLogging = c.req.path === "/log"
+        if (!skipLogging) {
+          log.info("request", {
+            method: c.req.method,
+            path: c.req.path,
+          })
+        }
+        const timer = log.time("request", {
+          method: c.req.method,
+          path: c.req.path,
+        })
+        await next()
+        if (!skipLogging) {
+          timer.stop()
+        }
+      })
       .use((c, next) => {
         if (skipCompress(c.req.path, c.req.method)) return next()
         return zipped(c, next)
