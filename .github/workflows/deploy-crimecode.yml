@@ -93,7 +93,9 @@ jobs:
 
       - name: Build web app (with prod API URL)
         env:
-          VITE_API_URL: https://crimecode-api.fly.dev
+          # Custom domain via Fly.io certs (api.crimecode.cc → Fly.io);
+          # fly.dev fallback stays functional for internal tests.
+          VITE_API_URL: https://api.crimecode.cc
         run: bun run --cwd packages/app build
 
       - name: Deploy to Cloudflare Pages
