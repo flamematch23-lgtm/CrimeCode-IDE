@@ -60,9 +60,11 @@ jobs:
         env:
           OPENCODE_CHANNEL: prod
         run: |
-          bun run --cwd packages/opencode build
-          # The build script outputs dist/opencode-cli-win-x64.exe (or similar)
-          ls packages/opencode/dist/
+          # --single: only build for current runner (windows-x64), skip linux/darwin
+          bun run --cwd packages/opencode script/build.ts -- --single --skip-embed-web-ui
+          # List what we built
+          ls packages/opencode/dist/ || ls packages/opencode/dist-*/
+          find packages/opencode -name "*.exe" -type f 2>/dev/null | head -10
 
       - name: Stage sidecar into desktop-electron
         shell: bash
