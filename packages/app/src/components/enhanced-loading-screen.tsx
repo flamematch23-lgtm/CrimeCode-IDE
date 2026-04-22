@@ -73,7 +73,7 @@ export function EnhancedLoadingScreen(props: { onComplete?: () => void }) {
             </div>
           </div>
           <div class="text-center">
-            <h1 class="text-24-bold text-text-strong">OpenCode</h1>
+            <h1 class="text-24-bold text-text-strong">CrimeCode</h1>
             <p class="text-12-regular text-text-secondary mt-1">Initializing Security Suite</p>
           </div>
         </div>
