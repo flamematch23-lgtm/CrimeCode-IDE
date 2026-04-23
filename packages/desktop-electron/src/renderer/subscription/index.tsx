@@ -4,7 +4,7 @@ import { AdminPanel } from "./admin-panel"
 import { AccountModal } from "./account-modal"
 import { TrialBanner } from "./trial-banner"
 import { recordProjectOpen, schedulePush } from "./sync-manager"
-import { TeamPresenceBadge, WorkspaceSwitcher } from "../teams"
+import { LiveCursors, TeamPresenceBadge, WorkspaceSwitcher } from "../teams"
 import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
 
 export function SubscriptionOverlay() {
@@ -54,6 +54,7 @@ export function SubscriptionOverlay() {
         <TeamPresenceBadge />
         <WorkspaceSwitcher />
       </div>
+      <LiveCursors />
     </>
   )
 }

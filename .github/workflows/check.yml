@@ -1,0 +1,46 @@
+name: Check
+
+# Typecheck + unit tests. Runs on every push to any branch and on every PR.
+# Required by branch protection for the master branch (see GitHub settings).
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck ${{ matrix.pkg }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: [opencode, app, desktop-electron]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install
+        run: bun install --production --ignore-scripts
+      - name: Typecheck
+        run: bun run --cwd packages/${{ matrix.pkg }} typecheck
+
+  test:
+    name: Unit tests — license core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install
+        run: bun install --production --ignore-scripts
+      - name: Run token + payments tests
+        working-directory: packages/opencode
+        run: bun test src/license/token.test.ts src/license/payments.test.ts

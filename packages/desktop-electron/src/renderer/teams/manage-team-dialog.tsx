@@ -1,5 +1,6 @@
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { getTeamsClient } from "@opencode-ai/app/utils/teams-client"
+import { installFocusTrap } from "../a11y/focus-trap"
 
 export function ManageTeamDialog(props: { teamId: string; onClose: () => void; onDeleted: () => void }) {
   const client = getTeamsClient()
@@ -101,8 +102,15 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     }
   }
 
+  let panelRef: HTMLDivElement | undefined
+  onMount(() => {
+    if (!panelRef) return
+    const trap = installFocusTrap(panelRef, props.onClose)
+    onCleanup(() => trap.release())
+  })
+
   return (
-    <div data-component="team-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-team-title">
+    <div data-component="team-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-team-title" ref={(el) => (panelRef = el)}>
       <div data-slot="backdrop" onClick={props.onClose} />
       <div data-slot="panel" data-wide="true">
         <button data-slot="close" onClick={props.onClose} aria-label="Close">×</button>

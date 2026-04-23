@@ -1,7 +1,8 @@
-import { Match, Show, Switch, createResource, createSignal } from "solid-js"
+import { Match, Show, Switch, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { useLicense } from "./use-license"
 import { lastSyncAt, pullAll, pushAll } from "./sync-manager"
 import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
+import { installFocusTrap } from "../a11y/focus-trap"
 
 interface SignInState {
   pin: string
@@ -155,8 +156,15 @@ export function AccountModal(props: { onClose: () => void }) {
     props.onClose()
   }
 
+  let panelRef: HTMLDivElement | undefined
+  onMount(() => {
+    if (!panelRef) return
+    const trap = installFocusTrap(panelRef, close)
+    onCleanup(() => trap.release())
+  })
+
   return (
-    <div data-component="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-title">
+    <div data-component="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-title" ref={(el) => (panelRef = el)}>
       <div data-slot="backdrop" onClick={close} />
       <div data-slot="panel">
         <button data-slot="close" onClick={close} aria-label="Close">×</button>

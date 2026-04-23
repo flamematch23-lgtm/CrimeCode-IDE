@@ -1,3 +1,48 @@
+/* Respect the OS "reduce motion" preference everywhere inside our custom UI.
+   Animations collapse to instant, transitions skip. Applies to glitch,
+   shimmer, panel-in, spin, grid-pan, glow-pulse, badge-pulse, etc. */
+@media (prefers-reduced-motion: reduce) {
+  [data-component="subscription-gate"] *,
+  [data-component="subscription-gate-loading"] *,
+  [data-component="account-modal"] *,
+  [data-component="team-dialog"] *,
+  [data-component="workspace-switcher"] *,
+  [data-component="trial-banner"] *,
+  [data-component="team-presence-badge"] *,
+  [data-component="live-cursors"] * {
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===== Live cursors overlay ===== */
+[data-component="live-cursors"] {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9500;
+}
+[data-component="live-cursors"] [data-slot="cursor"] {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translate(-2px, -2px);
+  transition: left 0.1s linear, top 0.1s linear;
+  will-change: left, top;
+}
+[data-component="live-cursors"] [data-slot="label"] {
+  background: var(--cursor-color, #ff5722);
+  color: #07070a;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font: 700 11px/1.2 -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  white-space: nowrap;
+}
+
 /* ===== Accessibility primitives ===== */
 .sr-only {
   position: absolute !important;

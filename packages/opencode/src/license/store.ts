@@ -305,6 +305,146 @@ export function listOpenOffers(limit = 200): PaymentOfferRow[] {
     .all(now(), limit)
 }
 
+/**
+ * Issue or extend a "server-side trial" license for a customer: a real
+ * license token with a short expiry and no payment. Used by the web admin
+ * dashboard to hand out extensions / promos.
+ */
+export function adminExtendTrial(opts: {
+  customer_telegram?: string | null
+  days: number
+  note?: string | null
+}): { customer: CustomerRow; license: LicenseRow; token: string } {
+  if (!opts.customer_telegram) throw new Error("missing_customer_telegram")
+  if (!Number.isFinite(opts.days) || opts.days <= 0 || opts.days > 365) throw new Error("bad_days")
+  const db = getDb()
+  const customer = findOrCreateCustomerByTelegram({
+    telegram: opts.customer_telegram,
+    note: opts.note ?? null,
+  })
+  const issuedAt = now()
+  const expiresAt = issuedAt + opts.days * 86400
+  const licenseId = newId("lic")
+  const { token, sig } = makeToken({
+    l: licenseId,
+    i: "monthly",
+    t: issuedAt,
+    e: expiresAt,
+  })
+  db.prepare(
+    "INSERT INTO licenses (id, customer_id, order_id, token_sig, interval, issued_at, expires_at) VALUES (?, ?, NULL, ?, 'monthly', ?, ?)",
+  ).run(licenseId, customer.id, sig, issuedAt, expiresAt)
+  audit("license.admin_trial", { license_id: licenseId, customer_id: customer.id, days: opts.days, note: opts.note ?? null })
+  const license = db.prepare<LicenseRow, [string]>("SELECT * FROM licenses WHERE id = ?").get(licenseId)!
+  return { customer, license, token }
+}
+
+/**
+ * Revenue / conversion / churn counters used by the admin analytics panel.
+ * All computed from the existing orders + licenses tables — no extra state.
+ */
+export function analyticsSnapshot(): {
+  revenue_30d_usd: number
+  revenue_365d_usd: number
+  revenue_total_usd: number
+  orders_30d: number
+  orders_total: number
+  orders_pending: number
+  licenses_active: number
+  licenses_expired: number
+  licenses_revoked: number
+  mrr_usd: number
+  conversion_rate_pct: number
+  churn_30d_pct: number
+} {
+  const db = getDb()
+  const nowSec = now()
+  const priceByInterval: Record<string, number> = { monthly: 20, annual: 200, lifetime: 500 }
+  const sumRevenue = (sinceSec?: number): number => {
+    const q = sinceSec
+      ? "SELECT interval, COUNT(*) AS n FROM orders WHERE status = 'confirmed' AND confirmed_at >= ? GROUP BY interval"
+      : "SELECT interval, COUNT(*) AS n FROM orders WHERE status = 'confirmed' GROUP BY interval"
+    const rows = sinceSec
+      ? db.prepare<{ interval: string; n: number }, [number]>(q).all(sinceSec)
+      : db.prepare<{ interval: string; n: number }, []>(q).all()
+    return rows.reduce((sum, r) => sum + (priceByInterval[r.interval] ?? 0) * r.n, 0)
+  }
+  const revenue_30d_usd = sumRevenue(nowSec - 30 * 86400)
+  const revenue_365d_usd = sumRevenue(nowSec - 365 * 86400)
+  const revenue_total_usd = sumRevenue()
+
+  const orders_30d =
+    db
+      .prepare<{ n: number }, [number]>(
+        "SELECT COUNT(*) AS n FROM orders WHERE status = 'confirmed' AND confirmed_at >= ?",
+      )
+      .get(nowSec - 30 * 86400)?.n ?? 0
+  const orders_total = db.prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM orders WHERE status = 'confirmed'").get()?.n ?? 0
+  const orders_pending = db.prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'").get()?.n ?? 0
+
+  const licenses_active =
+    db
+      .prepare<{ n: number }, [number]>(
+        "SELECT COUNT(*) AS n FROM licenses WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+      )
+      .get(nowSec)?.n ?? 0
+  const licenses_expired =
+    db
+      .prepare<{ n: number }, [number]>(
+        "SELECT COUNT(*) AS n FROM licenses WHERE revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?",
+      )
+      .get(nowSec)?.n ?? 0
+  const licenses_revoked = db.prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM licenses WHERE revoked_at IS NOT NULL").get()?.n ?? 0
+
+  // MRR approximation: sum of active monthly ($20) + active annual / 12 ($16.67). Lifetime doesn't contribute to MRR.
+  const monthly_active =
+    db
+      .prepare<{ n: number }, [number]>(
+        "SELECT COUNT(*) AS n FROM licenses WHERE interval = 'monthly' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+      )
+      .get(nowSec)?.n ?? 0
+  const annual_active =
+    db
+      .prepare<{ n: number }, [number]>(
+        "SELECT COUNT(*) AS n FROM licenses WHERE interval = 'annual' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+      )
+      .get(nowSec)?.n ?? 0
+  const mrr_usd = monthly_active * 20 + annual_active * (200 / 12)
+
+  // Conversion rate: confirmed orders / total orders (pending + cancelled + confirmed) over all time.
+  const total_orders_everywhere = db.prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM orders").get()?.n ?? 0
+  const conversion_rate_pct = total_orders_everywhere > 0 ? (orders_total / total_orders_everywhere) * 100 : 0
+
+  // Churn: licenses expired or revoked in the last 30 days / active 30 days ago.
+  const expired_30d =
+    db
+      .prepare<{ n: number }, [number, number]>(
+        "SELECT COUNT(*) AS n FROM licenses WHERE expires_at IS NOT NULL AND expires_at > ? AND expires_at <= ?",
+      )
+      .get(nowSec - 30 * 86400, nowSec)?.n ?? 0
+  const revoked_30d =
+    db
+      .prepare<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM licenses WHERE revoked_at >= ?")
+      .get(nowSec - 30 * 86400)?.n ?? 0
+  const active_30d_ago = licenses_active + expired_30d + revoked_30d
+  const churn_30d_pct = active_30d_ago > 0 ? ((expired_30d + revoked_30d) / active_30d_ago) * 100 : 0
+
+  return {
+    revenue_30d_usd,
+    revenue_365d_usd,
+    revenue_total_usd,
+    orders_30d,
+    orders_total,
+    orders_pending,
+    licenses_active,
+    licenses_expired,
+    licenses_revoked,
+    mrr_usd: Math.round(mrr_usd * 100) / 100,
+    conversion_rate_pct: Math.round(conversion_rate_pct * 10) / 10,
+    churn_30d_pct: Math.round(churn_30d_pct * 10) / 10,
+  }
+}
+
 export function statsCounts(): {
   customers: number
   orders_pending: number

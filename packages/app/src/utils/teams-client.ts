@@ -70,6 +70,7 @@ export interface TeamEvent {
     | "member_role_changed"
     | "team_renamed"
     | "team_deleted"
+    | "cursor_moved"
   team_id?: string
   session_id?: string
   host?: string
@@ -77,6 +78,9 @@ export interface TeamEvent {
   customer_id?: string
   role?: string
   name?: string
+  x?: number
+  y?: number
+  label?: string | null
 }
 
 export interface TeamsClient {
@@ -93,6 +97,8 @@ export interface TeamsClient {
   publishSession(id: string, title: string, state: unknown): Promise<TeamLiveSession>
   heartbeatSession(id: string, sid: string, state: unknown): Promise<TeamLiveSession | null>
   endSession(id: string, sid: string): Promise<{ ok: true }>
+  /** Publish a cursor position for a live session. Fire-and-forget. */
+  publishCursor(id: string, sid: string, x: number, y: number, label?: string): Promise<void>
   /** Open an SSE subscription. Returns an unsubscribe. */
   subscribe(id: string, onEvent: (e: TeamEvent) => void): () => void
 }
@@ -119,6 +125,7 @@ function desktopClient(): TeamsClient {
     publishSession: (id, title, state) => api().publishSession(id, title, state),
     heartbeatSession: (id, sid, state) => api().heartbeatSession(id, sid, state),
     endSession: (id, sid) => api().endSession(id, sid),
+    publishCursor: (id, sid, x, y, label) => webClient().publishCursor(id, sid, x, y, label),
     subscribe: (id, onEvent) => {
       // Desktop: EventSource works in renderer with the same origin, fall
       // through to the web impl but resolve the token via IPC so the secret
@@ -226,6 +233,12 @@ function webClient(): TeamsClient {
       }),
     endSession: (id, sid) =>
       json(`/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" }),
+    publishCursor: async (id, sid, x, y, label) => {
+      await apiFetch(
+        `/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}/cursor`,
+        { method: "POST", body: JSON.stringify({ x, y, label }) },
+      ).catch(() => undefined)
+    },
     subscribe: (id, onEvent) => {
       if (typeof EventSource === "undefined") return () => undefined
       const s = readWebSession()
@@ -251,6 +264,7 @@ function webClient(): TeamsClient {
         "member_role_changed",
         "team_renamed",
         "team_deleted",
+        "cursor_moved",
       ]
       for (const t of types) es.addEventListener(t, listener as EventListener)
       es.addEventListener("error", () => {

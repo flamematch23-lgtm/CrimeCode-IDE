@@ -4,6 +4,8 @@ import { createHash } from "node:crypto"
 import { lazy } from "../../util/lazy"
 import { verifyToken } from "../../license/token"
 import {
+  adminExtendTrial,
+  analyticsSnapshot,
   cancelOrder,
   confirmOrderAndIssue,
   createOrder,
@@ -46,6 +48,7 @@ import {
   removeMember,
   renameTeam,
   setMemberRole,
+  transferOwnership,
 } from "../../license/teams"
 import { subscribeTeam } from "../../license/team-events"
 import { streamSSE } from "hono/streaming"
@@ -211,6 +214,25 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
   <div class="stats" id="stats"></div>
 
   <section>
+    <h2>📊 Analytics</h2>
+    <div class="stats" id="analytics"></div>
+  </section>
+
+  <section>
+    <h2>🎁 Extend trial / free days</h2>
+    <p style="color:#888;font-size:12px;margin:0 0 10px">Hand a short manual license to a customer (e.g. a promo, a support make-good). Issues a real signed token with the given expiry in days.</p>
+    <form id="trialForm">
+      <label class="sr-only" for="trial-telegram">Customer Telegram handle</label>
+      <input id="trial-telegram" name="customer_telegram" placeholder="@customer" required aria-label="Customer Telegram handle" />
+      <label class="sr-only" for="trial-days">Days</label>
+      <input id="trial-days" name="days" type="number" min="1" max="365" placeholder="days (1-365)" required aria-label="Days" />
+      <label class="sr-only" for="trial-note">Note</label>
+      <input id="trial-note" name="note" placeholder="note (optional)" aria-label="Note" />
+      <button type="submit">Issue Trial Token</button>
+    </form>
+  </section>
+
+  <section>
     <h2>Issue License (manual)</h2>
     <form id="issueForm">
       <label class="sr-only" for="issue-telegram">Customer Telegram handle</label>
@@ -323,7 +345,30 @@ async function loadAudit() {
     <tr><td>\${fmt(e.ts)}</td><td>\${e.action}</td><td><code>\${e.details ? String(e.details).slice(0, 200) : ""}</code></td></tr>\`).join("")
 }
 
-async function refreshAll() { await Promise.all([loadStats(), loadOrders(), loadLicenses(), loadAudit()]) }
+async function loadAnalytics() {
+  try {
+    const a = await api("/analytics")
+    const fmt$ = (n) => "$" + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })
+    const fmtPct = (n) => Number(n || 0).toFixed(1) + "%"
+    const cards = [
+      ["MRR", fmt$(a.mrr_usd)],
+      ["Revenue 30d", fmt$(a.revenue_30d_usd)],
+      ["Revenue 365d", fmt$(a.revenue_365d_usd)],
+      ["Revenue total", fmt$(a.revenue_total_usd)],
+      ["Conversion rate", fmtPct(a.conversion_rate_pct)],
+      ["Churn 30d", fmtPct(a.churn_30d_pct)],
+      ["Orders 30d", a.orders_30d],
+      ["Licenses active", a.licenses_active],
+    ]
+    document.getElementById("analytics").innerHTML = cards
+      .map(([k, v]) => \`<div class="stat"><div class="v">\${v}</div><div class="k">\${k}</div></div>\`)
+      .join("")
+  } catch (e) {
+    document.getElementById("analytics").innerHTML = '<div class="empty">Analytics unavailable: ' + e.message + "</div>"
+  }
+}
+
+async function refreshAll() { await Promise.all([loadStats(), loadAnalytics(), loadOrders(), loadLicenses(), loadAudit()]) }
 
 async function triggerBackup() {
   showToast("📦 Snapshotting database…")
@@ -364,6 +409,18 @@ document.getElementById("issueForm").addEventListener("submit", async (e) => {
   const data = Object.fromEntries(new FormData(e.target))
   try {
     const r = await api("/issue", { method: "POST", body: JSON.stringify(data) })
+    showToast(r.token, { copy: true })
+    e.target.reset()
+    await refreshAll()
+  } catch (err) { showToast("Error: " + err.message) }
+})
+
+document.getElementById("trialForm").addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const data = Object.fromEntries(new FormData(e.target))
+  data.days = Number(data.days)
+  try {
+    const r = await api("/trial-extend", { method: "POST", body: JSON.stringify(data) })
     showToast(r.token, { copy: true })
     e.target.reset()
     await refreshAll()
@@ -601,6 +658,20 @@ export const LicenseRoutes = lazy(() => {
     }
   })
 
+  app.post("/teams/:id/transfer-ownership", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { new_owner_customer_id?: string }
+    if (!body.new_owner_customer_id) return c.json({ error: "missing_new_owner" }, 400)
+    try {
+      const team = transferOwnership(c.req.param("id"), sess.sub, body.new_owner_customer_id)
+      return c.json({ team })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
   app.delete("/teams/:id/invites/:inviteId", (c) => {
     const sess = sessionGuard(c as never)
     if (!sess) return c.json({ error: "unauthorized" }, 401)
@@ -654,6 +725,31 @@ export const LicenseRoutes = lazy(() => {
     if (!sess) return c.json({ error: "unauthorized" }, 401)
     const ok = endSession(c.req.param("sid"), sess.sub)
     if (!ok) return c.json({ error: "not_found" }, 404)
+    return c.json({ ok: true })
+  })
+
+  // Cursor broadcast — intentionally stateless: we emit an event and do NOT
+  // persist. The SSE stream fans it out; clients keep a local map keyed by
+  // customer_id and fade the dot after N seconds of no update.
+  app.post("/teams/:id/sessions/:sid/cursor", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    const body = (await c.req.json().catch(() => ({}))) as { x?: number; y?: number; label?: string }
+    const x = typeof body.x === "number" ? Math.max(0, Math.min(1, body.x)) : null
+    const y = typeof body.y === "number" ? Math.max(0, Math.min(1, body.y)) : null
+    if (x === null || y === null) return c.json({ error: "bad_coords" }, 400)
+    const { emitTeamEvent } = await import("../../license/team-events")
+    emitTeamEvent({
+      type: "cursor_moved",
+      team_id: teamId,
+      session_id: c.req.param("sid"),
+      customer_id: sess.sub,
+      x,
+      y,
+      label: typeof body.label === "string" ? body.label.slice(0, 32) : null,
+    })
     return c.json({ ok: true })
   })
 
@@ -820,6 +916,34 @@ export const LicenseRoutes = lazy(() => {
   })
 
   admin.get("/audit", (c) => c.json(listAudit(200)))
+
+  admin.get("/analytics", (c) => c.json(analyticsSnapshot()))
+
+  admin.post("/trial-extend", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      customer_telegram?: string
+      days?: number
+      note?: string
+    }
+    if (!body.customer_telegram) return c.json({ error: "missing_customer_telegram" }, 400)
+    const days = Number(body.days)
+    if (!Number.isFinite(days) || days <= 0 || days > 365) return c.json({ error: "bad_days" }, 400)
+    try {
+      const r = adminExtendTrial({
+        customer_telegram: body.customer_telegram,
+        days,
+        note: body.note ?? null,
+      })
+      return c.json({
+        token: r.token,
+        license_id: r.license.id,
+        customer_id: r.customer.id,
+        expires_at: r.license.expires_at,
+      })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
 
   admin.post("/backup", async (c) => {
     const r = await backupOnce()

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Privacy Policy — CrimeCode</title>
+<meta name="description" content="CrimeCode Privacy Policy — what we collect, how we use it, your GDPR rights." />
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="/_shared.css" />
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="/" aria-label="CrimeCode home">
+      <span class="logo">CC</span>
+      <span class="name">CRIMECODE</span>
+    </a>
+    <nav>
+      <a href="/pricing">Pricing</a>
+      <a href="/faq">FAQ</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy" aria-current="page">Privacy</a>
+    </nav>
+    <a class="cta" href="/">Sign in</a>
+  </div>
+</header>
+
+<main class="page">
+  <h1>Privacy Policy</h1>
+  <p class="lead">Last updated: 23 April 2026. This is the short, honest version of what we store and why. The full legal text follows.</p>
+
+  <div class="card">
+    <h3>TL;DR</h3>
+    <ul>
+      <li>We store your <strong>Telegram handle + user ID</strong>, your <strong>orders</strong>, your <strong>license token signature</strong>, and any <strong>preferences / recent project paths</strong> you explicitly sync to the cloud.</li>
+      <li>We do <strong>not</strong> collect your email, real name, payment card data, browser fingerprint, source code, chat content, or location.</li>
+      <li>Data lives on a Fly.io machine in <strong>Frankfurt (EU)</strong>. Daily encrypted backups to Tigris. Sentry receives error traces (no PII).</li>
+      <li>You can delete your account in full by messaging <a href="https://t.me/OpCrime1312">@OpCrime1312</a>.</li>
+    </ul>
+  </div>
+
+  <h2>1. Who is the data controller?</h2>
+  <p>The data controller is the CrimeCode operator (Italy, EU). For questions, privacy requests, or GDPR complaints, contact <code>hello@crimecode.cc</code> or <a href="https://t.me/OpCrime1312">@OpCrime1312</a> on Telegram.</p>
+
+  <h2>2. What we collect and why</h2>
+
+  <h3>When you message our bot or sign in</h3>
+  <ul>
+    <li><strong>Telegram user ID</strong> (numeric) and <strong>username</strong> if set — used to identify your account and deliver messages back to you. Stored in the <code>customers</code> table. Legal basis: performance of contract (Art. 6(1)(b) GDPR).</li>
+    <li><strong>Device label</strong> (app name + hostname) at sign-in time — stored in <code>auth_sessions</code> so you can see which devices have an active session. You can revoke any session from the Account dialog.</li>
+  </ul>
+
+  <h3>When you place an order</h3>
+  <ul>
+    <li><strong>Order record</strong>: plan, status, amount, creation time, confirmation time. No KYC data.</li>
+    <li><strong>Wallet transaction hash</strong> once confirmed on-chain — this is public information by definition.</li>
+    <li><strong>License token signature</strong> (12 bytes) — NOT the full token. We never store the part that a customer pastes into the app.</li>
+  </ul>
+
+  <h3>When you use cloud sync</h3>
+  <ul>
+    <li>Anything you explicitly push via <code>/license/sync/&lt;key&gt;</code> — currently the app uses two keys, <code>client.settings</code> (preferences JSON) and <code>client.recent-projects</code> (list of recent folder paths and names). You control what's pushed; we never scrape the rest of your filesystem.</li>
+    <li>Max 64 KB per key. Stored unencrypted at rest on the server disk, but transmitted only over HTTPS.</li>
+  </ul>
+
+  <h3>When you create or join a team</h3>
+  <ul>
+    <li>Team name, member list (customer IDs), roles, pending invite identifiers (Telegram handles or emails).</li>
+    <li>Live-session metadata (title + small JSON state) for the duration of the session; cleared when you end it or after 90 seconds of no heartbeat.</li>
+  </ul>
+
+  <h3>When an error happens</h3>
+  <ul>
+    <li>A stack trace + the HTTP path/method that triggered the error is sent to Sentry. Sentry is configured with <code>sendDefaultPii: false</code>, so we never forward your IP, cookies or user agent. You can see the exact capture code in <code>packages/opencode/src/license/sentry.ts</code> in our public repo.</li>
+  </ul>
+
+  <h2>3. Cookies and local storage</h2>
+  <p>The website at <code>crimecode.cc</code> does not use tracking cookies. The web IDE and the desktop app use <strong>localStorage</strong> on your own machine for:</p>
+  <ul>
+    <li>The signed session JWT (<code>crimecode.session</code>).</li>
+    <li>Your active workspace preference (<code>client.active-workspace</code>).</li>
+    <li>Your settings snapshot and recent project list (also synced to the cloud when you're signed in).</li>
+  </ul>
+  <p>No third-party analytics, no advertising, no fingerprinting.</p>
+
+  <h2>4. Payment data</h2>
+  <p>We do not touch payment cards or PayPal. Payments happen on-chain. The only data we see is the public blockchain transaction: <em>from wallet, to wallet, amount, tx hash, timestamp</em>. We record the tx hash against your order so you can trace it.</p>
+
+  <h2>5. Who we share data with</h2>
+  <ul>
+    <li><strong>Fly.io</strong> (Delaware, USA — EU region Frankfurt) — hosts our server and database.</li>
+    <li><strong>Tigris Data</strong> (Delaware, USA, EU region) — S3-compatible backup storage, receives nightly encrypted copies of the database.</li>
+    <li><strong>Telegram Messenger LLP</strong> — delivers bot messages to you. Telegram sees the bot-chat content (the bot is how we get messages to you). Telegram has its own privacy policy at <a href="https://telegram.org/privacy">telegram.org/privacy</a>.</li>
+    <li><strong>Cloudflare</strong> — CDN and DNS for <code>crimecode.cc</code>. Sees request metadata (IP, URL, timestamps) for the web app only. The desktop app talks to <code>api.crimecode.cc</code> directly.</li>
+    <li><strong>CoinGecko</strong> — USD→crypto exchange rate. We send them no user data; we just fetch the public rate.</li>
+    <li><strong>mempool.space, litecoinspace.org, etherscan.io, Blockcypher</strong> — block explorers queried by our on-chain payment poller. We only send wallet addresses and they see that our server is polling them; no user data leaves.</li>
+    <li><strong>Sentry</strong> (Delaware, USA — EU region Frankfurt) — receives error traces without PII.</li>
+  </ul>
+  <p>We do not sell your data and never will. We do not share it with advertisers, governments, or other third parties outside of a valid legal request.</p>
+
+  <h2>6. Retention</h2>
+  <ul>
+    <li><strong>Customer and license records</strong>: kept for as long as the license is active, plus 24 months after the last expiry, so we can honour reactivation requests.</li>
+    <li><strong>Auth sessions</strong>: 30 days from issue, automatically purged.</li>
+    <li><strong>Pending invites</strong>: kept until claimed or cancelled.</li>
+    <li><strong>Live-session metadata</strong>: kept for 30 days after the session ends, then purged.</li>
+    <li><strong>Audit log</strong>: 12 months.</li>
+    <li><strong>Backups</strong>: rolling 30 days on Tigris, then overwritten.</li>
+  </ul>
+
+  <h2>7. Your GDPR rights</h2>
+  <p>If you are in the EU/EEA, you have the following rights under GDPR:</p>
+  <ul>
+    <li><strong>Access</strong> — request a copy of everything we hold about you.</li>
+    <li><strong>Rectification</strong> — correct anything that's wrong.</li>
+    <li><strong>Erasure</strong> ("right to be forgotten") — delete your account and all its data.</li>
+    <li><strong>Restriction</strong> — pause processing while you investigate a concern.</li>
+    <li><strong>Portability</strong> — receive your data in a machine-readable format (JSON).</li>
+    <li><strong>Objection</strong> — object to processing that relies on legitimate interests.</li>
+    <li><strong>Complaint</strong> — file a complaint with your local supervisory authority (in Italy: <em>Garante per la Protezione dei Dati Personali</em>, <a href="https://www.gpdp.it/">gpdp.it</a>).</li>
+  </ul>
+  <p>To exercise any right, message <a href="https://t.me/OpCrime1312">@OpCrime1312</a> from the Telegram account you signed up with, or email <code>hello@crimecode.cc</code>. We respond within 30 days.</p>
+
+  <h2>8. Children</h2>
+  <p>CrimeCode is not directed at children under 16. We do not knowingly collect data from minors. If you believe a child has created an account, please let us know and we'll delete it.</p>
+
+  <h2>9. International transfers</h2>
+  <p>Although we host in the EU, some processors (Fly.io, Tigris, Sentry) are incorporated in the United States. Data transfers from the EU to the US rely on Standard Contractual Clauses (SCC) as approved by the European Commission in June 2021.</p>
+
+  <h2>10. Security</h2>
+  <p>We use HTTPS everywhere, HMAC-SHA256 signed session tokens, Basic Auth with SHA-256 hashed admin passphrase, at-rest encryption of Tigris backups, and automatic backups every 12 hours. The source of the backend is mostly open-source — you can audit exactly what we do at <a href="https://github.com/flamematch23-lgtm/CrimeCode-IDE">github.com/flamematch23-lgtm/CrimeCode-IDE</a>.</p>
+
+  <h2>11. Changes</h2>
+  <p>We may update this policy occasionally. Material changes will be announced on this page with a new "last updated" date at least 14 days before they take effect. If the change expands the scope of data we process, we'll also message it to you via the Telegram bot.</p>
+</main>
+
+<footer class="site-footer">
+  <div class="links">
+    <a href="/">Home</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/faq">FAQ</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="https://t.me/CrimeCodeSub_bot">Telegram bot</a>
+  </div>
+  <p>© 2026 CrimeCode. Built for security researchers.</p>
+</footer>
+</body>
+</html>

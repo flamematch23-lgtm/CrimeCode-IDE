@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { Log } from "../util/log"
 import { getDb } from "./db"
 import { claimPendingInvitesForCustomer } from "./teams"
+import { notifyNewDeviceSignIn } from "./telegram-notify"
 
 const log = Log.create({ service: "license-auth" })
 
@@ -182,6 +183,17 @@ export function pollAuth(pin: string): PollResult {
     claimPendingInvitesForCustomer(customer.id)
   } catch (err) {
     log.warn("failed to claim pending invites", { customer: customer.id, error: err instanceof Error ? err.message : String(err) })
+  }
+
+  // Notify the customer via Telegram about the new device sign-in so they
+  // can spot someone else grabbing a PIN. Fire-and-forget — never block the
+  // sign-in on a delivery failure.
+  if (customer.telegram_user_id) {
+    void notifyNewDeviceSignIn({
+      telegram_user_id: customer.telegram_user_id,
+      device_label: row.device_label ?? null,
+      when: now,
+    }).catch(() => undefined)
   }
 
   const { token, exp } = makeSessionToken({

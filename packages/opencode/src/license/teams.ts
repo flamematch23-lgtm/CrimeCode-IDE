@@ -257,6 +257,29 @@ export function setMemberRole(
     .get(teamId, customerId)!
 }
 
+/**
+ * Transfer ownership from the current owner to another existing member. The
+ * old owner is demoted to admin so they keep some privileges but can no
+ * longer delete the team or re-transfer.
+ */
+export function transferOwnership(teamId: string, actor: string, newOwnerCustomerId: string): TeamRow {
+  const team = getTeam(teamId)
+  if (!team) throw new Error("not_found")
+  if (team.owner_customer_id !== actor) throw new Error("only_owner")
+  if (newOwnerCustomerId === actor) throw new Error("same_owner")
+  const targetRole = getMemberRole(teamId, newOwnerCustomerId)
+  if (!targetRole) throw new Error("not_member")
+  const db = getDb()
+  db.transaction(() => {
+    db.prepare("UPDATE teams SET owner_customer_id = ? WHERE id = ?").run(newOwnerCustomerId, teamId)
+    db.prepare("UPDATE team_members SET role = 'owner' WHERE team_id = ? AND customer_id = ?").run(teamId, newOwnerCustomerId)
+    db.prepare("UPDATE team_members SET role = 'admin' WHERE team_id = ? AND customer_id = ?").run(teamId, actor)
+  })()
+  emitTeamEvent({ type: "member_role_changed", team_id: teamId, customer_id: newOwnerCustomerId, role: "owner" })
+  emitTeamEvent({ type: "member_role_changed", team_id: teamId, customer_id: actor, role: "admin" })
+  return getTeam(teamId)!
+}
+
 export function cancelInvite(teamId: string, actor: string, inviteId: string): void {
   const role = getMemberRole(teamId, actor)
   if (role !== "owner" && role !== "admin") throw new Error("forbidden")

@@ -2,8 +2,9 @@ import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import type { TeamLiveSession } from "../../preload/types"
 import { getTeamsClient } from "@opencode-ai/app/utils/teams-client"
 import { WorkspaceSwitcher } from "./workspace-switcher"
+import { LiveCursors } from "./live-cursors"
 
-export { WorkspaceSwitcher }
+export { WorkspaceSwitcher, LiveCursors }
 
 interface ActiveWorkspace {
   kind: "personal" | "team"

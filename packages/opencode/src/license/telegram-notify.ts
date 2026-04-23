@@ -3,6 +3,38 @@ import type { Currency } from "./prices"
 
 const log = Log.create({ service: "telegram-notify" })
 
+export async function sendTelegramMessage(chatId: number, text: string, parseMode: "Markdown" = "Markdown"): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  if (!token) return
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: parseMode,
+        disable_web_page_preview: true,
+      }),
+    })
+  } catch (err) {
+    log.warn("sendMessage failed", { error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+export async function notifyNewDeviceSignIn(opts: {
+  telegram_user_id: number
+  device_label: string | null
+  when: number
+}): Promise<void> {
+  const body =
+    `🔐 *New device signed in to your CrimeCode account*\n\n` +
+    `Device: ${opts.device_label ? "`" + opts.device_label + "`" : "_unknown_"}\n` +
+    `Time: ${new Date(opts.when * 1000).toISOString()}\n\n` +
+    `If this wasn't you, open the desktop/web app → *Account* → *Sign out*, then change any shared credentials.`
+  await sendTelegramMessage(opts.telegram_user_id, body)
+}
+
 interface SendOpts {
   telegram_user_id: number
   license_id: string

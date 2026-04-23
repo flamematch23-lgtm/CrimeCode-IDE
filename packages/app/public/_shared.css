@@ -1,0 +1,206 @@
+/* Shared styles for the CrimeCode marketing/legal pages served alongside the
+   SolidJS IDE bundle. Intentionally keep everything inline so the pages
+   render instantly with zero JS. */
+
+:root {
+  color-scheme: dark;
+  --orange: #ff5722;
+  --orange-dark: #f4511e;
+  --bg: #07070a;
+  --bg-panel: rgba(15, 15, 20, 0.78);
+  --text: #f5f5f5;
+  --text-dim: rgba(255, 255, 255, 0.65);
+  --text-faint: rgba(255, 255, 255, 0.45);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 87, 34, 0.3);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  background: radial-gradient(ellipse at top, #1a0a0a 0%, #07070a 70%) fixed;
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+a { color: var(--orange); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: 2px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 4px; font-size: 0.95em; }
+
+.site-header {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(15,15,20,0.85);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.site-header .inner {
+  max-width: 1080px; margin: 0 auto;
+  padding: 14px 28px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.site-header .brand { display: flex; align-items: center; gap: 12px; }
+.site-header .logo {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+  display: flex; align-items: center; justify-content: center;
+  font-family: ui-monospace, monospace; font-weight: 800; font-size: 14px;
+  color: #07070a;
+}
+.site-header .name {
+  font-weight: 800; letter-spacing: 0.3em; font-size: 13px; color: var(--orange);
+}
+.site-header nav { display: flex; gap: 20px; flex-wrap: wrap; }
+.site-header nav a { color: var(--text-dim); font-size: 13px; font-weight: 500; }
+.site-header nav a:hover { color: var(--text); text-decoration: none; }
+.site-header .cta {
+  background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+  color: #fff; padding: 8px 18px; border-radius: 8px;
+  font-size: 13px; font-weight: 700;
+  box-shadow: 0 4px 14px rgba(255,87,34,0.3);
+}
+.site-header .cta:hover { text-decoration: none; transform: translateY(-1px); }
+
+main.page { max-width: 1080px; margin: 0 auto; padding: 48px 28px 80px; }
+main.page h1 { font-size: 36px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 12px; color: #fff; }
+main.page .lead { font-size: 16px; color: var(--text-dim); max-width: 720px; margin: 0 0 40px; }
+main.page h2 { font-size: 22px; font-weight: 700; margin: 40px 0 12px; color: #fff; }
+main.page h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; color: var(--orange); text-transform: uppercase; letter-spacing: 0.06em; }
+main.page p { color: var(--text-dim); margin: 0 0 12px; }
+main.page ul, main.page ol { color: var(--text-dim); padding-left: 22px; margin: 0 0 16px; }
+main.page li { margin-bottom: 6px; }
+
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 28px;
+  margin-bottom: 16px;
+}
+.pricing-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;
+  margin: 32px 0;
+}
+.price-card {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 28px 24px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.price-card.featured {
+  border-color: var(--border-strong);
+  background: linear-gradient(135deg, rgba(255,87,34,0.08), rgba(255,87,34,0.02));
+}
+.price-card:hover {
+  border-color: rgba(255,87,34,0.5);
+  transform: translateY(-4px);
+  box-shadow: 0 18px 50px rgba(255,87,34,0.18);
+}
+.price-card .badge {
+  align-self: flex-start;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--orange); background: rgba(255,87,34,0.18);
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid rgba(255,87,34,0.4);
+}
+.price-card .title { font-size: 18px; font-weight: 700; color: #fff; }
+.price-card .price { font-size: 30px; font-weight: 800; color: var(--orange); text-shadow: 0 0 20px rgba(255,87,34,0.3); line-height: 1.1; }
+.price-card .desc { color: var(--text-dim); font-size: 13px; flex: 1; }
+.price-card ul { color: var(--text-dim); font-size: 13px; padding-left: 20px; margin: 8px 0 16px; }
+.price-card li { margin-bottom: 4px; }
+.price-card .cta {
+  display: inline-block; text-align: center;
+  background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+  color: #fff; padding: 12px 18px; border-radius: 10px;
+  font-weight: 700; font-size: 14px;
+  min-height: 44px;
+  box-shadow: 0 4px 14px rgba(255,87,34,0.3);
+}
+.price-card .cta:hover { text-decoration: none; transform: translateY(-1px); box-shadow: 0 10px 28px rgba(255,87,34,0.5); }
+
+.faq { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.faq details {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.faq details[open] { border-color: rgba(255,87,34,0.3); }
+.faq summary {
+  cursor: pointer; font-weight: 600; color: #fff;
+  list-style: none;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; color: var(--orange); font-size: 22px; font-weight: 800; line-height: 1; }
+.faq details[open] summary::after { content: "−"; }
+.faq details p { margin-top: 12px; margin-bottom: 0; }
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding: 32px 28px;
+  color: var(--text-faint); font-size: 12px;
+  text-align: center;
+}
+.site-footer .links { display: flex; gap: 20px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+.site-footer .links a { color: var(--text-dim); }
+
+.hero {
+  text-align: center;
+  padding: 80px 28px 64px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute; top: -40%; left: 50%;
+  width: 700px; height: 700px; transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(255,87,34,0.15) 0%, transparent 60%);
+  filter: blur(40px); pointer-events: none;
+}
+.hero h1 {
+  font-size: 56px; font-weight: 800; letter-spacing: -0.03em;
+  margin: 0 0 16px; color: #fff; line-height: 1.1;
+}
+.hero h1 .accent {
+  background: linear-gradient(135deg, #fff 0%, #ffd0bd 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  padding-bottom: 4px; display: inline-block;
+}
+.hero .lead {
+  max-width: 640px; margin: 0 auto 32px;
+  font-size: 18px; color: var(--text-dim);
+}
+.hero .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.hero .cta-primary {
+  background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+  color: #fff; padding: 14px 28px; border-radius: 10px;
+  font-weight: 700; font-size: 15px;
+  box-shadow: 0 6px 24px rgba(255,87,34,0.35);
+  min-height: 48px;
+}
+.hero .cta-primary:hover { text-decoration: none; transform: translateY(-2px); box-shadow: 0 10px 32px rgba(255,87,34,0.55); }
+.hero .cta-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 14px 28px; border-radius: 10px;
+  font-weight: 600; font-size: 15px;
+  min-height: 48px;
+}
+.hero .cta-secondary:hover { text-decoration: none; border-color: var(--orange); color: var(--orange); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
+
+@media (max-width: 640px) {
+  .hero h1 { font-size: 36px; }
+  .hero .lead { font-size: 15px; }
+  main.page { padding: 32px 20px 64px; }
+  main.page h1 { font-size: 28px; }
+  .site-header .inner { padding: 14px 20px; }
+  .site-header nav { display: none; }
+}

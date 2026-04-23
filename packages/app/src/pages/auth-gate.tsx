@@ -347,6 +347,15 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
               </Show>
 
               <p style={hintStyle}>Credentials stay in your browser's localStorage and travel only over HTTPS.</p>
+              <p style={footerLinksStyle}>
+                <a href="/pricing" style={footerLinkStyle}>Pricing</a>
+                <span style={dotStyle}>·</span>
+                <a href="/faq" style={footerLinkStyle}>FAQ</a>
+                <span style={dotStyle}>·</span>
+                <a href="/terms" style={footerLinkStyle}>Terms</a>
+                <span style={dotStyle}>·</span>
+                <a href="/privacy" style={footerLinkStyle}>Privacy</a>
+              </p>
             </div>
           </div>
         </Show>
@@ -503,4 +512,17 @@ const hintStyle: JSX.CSSProperties = {
   "font-size": "11px",
   color: "rgba(255,255,255,0.4)",
   "line-height": "1.5",
+}
+const footerLinksStyle: JSX.CSSProperties = {
+  margin: "14px 0 0 0",
+  "text-align": "center",
+  "font-size": "11px",
+}
+const footerLinkStyle: JSX.CSSProperties = {
+  color: "rgba(255,255,255,0.55)",
+  "text-decoration": "none",
+  margin: "0 4px",
+}
+const dotStyle: JSX.CSSProperties = {
+  color: "rgba(255,255,255,0.25)",
 }

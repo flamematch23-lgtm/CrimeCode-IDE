@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>FAQ — CrimeCode</title>
+<meta name="description" content="Frequently asked questions about CrimeCode: payment, licenses, teams, privacy." />
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="/_shared.css" />
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="/" aria-label="CrimeCode home">
+      <span class="logo">CC</span>
+      <span class="name">CRIMECODE</span>
+    </a>
+    <nav>
+      <a href="/pricing">Pricing</a>
+      <a href="/faq" aria-current="page">FAQ</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+    <a class="cta" href="/">Sign in</a>
+  </div>
+</header>
+
+<main class="page">
+  <h1>Frequently asked questions</h1>
+  <p class="lead">Short answers to the questions people ask before subscribing.</p>
+
+  <h2>General</h2>
+  <div class="faq">
+    <details>
+      <summary>What is CrimeCode?</summary>
+      <p>CrimeCode is a desktop + web IDE designed for fraud research and security tooling. It bundles the editor, terminal, AI assistants, and team collaboration into a single privacy-first app.</p>
+    </details>
+
+    <details>
+      <summary>On what platforms does it run?</summary>
+      <p>Windows, macOS (Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm) for the desktop app. The web app runs in any modern browser — Chromium, Firefox, Safari.</p>
+    </details>
+
+    <details>
+      <summary>Do I need to create an account?</summary>
+      <p>No email, no password. You sign in with a one-time PIN through our Telegram bot <code>@CrimeCodeSub_bot</code>. That also becomes the identity you use for team invites and cloud sync.</p>
+    </details>
+  </div>
+
+  <h2>Payment</h2>
+  <div class="faq">
+    <details>
+      <summary>Which cryptocurrencies do you accept?</summary>
+      <p>Bitcoin (BTC), Litecoin (LTC), and Ethereum (ETH). The bot generates wallet addresses with the exact amount per plan and detects your payment automatically on-chain.</p>
+    </details>
+
+    <details>
+      <summary>How fast does payment confirm?</summary>
+      <p>Usually 1–15 minutes depending on network congestion. The bot polls the chain every 60 seconds and DMs you the license token as soon as confirmations meet the threshold (1 for BTC/LTC, 6 for ETH).</p>
+    </details>
+
+    <details>
+      <summary>Do you accept cards, PayPal, or bank transfer?</summary>
+      <p>No. We're crypto-only by design — no card data, no KYC, no chargeback surface.</p>
+    </details>
+
+    <details>
+      <summary>What if I send the wrong amount?</summary>
+      <p>The bot matches transactions by exact amount (including a unique discriminator). If your transaction doesn't match, contact <a href="https://t.me/OpCrime1312">@OpCrime1312</a> with your tx hash and order ID — we reconcile manually.</p>
+    </details>
+
+    <details>
+      <summary>Can I get a refund?</summary>
+      <p>Yes, within 7 days of a monthly/annual order or 30 days for lifetime (if you haven't activated). Refunds are manual — message <a href="https://t.me/OpCrime1312">@OpCrime1312</a>.</p>
+    </details>
+  </div>
+
+  <h2>Licenses</h2>
+  <div class="faq">
+    <details>
+      <summary>Can I use my license on multiple devices?</summary>
+      <p>Yes. The license is tied to your Telegram identity, not a specific machine. Sign in on each device with the same Telegram account and your license follows you.</p>
+    </details>
+
+    <details>
+      <summary>What happens when my monthly/annual expires?</summary>
+      <p>You'll get a reminder 7 days before expiry, plus an urgent one 24 hours before. After expiry the app shows the paywall again — nothing breaks, you just need a new order.</p>
+    </details>
+
+    <details>
+      <summary>Does lifetime really mean lifetime?</summary>
+      <p>Yes — the license token doesn't carry an expiry. All future desktop/web updates are included. The only way you lose access is if we explicitly revoke (fraud, chargeback, ToS violation).</p>
+    </details>
+
+    <details>
+      <summary>Can I use CrimeCode offline?</summary>
+      <p>Yes. After the first online activation the client caches the license for 7 days. It re-verifies in the background when you're online — if the server says "expired" or "revoked" within 7 days the local copy is updated. You can work offline indefinitely as long as you reconnect at least once a week.</p>
+    </details>
+  </div>
+
+  <h2>Teams</h2>
+  <div class="faq">
+    <details>
+      <summary>How many members can I add?</summary>
+      <p>Up to 20 members per team on the Annual and Lifetime plans. Monthly is intended for individuals — team creation is disabled on monthly plans.</p>
+    </details>
+
+    <details>
+      <summary>Do my team members each need to pay?</summary>
+      <p>No. One Annual or Lifetime license covers the whole team. Add members by their Telegram handle or email — the invite is auto-accepted on their next sign-in.</p>
+    </details>
+
+    <details>
+      <summary>What are the roles?</summary>
+      <p><strong>Owner</strong>: full control (add/remove, rename, delete team, change roles).<br /><strong>Admin</strong>: can add/remove members, cancel invites.<br /><strong>Member</strong>: can see team workspace and live sessions.</p>
+    </details>
+
+    <details>
+      <summary>What are live sessions?</summary>
+      <p>When you switch to a team workspace, you can advertise your current editor session. Other team members see a green "N live" badge and can join (coming soon: real-time cursor sharing).</p>
+    </details>
+  </div>
+
+  <h2>Privacy & security</h2>
+  <div class="faq">
+    <details>
+      <summary>What data do you store?</summary>
+      <p>Your Telegram handle/user ID, your orders, the license token signature (not the full token), and any data you explicitly sync to the cloud (preferences, recent project paths). No source code, no chat content, no email, no card data.</p>
+    </details>
+
+    <details>
+      <summary>Where is the data stored?</summary>
+      <p>A SQLite database on a Fly.io machine in Frankfurt (EU). Daily encrypted backups to Tigris object storage. See <a href="/privacy">Privacy Policy</a> for the full list.</p>
+    </details>
+
+    <details>
+      <summary>Is my code ever sent to your servers?</summary>
+      <p>No. The desktop IDE runs locally and only the cloud sync endpoints (<code>/license/sync/*</code>) receive data you explicitly push — limited to 64 KB per key and only for preferences / recent paths.</p>
+    </details>
+
+    <details>
+      <summary>How do I delete my account?</summary>
+      <p>DM <a href="https://t.me/OpCrime1312">@OpCrime1312</a> from the Telegram account you signed up with. We'll delete your customer row, licenses, sync data, and invalidate all sessions within 7 days.</p>
+    </details>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="links">
+    <a href="/">Home</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/faq">FAQ</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="https://t.me/CrimeCodeSub_bot">Telegram bot</a>
+  </div>
+  <p>© 2026 CrimeCode. Built for security researchers.</p>
+</footer>
+</body>
+</html>

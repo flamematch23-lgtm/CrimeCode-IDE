@@ -16,6 +16,15 @@ export type TeamEvent =
   | { type: "member_role_changed"; team_id: string; customer_id: string; role: string }
   | { type: "team_renamed"; team_id: string; name: string }
   | { type: "team_deleted"; team_id: string }
+  | {
+      type: "cursor_moved"
+      team_id: string
+      session_id: string
+      customer_id: string
+      x: number // 0..1 normalized viewport X
+      y: number // 0..1 normalized viewport Y
+      label?: string | null
+    }
 
 type Listener = (event: TeamEvent) => void
 

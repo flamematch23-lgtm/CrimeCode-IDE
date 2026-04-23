@@ -1,6 +1,14 @@
-# Cloudflare Pages — redirect www → apex (canonical host).
-# Syntax: <from-pattern> <to-pattern> <status>
-# https://developers.cloudflare.com/pages/configuration/redirects/
+# Cloudflare Pages — redirects.
+# Static .html files in public/ are served directly at their path minus
+# the extension (clean URLs). SPA fallback for everything else.
 
+# www -> apex
 https://www.crimecode.cc/*  https://crimecode.cc/:splat  301
 http://www.crimecode.cc/*   https://crimecode.cc/:splat  301
+
+# Old aliases so external links keep working.
+/welcome   /       302
+/pricing.html   /pricing   301
+/faq.html       /faq       301
+/terms.html     /terms     301
+/privacy.html   /privacy   301

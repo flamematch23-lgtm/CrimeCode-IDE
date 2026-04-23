@@ -1,5 +1,6 @@
-import { Show, createSignal } from "solid-js"
+import { Show, createSignal, onCleanup, onMount } from "solid-js"
 import type { TeamSummary } from "../../preload/types"
+import { installFocusTrap } from "../a11y/focus-trap"
 
 export function CreateTeamDialog(props: { onClose: () => void; onCreated: (team: TeamSummary) => void }) {
   const [name, setName] = createSignal("")
@@ -23,8 +24,15 @@ export function CreateTeamDialog(props: { onClose: () => void; onCreated: (team:
     }
   }
 
+  let panelRef: HTMLDivElement | undefined
+  onMount(() => {
+    if (!panelRef) return
+    const trap = installFocusTrap(panelRef, props.onClose)
+    onCleanup(() => trap.release())
+  })
+
   return (
-    <div data-component="team-dialog" role="dialog" aria-modal="true" aria-labelledby="create-team-title">
+    <div data-component="team-dialog" role="dialog" aria-modal="true" aria-labelledby="create-team-title" ref={(el) => (panelRef = el)}>
       <div data-slot="backdrop" onClick={props.onClose} />
       <div data-slot="panel">
         <button data-slot="close" onClick={props.onClose} aria-label="Close">×</button>
