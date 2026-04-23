@@ -807,19 +807,40 @@ export const LicenseRoutes = lazy(() => {
 
   // --- Public endpoint (no admin auth — used by Electron client) ---
   app.post("/validate", async (c) => {
-    // Rate limit per source IP — 10 requests / 60 s. Trust CF-Connecting-IP
-    // (set by Cloudflare proxy) first, then fall back to the leftmost
-    // X-Forwarded-For (Fly's edge proxy) and finally to the connection
-    // remote address.
+    // Parse the body FIRST so we can inspect the token for rate-limit tiering.
+    // An invalid / absent token falls into the FREE bucket (stingy limit to
+    // discourage brute-force), a well-signed token (HMAC-valid) gets the PRO
+    // bucket — we don't need to hit the DB here because HMAC alone proves
+    // the caller is legitimate proof-of-purchase; expiry / revocation still
+    // bite at validateBySig() below.
+    let body: { token?: string; machine_id?: string } = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      /* handled by the missing-token branch below */
+    }
+
+    const token = typeof body.token === "string" ? body.token : ""
+    const hmacCheck = token ? verifyToken(token) : { ok: false, reason: "missing_token" }
+
+    // Pick the tier before doing anything else so a flood of free-tier
+    // traffic can't use up the Pro pool.
     const ip =
       c.req.header("CF-Connecting-IP") ??
       c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
       c.req.header("Fly-Client-IP") ??
       "unknown"
-    const rl = checkRateLimit(ip)
+    const rl =
+      hmacCheck.ok && hmacCheck.sig
+        ? checkRateLimit("pro:" + hmacCheck.sig, { max: 60 })
+        : checkRateLimit("free:" + ip, { max: 10 })
     if (!rl.ok) {
       return new Response(
-        JSON.stringify({ status: "rate_limited", retry_after: rl.retryAfterSeconds }),
+        JSON.stringify({
+          status: "rate_limited",
+          retry_after: rl.retryAfterSeconds,
+          tier: hmacCheck.ok ? "pro" : "free",
+        }),
         {
           status: 429,
           headers: {
@@ -829,20 +850,16 @@ export const LicenseRoutes = lazy(() => {
         },
       )
     }
-    let body: { token?: string; machine_id?: string }
-    try {
-      body = await c.req.json()
-    } catch {
-      return c.json({ status: "unknown", reason: "invalid_json" }, 400)
+
+    if (!token) return c.json({ status: "unknown", reason: "invalid_json" }, 400)
+    if (!hmacCheck.ok || !hmacCheck.payload || !hmacCheck.sig) {
+      return c.json({ status: "unknown", reason: hmacCheck.reason ?? "bad_token" }, 200)
     }
-    if (!body.token) return c.json({ status: "unknown", reason: "missing_token" }, 400)
-    const v = verifyToken(body.token)
-    if (!v.ok || !v.payload || !v.sig) return c.json({ status: "unknown", reason: v.reason ?? "bad_token" }, 200)
-    const result = validateBySig({ token_sig: v.sig, machine_id: body.machine_id ?? null })
+    const result = validateBySig({ token_sig: hmacCheck.sig, machine_id: body.machine_id ?? null })
     return c.json({
       ...result,
-      interval: v.payload.i,
-      issued_at: v.payload.t,
+      interval: hmacCheck.payload.i,
+      issued_at: hmacCheck.payload.t,
     })
   })
 
