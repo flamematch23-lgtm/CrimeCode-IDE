@@ -81,19 +81,25 @@ async function send(chatId: number, text: string, parseMode: "Markdown" | "Markd
 
 const HELP_USER = `🔥 *Welcome to CrimeCode* 🔥
 
-The IDE for fraud researchers and security professionals — built by the team, for the team.
+The IDE built for fraud researchers and security pros — by the team, for the team.
 
-📋 *How to subscribe (3 simple steps)*
+🏷️ *Plans*
 
-*1.* Pick your plan with \`/order\`
-   • \`/order monthly\` — €X / month
-   • \`/order annual\` — €X / year (save ~30%)
-   • \`/order lifetime\` — €X one-time, forever
+⚡ *Monthly* — *$20 / month*
+   Try the platform. All Pro features unlocked, cancel anytime.
 
-*2.* Pay one of our wallets (USDT, BTC, ETH, Monero accepted):
-   👉 Contact @OpCrime1312 or @JollyFraud with your order ID — they'll give you the wallet address and confirm receipt.
+🔥 *Annual* — *$200 / year* _(save ~17%)_
+   For serious users. Two months free vs paying monthly.
 
-*3.* Receive your license token here automatically as soon as the payment is verified. Paste it into the desktop app → Subscription gate → "I have a token" → Activate. Done.
+💎 *Lifetime* — *$500 once* _(best value)_
+   Pay once, keep forever. All future updates included.
+
+📋 *How it works (fully automated)*
+
+*1.* Run \`/order monthly\` — _or_ \`annual\` _or_ \`lifetime\`.
+*2.* The bot replies with three wallets (BTC / LTC / ETH) and the *exact* amount to send for each.
+*3.* Send the EXACT amount to ANY one of those wallets.
+*4.* As soon as the transaction is confirmed on-chain (~1–15 min) you receive your license token here automatically. ⚡
 
 📌 *Useful commands*
 \`/start\` — show this message
@@ -102,9 +108,9 @@ The IDE for fraud researchers and security professionals — built by the team, 
 \`/myorders\` — list your last orders
 
 🔒 *Privacy*
-We only store: your Telegram handle, your order, the issued license token signature. No emails, no payment data, no personal IDs unless you give them to us.
+We store only your Telegram handle, your order, and the license token signature. No email, no card data, no KYC.
 
-🆘 *Need help?* Reply to this chat or message @OpCrime1312 directly.`
+🆘 *Need a human?* Message @OpCrime1312 or @JollyFraud — quote your order ID.`
 
 const HELP_ADMIN = `🛠️ *Admin commands* (you only)
 
