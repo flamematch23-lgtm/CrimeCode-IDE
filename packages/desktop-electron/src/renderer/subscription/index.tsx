@@ -3,6 +3,7 @@ import { SubscriptionModal } from "./subscription-modal"
 import { AdminPanel } from "./admin-panel"
 import { AccountModal } from "./account-modal"
 import { TrialBanner } from "./trial-banner"
+import { recordProjectOpen, schedulePush } from "./sync-manager"
 
 export function SubscriptionOverlay() {
   const [sub, setSub] = createSignal(false)
@@ -37,6 +38,9 @@ async function handleProjectNew() {
   try {
     const result = await window.api.project.create()
     if (!result?.directory) return
+    // Record in local + debounced cloud push (only fires if signed in).
+    recordProjectOpen(result.directory)
+    schedulePush()
     // Hand the directory off to the existing "open project" handler so the
     // app jumps into the same first-run flow it already knows.
     window.location.hash = `#open?directory=${encodeURIComponent(result.directory)}`

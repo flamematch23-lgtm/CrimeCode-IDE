@@ -682,6 +682,42 @@
 }
 [data-component="account-modal"] button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+[data-component="account-modal"] [data-slot="sync-section"] {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: rgba(255, 87, 34, 0.04);
+  border: 1px solid rgba(255, 87, 34, 0.18);
+  border-radius: 10px;
+}
+[data-component="account-modal"] [data-slot="sync-section"] h3 {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ff5722;
+  font-weight: 700;
+}
+[data-component="account-modal"] [data-slot="sync-actions"] {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+[data-component="account-modal"] [data-slot="sync-actions"] button {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+[data-component="account-modal"] [data-slot="info"] {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
 /* ===== Trial banner ===== */
 [data-component="trial-banner"] {
   position: fixed;
