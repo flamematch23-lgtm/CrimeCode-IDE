@@ -1186,3 +1186,15 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+/* Ownership transfer button */
+[data-component="team-dialog"] [data-slot="transfer-btn"] {
+  padding: 4px 8px;
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+}
+[data-component="team-dialog"] [data-slot="transfer-btn"]:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+  border-color: #fbbf24;
+}

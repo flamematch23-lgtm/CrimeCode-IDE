@@ -97,6 +97,8 @@ export interface TeamsClient {
   publishSession(id: string, title: string, state: unknown): Promise<TeamLiveSession>
   heartbeatSession(id: string, sid: string, state: unknown): Promise<TeamLiveSession | null>
   endSession(id: string, sid: string): Promise<{ ok: true }>
+  /** Transfer ownership of a team to another member. Owner-only. */
+  transferOwnership(id: string, newOwnerCustomerId: string): Promise<{ team: TeamSummary }>
   /** Publish a cursor position for a live session. Fire-and-forget. */
   publishCursor(id: string, sid: string, x: number, y: number, label?: string): Promise<void>
   /** Open an SSE subscription. Returns an unsubscribe. */
@@ -125,6 +127,7 @@ function desktopClient(): TeamsClient {
     publishSession: (id, title, state) => api().publishSession(id, title, state),
     heartbeatSession: (id, sid, state) => api().heartbeatSession(id, sid, state),
     endSession: (id, sid) => api().endSession(id, sid),
+    transferOwnership: (id, newOwnerCustomerId) => webClient().transferOwnership(id, newOwnerCustomerId),
     publishCursor: (id, sid, x, y, label) => webClient().publishCursor(id, sid, x, y, label),
     subscribe: (id, onEvent) => {
       // Desktop: EventSource works in renderer with the same origin, fall
@@ -233,6 +236,11 @@ function webClient(): TeamsClient {
       }),
     endSession: (id, sid) =>
       json(`/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" }),
+    transferOwnership: (id, newOwnerCustomerId) =>
+      json(`/license/teams/${encodeURIComponent(id)}/transfer-ownership`, {
+        method: "POST",
+        body: JSON.stringify({ new_owner_customer_id: newOwnerCustomerId }),
+      }),
     publishCursor: async (id, sid, x, y, label) => {
       await apiFetch(
         `/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}/cursor`,

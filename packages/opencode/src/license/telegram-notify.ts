@@ -1,5 +1,6 @@
 import { Log } from "../util/log"
 import type { Currency } from "./prices"
+import { newDeviceMessage, paymentConfirmedMessage, recallLang } from "./telegram-i18n"
 
 const log = Log.create({ service: "telegram-notify" })
 
@@ -27,11 +28,9 @@ export async function notifyNewDeviceSignIn(opts: {
   device_label: string | null
   when: number
 }): Promise<void> {
-  const body =
-    `🔐 *New device signed in to your CrimeCode account*\n\n` +
-    `Device: ${opts.device_label ? "`" + opts.device_label + "`" : "_unknown_"}\n` +
-    `Time: ${new Date(opts.when * 1000).toISOString()}\n\n` +
-    `If this wasn't you, open the desktop/web app → *Account* → *Sign out*, then change any shared credentials.`
+  const lang = recallLang(opts.telegram_user_id)
+  const deviceLabel = opts.device_label ? "`" + opts.device_label + "`" : lang === "it" ? "_sconosciuto_" : "_unknown_"
+  const body = newDeviceMessage(lang, deviceLabel, new Date(opts.when * 1000).toISOString())
   await sendTelegramMessage(opts.telegram_user_id, body)
 }
 
@@ -58,21 +57,23 @@ function escapeMd(s: string): string {
 export async function sendCustomerToken(opts: SendOpts): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) return
-  const expLine = opts.expires_at
-    ? `Expires: *${new Date(opts.expires_at * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}*`
+  const lang = recallLang(opts.telegram_user_id)
+  const expDateStr = opts.expires_at
+    ? new Date(opts.expires_at * 1000).toLocaleDateString(lang === "it" ? "it-IT" : "en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : null
+  const expLine = expDateStr
+    ? lang === "it"
+      ? `Scadenza: *${expDateStr}*`
+      : `Expires: *${expDateStr}*`
+    : lang === "it"
+    ? "Scadenza: *mai (a vita)* 🎉"
     : "Expires: *never (lifetime)* 🎉"
-  const explorer = EXPLORERS[opts.currency](opts.tx)
-  const body =
-    `✅ *Payment received on-chain!*\n\n` +
-    `Order has been confirmed and your CrimeCode Pro license is ready.\n\n` +
-    `License ID: \`${opts.license_id}\`\n` +
-    `Plan: *${opts.interval}*\n` +
-    `${expLine}\n` +
-    `Tx: ${escapeMd(explorer)}\n\n` +
-    `📋 *Activation*\n\n` +
-    `Open the CrimeCode desktop app → on the Subscription screen click *"I have a license token"* → paste the token below → click *Activate*.\n\n` +
-    `\`${opts.token}\`\n\n` +
-    `Thanks for supporting CrimeCode 🖤`
+  const explorer = escapeMd(EXPLORERS[opts.currency](opts.tx))
+  const body = paymentConfirmedMessage(lang, opts.license_id, opts.interval, expLine, explorer, opts.token)
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",

@@ -115,3 +115,419 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+}
+
+/* Keyframe referenced by the workspace-switcher popover and team dialogs. */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* sr-only helper for visually-hidden form labels. */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+
+/* Focus ring for any interactive element inside the teams surface. */
+[data-component="workspace-switcher"] :focus-visible,
+[data-component="team-dialog"] :focus-visible,
+[data-component="workspace-dock"] :focus-visible {
+  outline: 2px solid #ff5722;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Minimum 44×44 touch targets for WCAG 2.5.5. */
+[data-component="workspace-switcher"] button,
+[data-component="team-dialog"] button,
+[data-component="workspace-switcher"] [data-slot="create"] {
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+/* reduce-motion support for the shared teams surface. */
+@media (prefers-reduced-motion: reduce) {
+  [data-component="workspace-switcher"] *,
+  [data-component="team-dialog"] *,
+  [data-component="team-presence-badge"] *,
+  [data-component="workspace-dock"] * {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
+
+/* ===== Workspace dock (bottom-left corner) ===== */
+[data-component="workspace-dock"] {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 8000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+[data-component="workspace-dock"] > * { pointer-events: auto; }
+
+[data-component="team-presence-badge"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: #4ade80;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font: 600 11px/1 -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+[data-component="team-presence-badge"] [data-slot="dot"] {
+  width: 8px; height: 8px; background: #4ade80; border-radius: 50%;
+  box-shadow: 0 0 6px #4ade80;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+/* ===== Workspace switcher ===== */
+[data-component="workspace-switcher"] {
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #f5f5f5;
+}
+[data-component="workspace-switcher"] [data-slot="trigger"] {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(15, 15, 20, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f5f5f5;
+  padding: 8px 12px;
+  border-radius: 10px;
+  min-width: 240px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  backdrop-filter: blur(10px);
+}
+[data-component="workspace-switcher"] [data-slot="trigger"]:hover {
+  border-color: rgba(255, 87, 34, 0.5);
+  background: rgba(20, 20, 25, 0.98);
+}
+[data-component="workspace-switcher"] [data-slot="icon"] { font-size: 18px; }
+[data-component="workspace-switcher"] [data-slot="labels"] {
+  display: flex; flex-direction: column; flex: 1; text-align: left; line-height: 1.2;
+}
+[data-component="workspace-switcher"] [data-slot="title"] { font-size: 13px; font-weight: 700; }
+[data-component="workspace-switcher"] [data-slot="subtitle"] { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+[data-component="workspace-switcher"] [data-slot="chevron"] { color: rgba(255,255,255,0.4); font-size: 10px; }
+
+[data-component="workspace-switcher"] [data-slot="popover"] {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 280px;
+  background: #15151a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  animation: panel-in 0.15s ease-out both;
+}
+[data-component="workspace-switcher"] [data-slot="section-label"] {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  padding: 6px 10px 2px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+[data-component="workspace-switcher"] [data-slot="section-label"]::before {
+  content: "👤";
+}
+[data-component="workspace-switcher"] [data-slot="section-label"]:nth-of-type(n+2)::before {
+  content: "👥";
+}
+[data-component="workspace-switcher"] [data-slot="item"] {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #f5f5f5;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: background 0.1s;
+}
+[data-component="workspace-switcher"] [data-slot="item"]:hover {
+  background: rgba(255, 87, 34, 0.1);
+}
+[data-component="workspace-switcher"] [data-slot="item"][data-active="true"] {
+  background: rgba(255, 87, 34, 0.14);
+}
+[data-component="workspace-switcher"] [data-slot="item-icon"] {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, #ff5722, #f4511e);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; color: #07070a;
+  flex-shrink: 0;
+}
+[data-component="workspace-switcher"] [data-slot="item-labels"] {
+  display: flex; flex-direction: column; flex: 1; line-height: 1.2;
+  min-width: 0;
+}
+[data-component="workspace-switcher"] [data-slot="item-title"] {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-component="workspace-switcher"] [data-slot="item-subtitle"] {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  margin-top: 2px;
+}
+[data-component="workspace-switcher"] [data-slot="badge-owner"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+[data-component="workspace-switcher"] [data-slot="check"] {
+  color: #4ade80;
+  font-weight: 800;
+}
+[data-component="workspace-switcher"] [data-slot="gear"] {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.4);
+  width: 32px; height: 32px;
+  min-height: 32px; /* overrides the 44px catch-all; the trigger button
+                       provides the full 44px touch target */
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-component="workspace-switcher"] [data-slot="gear"]:hover {
+  color: #ff5722;
+  background: rgba(255, 87, 34, 0.1);
+}
+[data-component="workspace-switcher"] [data-slot="create"] {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 4px;
+  font: 600 12px/1 inherit;
+  justify-content: center;
+  transition: all 0.1s;
+}
+[data-component="workspace-switcher"] [data-slot="create"]:hover {
+  border-color: #ff5722;
+  color: #ff5722;
+  background: rgba(255, 87, 34, 0.06);
+}
+[data-component="workspace-switcher"] [data-slot="empty"] {
+  padding: 12px; color: rgba(255,255,255,0.5); font-size: 12px; text-align: center;
+}
+
+/* ===== Team dialog (Create / Manage) ===== */
+[data-component="team-dialog"] {
+  position: fixed; inset: 0; z-index: 100000;
+  display: flex; align-items: center; justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #f5f5f5;
+}
+[data-component="team-dialog"] [data-slot="backdrop"] {
+  position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+[data-component="team-dialog"] [data-slot="panel"] {
+  position: relative; width: 90%; max-width: 480px;
+  background: #15151a; border: 1px solid rgba(255, 87, 34, 0.3); border-radius: 14px;
+  padding: 28px 32px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  animation: panel-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+[data-component="team-dialog"] [data-slot="panel"][data-wide="true"] { max-width: 620px; }
+[data-component="team-dialog"] [data-slot="close"] {
+  position: absolute; top: 10px; right: 14px;
+  background: transparent; border: none; color: #888;
+  font-size: 26px; cursor: pointer; line-height: 1;
+}
+[data-component="team-dialog"] [data-slot="close"]:hover { color: #ff5722; }
+[data-component="team-dialog"] h2 {
+  margin: 0 0 6px 0; font-size: 20px; color: #fff; font-weight: 800;
+}
+[data-component="team-dialog"] [data-slot="subtitle"] {
+  margin: 0 0 20px 0; color: rgba(255, 255, 255, 0.55); font-size: 13px;
+}
+[data-component="team-dialog"] label { display: block; margin-bottom: 8px; font-size: 12px; color: rgba(255,255,255,0.7); font-weight: 600; }
+[data-component="team-dialog"] label span:first-child { display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+[data-component="team-dialog"] input[type="text"] {
+  width: 100%;
+  background: #07070a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f5f5f5;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font: 14px inherit;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+[data-component="team-dialog"] input[type="text"]:focus {
+  outline: none;
+  border-color: #ff5722;
+}
+[data-component="team-dialog"] [data-slot="input-row"] {
+  display: flex; gap: 8px;
+}
+[data-component="team-dialog"] [data-slot="input-row"] input { flex: 1; }
+[data-component="team-dialog"] button {
+  background: linear-gradient(135deg, #ff5722, #f4511e); color: #fff; border: none;
+  padding: 10px 20px; border-radius: 8px; font-weight: 700; font-size: 13px;
+  cursor: pointer; transition: all 0.1s;
+}
+[data-component="team-dialog"] button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255,87,34,0.4); }
+[data-component="team-dialog"] button:disabled { opacity: 0.5; cursor: not-allowed; }
+[data-component="team-dialog"] button[data-kind="ghost"] {
+  background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #ccc; box-shadow: none;
+}
+[data-component="team-dialog"] button[data-kind="ghost"]:hover:not(:disabled) {
+  border-color: #ff5722; color: #ff5722;
+}
+[data-component="team-dialog"] button[data-kind="danger"] {
+  background: linear-gradient(135deg, #d33b22, #aa2811);
+}
+[data-component="team-dialog"] [data-slot="actions"] {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px;
+}
+[data-component="team-dialog"] [data-slot="error"] {
+  color: #ff8a8a; background: rgba(255,0,0,0.08); border: 1px solid rgba(255,0,0,0.25);
+  border-radius: 6px; padding: 8px 12px; margin-top: 12px; font-size: 13px;
+}
+[data-component="team-dialog"] [data-slot="info"] {
+  color: #4ade80; background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.25);
+  border-radius: 6px; padding: 8px 12px; margin-top: 12px; font-size: 13px;
+}
+[data-component="team-dialog"] [data-slot="members-section"],
+[data-component="team-dialog"] [data-slot="invites-section"] {
+  margin-top: 20px;
+}
+[data-component="team-dialog"] h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em;
+  color: #ff5722; margin: 0 0 10px 0;
+}
+[data-component="team-dialog"] [data-slot="members"],
+[data-component="team-dialog"] [data-slot="invites"] {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 240px; overflow-y: auto;
+}
+[data-component="team-dialog"] [data-slot="member"],
+[data-component="team-dialog"] [data-slot="invite"] {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+[data-component="team-dialog"] [data-slot="avatar"] {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: linear-gradient(135deg, #ff5722, #f4511e);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #07070a;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+[data-component="team-dialog"] [data-slot="member-labels"] {
+  flex: 1; display: flex; flex-direction: column; line-height: 1.2; min-width: 0;
+}
+[data-component="team-dialog"] [data-slot="member-name"] {
+  font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+[data-component="team-dialog"] [data-slot="member-telegram"] {
+  font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px;
+}
+[data-component="team-dialog"] [data-slot="member-role"] {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 3px 8px; border-radius: 999px;
+}
+[data-component="team-dialog"] [data-slot="member-role"][data-role="owner"] {
+  color: #fbbf24; background: rgba(251, 191, 36, 0.15);
+}
+[data-component="team-dialog"] [data-slot="member-role"][data-role="admin"] {
+  color: #60a5fa; background: rgba(96, 165, 250, 0.15);
+}
+[data-component="team-dialog"] [data-slot="member-role"][data-role="member"] {
+  color: #a0a0a8; background: rgba(255, 255, 255, 0.06);
+}
+[data-component="team-dialog"] [data-slot="role-select"] {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f5f5f5;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+[data-component="team-dialog"] [data-slot="role-select"]:focus {
+  outline: none;
+  border-color: #ff5722;
+}
+[data-component="team-dialog"] [data-slot="member"] button,
+[data-component="team-dialog"] [data-slot="invite"] button {
+  padding: 4px 10px; font-size: 11px;
+}
+[data-component="team-dialog"] [data-slot="invite-identifier"] {
+  flex: 1; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+[data-component="team-dialog"] [data-slot="invite-date"] {
+  font-size: 11px; color: rgba(255,255,255,0.4);
+}
+[data-component="team-dialog"] [data-slot="loading"] {
+  text-align: center; color: rgba(255,255,255,0.5); padding: 40px;
+}
+
+
+/* Ownership transfer button (NEW v2.12.0) */
+[data-component="team-dialog"] [data-slot="transfer-btn"] {
+  padding: 4px 8px;
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+}
+[data-component="team-dialog"] [data-slot="transfer-btn"]:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+  border-color: #fbbf24;
+}

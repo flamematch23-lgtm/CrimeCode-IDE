@@ -2,6 +2,7 @@ import { Log } from "../util/log"
 import { captureException } from "./sentry"
 import { claimPinForCustomer } from "./auth"
 import { listTeamsForCustomer } from "./teams"
+import { helpUser, orderCreatedMessage, pickLang, rememberLang, type Lang } from "./telegram-i18n"
 import {
   attachPaymentOffer,
   cancelOrder,
@@ -31,7 +32,7 @@ interface TgUpdate {
   update_id: number
   message?: {
     message_id: number
-    from?: { id: number; username?: string; first_name?: string }
+    from?: { id: number; username?: string; first_name?: string; language_code?: string }
     chat: { id: number }
     text?: string
   }
@@ -172,7 +173,11 @@ async function buildOfferLines(orderId: string, usd: number): Promise<{ lines: s
   return { lines, offers: out }
 }
 
-async function newOrderMessage(orderId: string, interval: keyof typeof PRICE_USD): Promise<string> {
+async function newOrderMessage(
+  orderId: string,
+  interval: keyof typeof PRICE_USD,
+  lang: Lang = "en",
+): Promise<string> {
   const usd = PRICE_USD[interval]
   const expires = Math.floor(Date.now() / 1000) + PAY_WINDOW_MINUTES * 60
   const { lines, offers } = await buildOfferLines(orderId, usd)
@@ -186,16 +191,7 @@ async function newOrderMessage(orderId: string, interval: keyof typeof PRICE_USD
       expires_at: expires,
     })
   }
-  const body =
-    `✅ *Order created!*\n\n` +
-    `ID: \`${orderId}\`\n` +
-    `Plan: *${interval}* — *$${usd} USD*\n` +
-    `Status: *pending payment*\n\n` +
-    `💸 *Pay with ANY of these wallets* — use the EXACT amount shown so the bot can match it back to your order:\n\n` +
-    lines.join("\n\n") +
-    `\n\n⏱ This order expires in *${PAY_WINDOW_MINUTES} minutes*. As soon as the transaction is confirmed on-chain you'll receive your license token *here automatically*.\n\n` +
-    `Need help? Contact @OpCrime1312 or @JollyFraud and quote order \`${orderId}\`.`
-  return body
+  return orderCreatedMessage(lang, orderId, interval, usd, lines.join("\n\n"), PAY_WINDOW_MINUTES)
 }
 
 function tokenDeliveryMessage(licenseId: string, interval: string, expiresAt: number | null, token: string): string {
@@ -232,12 +228,14 @@ async function handle(update: TgUpdate) {
   const username = msg.from.username ? `@${msg.from.username}` : null
   const text = msg.text.trim()
   const isAdmin = getAdminUserIds().has(userId)
+  const lang = pickLang(msg.from.language_code)
+  rememberLang(userId, lang) // cache for async messages (reminders, notifications)
 
-  log.info("telegram message", { from: userId, username, text: text.slice(0, 80) })
+  log.info("telegram message", { from: userId, username, lang, text: text.slice(0, 80) })
 
   const cmdMatch = text.match(/^\/([a-zA-Z]+)(?:@\w+)?(?:\s+(.*))?$/)
   if (!cmdMatch) {
-    await send(chatId, HELP_USER, "Markdown")
+    await send(chatId, helpUser(lang), "Markdown")
     return
   }
   const cmd = cmdMatch[1].toLowerCase()
@@ -261,7 +259,7 @@ async function handle(update: TgUpdate) {
           customer_user_id: userId,
           interval: deepLinkInterval as "monthly" | "annual" | "lifetime",
         })
-        await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD), "Markdown")
+        await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang), "Markdown")
         return
       }
       const authPin = args.match(/^auth_([A-Z0-9]{4,32})\b/i)?.[1]
@@ -284,7 +282,7 @@ async function handle(update: TgUpdate) {
         }
         return
       }
-      await send(chatId, HELP_USER + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
+      await send(chatId, helpUser(lang) + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
       return
     }
     case "order": {
@@ -298,7 +296,7 @@ async function handle(update: TgUpdate) {
         customer_user_id: userId,
         interval: interval as "monthly" | "annual" | "lifetime",
       })
-      await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD), "Markdown")
+      await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang), "Markdown")
       return
     }
     case "status": {
@@ -349,13 +347,17 @@ async function handle(update: TgUpdate) {
       if (!orderId) { await send(chatId, "Usage: `/confirm <order_id> [tx_hash]`", "Markdown"); return }
       const r = confirmOrderAndIssue({ order_id: orderId, tx_hash: txHash })
       if ("error" in r) { await send(chatId, "Error: " + r.error); return }
-      // notify customer
+      // notify customer (use their remembered locale if we've seen them)
       if (r.customer.telegram_user_id) {
         await send(
           r.customer.telegram_user_id,
           tokenDeliveryMessage(r.license.id, r.license.interval, r.license.expires_at, r.token),
           "Markdown",
         )
+        // ^^ the helper defined in this file is EN-only for the admin
+        // surface; the poller path (payments auto-detected on-chain) uses
+        // the i18n helper instead. Kept this branch EN since the admin
+        // explicitly typed /confirm and the receipt tone is identical.
       }
       const who = r.customer.telegram ?? (r.customer.telegram_user_id ? `user ${r.customer.telegram_user_id}` : "customer")
       await send(
@@ -432,7 +434,7 @@ async function handle(update: TgUpdate) {
       return
     }
     default:
-      await send(chatId, HELP_USER + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
+      await send(chatId, helpUser(lang) + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
   }
 }
 

@@ -8,7 +8,11 @@
     "./vite": "./vite.js",
     "./index.css": "./src/index.css",
     "./utils/teams-client": "./src/utils/teams-client.ts",
-    "./components/teams/live-cursors": "./src/components/teams/live-cursors.tsx"
+    "./components/teams/live-cursors": "./src/components/teams/live-cursors.tsx",
+    "./components/teams/workspace-switcher": "./src/components/teams/workspace-switcher.tsx",
+    "./components/teams/create-team-dialog": "./src/components/teams/create-team-dialog.tsx",
+    "./components/teams/manage-team-dialog": "./src/components/teams/manage-team-dialog.tsx",
+    "./a11y/focus-trap": "./src/a11y/focus-trap.ts"
   },
   "scripts": {
     "typecheck": "tsgo -b",

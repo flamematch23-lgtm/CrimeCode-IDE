@@ -1,5 +1,6 @@
 import { Log } from "../util/log"
 import { getDb } from "./db"
+import { recallLang, renewalReminderMessage } from "./telegram-i18n"
 
 const log = Log.create({ service: "license-reminders" })
 
@@ -19,10 +20,6 @@ interface CandidateRow {
   telegram_user_id: number | null
 }
 
-function escapeMd(s: string): string {
-  return s.replaceAll(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1")
-}
-
 async function sendReminderTo(
   userId: number,
   licenseId: string,
@@ -32,17 +29,7 @@ async function sendReminderTo(
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) return
   const urgent = daysLeft <= URGENT_DAYS_BEFORE
-  const headline = urgent
-    ? "⚠️ *License expiring TOMORROW*"
-    : `⏳ *License renewal reminder*`
-  const body =
-    `${headline}\n\n` +
-    `Your CrimeCode Pro license \`${licenseId}\` (plan: *${interval}*) expires in *${daysLeft} day${daysLeft === 1 ? "" : "s"}*.\n\n` +
-    `Renew now to avoid downtime — same wallet, same flow:\n\n` +
-    `• \`/order monthly\` — *$20 / month*\n` +
-    `• \`/order annual\` — *$200 / year* _(save 17%)_\n` +
-    `• \`/order lifetime\` — *$500 once* _(best value, never expires)_\n\n` +
-    `Need help? Message @OpCrime1312.`
+  const body = renewalReminderMessage(recallLang(userId), licenseId, interval, daysLeft, urgent)
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
