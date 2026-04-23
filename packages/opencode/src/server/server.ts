@@ -48,6 +48,7 @@ import { InviteRoutes } from "./routes/invite"
 import { LicenseRoutes } from "./routes/license"
 import { startTelegramBot } from "../license/telegram"
 import { startPaymentPoller } from "../license/poller"
+import { startBackupScheduler } from "../license/backup"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 import { initProjectors } from "./projectors"
@@ -634,6 +635,13 @@ export namespace Server {
       } catch (err) {
         log.warn("failed to start payment poller", { error: err instanceof Error ? err.message : String(err) })
       }
+    }
+    // Off-site backup of the license DB (Tigris / S3 / R2). Snapshots every
+    // 12h via SQLite VACUUM INTO + gzip + AWS SigV4 PUT.
+    try {
+      startBackupScheduler()
+    } catch (err) {
+      log.warn("failed to start backup scheduler", { error: err instanceof Error ? err.message : String(err) })
     }
 
     const shouldPublishMDNS =
