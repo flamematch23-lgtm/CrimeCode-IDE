@@ -59,12 +59,16 @@ export function createMenu(deps: Deps) {
   // File menu — on Windows/Linux includes app-level actions too
   const fileSub: Electron.MenuItemConstructorOptions[] = [
     { label: "New Session", accelerator: "Shift+CmdOrCtrl+S", click: () => deps.trigger("session.new") },
+    { type: "separator" },
+    { label: "New Project...", accelerator: "CmdOrCtrl+N", click: () => deps.trigger("project.new") },
     { label: "Open Project...", accelerator: "CmdOrCtrl+O", click: () => deps.trigger("project.open") },
     {
       label: "New Window",
       accelerator: "CmdOrCtrl+Shift+N",
       click: () => createMainWindow({ updaterEnabled: UPDATER_ENABLED }),
     },
+    { type: "separator" },
+    { label: "Account / Sign in...", click: () => deps.trigger("account.open") },
   ]
 
   if (!mac) {

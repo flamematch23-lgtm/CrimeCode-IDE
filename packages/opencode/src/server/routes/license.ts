@@ -18,6 +18,19 @@ import {
 } from "../../license/store"
 import { backupOnce } from "../../license/backup"
 import { checkRateLimit } from "../../license/rate-limit"
+import {
+  listSessionsForCustomer,
+  pollAuth,
+  revokeSession,
+  startAuth,
+  syncDelete,
+  syncGet,
+  syncList,
+  syncPut,
+  touchSession,
+  verifySessionToken,
+  type SessionPayload,
+} from "../../license/auth"
 
 const ADMIN_HASH = (process.env.OPENCODE_ADMIN_PASSPHRASE_SHA256 ?? "").toLowerCase()
 
@@ -339,6 +352,121 @@ refreshAll()
 
 export const LicenseRoutes = lazy(() => {
   const app = new Hono()
+
+  // ────────────────────────────────────────────────────────────────────────
+  //  Public auth flow (Telegram-magic-link)
+  // ────────────────────────────────────────────────────────────────────────
+
+  // 1. Client calls POST /auth/start → receives a PIN + bot deep-link URL.
+  app.post("/auth/start", async (c) => {
+    const ip =
+      c.req.header("CF-Connecting-IP") ??
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
+      "unknown"
+    const rl = checkRateLimit("auth-start:" + ip)
+    if (!rl.ok) {
+      return c.json({ error: "rate_limited", retry_after: rl.retryAfterSeconds }, 429)
+    }
+    let body: { device_label?: string } = {}
+    try {
+      body = (await c.req.json()) ?? {}
+    } catch {
+      // body optional
+    }
+    const started = startAuth({ device_label: body.device_label?.slice(0, 80) ?? null })
+    return c.json(started)
+  })
+
+  // 2. Client polls GET /auth/poll/:pin → "pending" until claimed, then "ok"
+  //    with a session token (and the PIN row is consumed).
+  app.get("/auth/poll/:pin", (c) => {
+    const pin = c.req.param("pin").toUpperCase()
+    if (!/^[A-Z0-9]{4,32}$/.test(pin)) return c.json({ status: "unknown" }, 400)
+    return c.json(pollAuth(pin))
+  })
+
+  // 3. Authenticated endpoints: any client with a valid session token.
+  const sessionGuard = (c: Parameters<Parameters<typeof app.use>[1]>[0]): SessionPayload | null => {
+    const auth = c.req.header("Authorization") ?? ""
+    if (!auth.startsWith("Bearer ")) return null
+    const token = auth.slice(7)
+    const v = verifySessionToken(token)
+    if (!v.ok) return null
+    touchSession(v.payload.sid)
+    return v.payload
+  }
+
+  app.get("/auth/me", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    return c.json({
+      customer_id: sess.sub,
+      telegram_user_id: sess.tg,
+      session_id: sess.sid,
+      expires_at: sess.exp,
+      sessions: listSessionsForCustomer(sess.sub),
+    })
+  })
+
+  app.post("/auth/logout", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    revokeSession(sess.sid)
+    return c.json({ ok: true })
+  })
+
+  app.post("/auth/sessions/:sid/revoke", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const target = c.req.param("sid")
+    const isOwn = listSessionsForCustomer(sess.sub).some((s) => s.id === target)
+    if (!isOwn) return c.json({ error: "not_found" }, 404)
+    revokeSession(target)
+    return c.json({ ok: true })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  //  Sync (per-account key-value store, max 64KB per key)
+  // ────────────────────────────────────────────────────────────────────────
+
+  app.get("/sync/:key", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const entry = syncGet(sess.sub, c.req.param("key"))
+    if (!entry) return c.json({ error: "not_found" }, 404)
+    return c.json(entry)
+  })
+
+  app.get("/sync", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    return c.json({ entries: syncList(sess.sub) })
+  })
+
+  app.put("/sync/:key", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const key = c.req.param("key")
+    const body = (await c.req.json().catch(() => null)) as { value?: string } | null
+    if (!body || typeof body.value !== "string") return c.json({ error: "missing_value" }, 400)
+    try {
+      const entry = syncPut(sess.sub, key, body.value)
+      return c.json(entry)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.delete("/sync/:key", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    syncDelete(sess.sub, c.req.param("key"))
+    return c.json({ ok: true })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  //  Original license endpoints
+  // ────────────────────────────────────────────────────────────────────────
 
   // --- Public endpoint (no admin auth — used by Electron client) ---
   app.post("/validate", async (c) => {

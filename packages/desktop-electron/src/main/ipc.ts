@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process"
-import { statSync, writeFileSync } from "node:fs"
+import { mkdirSync, statSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { BrowserWindow, Menu, Notification, app, clipboard, desktopCapturer, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -19,6 +19,7 @@ import {
   VALID_INTERVALS,
 } from "./license"
 import type { ProInterval } from "./license"
+import { authService } from "./auth"
 // CHECKOUT_BASE_URL retained in constants for retrocompat; checkout now opens
 // a Telegram DM to one of the support contacts for crypto payments.
 
@@ -413,6 +414,58 @@ export function registerIpcHandlers(deps: Deps) {
       return licenseService.activateFromToken({ interval, token })
     },
   )
+
+  // ── Account / sign-in (Telegram magic-link via @CrimeCodeSub_bot) ──
+  ipcMain.handle("account-get", () => authService.get())
+
+  ipcMain.handle("account-start-signin", async () => {
+    return authService.startSignIn()
+  })
+
+  ipcMain.handle("account-poll-signin", async (_e, pin: string) => {
+    if (typeof pin !== "string" || pin.length === 0) throw new Error("Invalid PIN")
+    return authService.pollSignIn(pin)
+  })
+
+  ipcMain.handle("account-logout", () => authService.logout())
+
+  ipcMain.handle("account-sync-get", async (_e, key: string) => {
+    if (typeof key !== "string") throw new Error("Invalid sync key")
+    const r = await authService.fetch(`/sync/${encodeURIComponent(key)}`)
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`sync get failed: ${r.status}`)
+    return await r.json()
+  })
+
+  ipcMain.handle("account-sync-put", async (_e, key: string, value: string) => {
+    if (typeof key !== "string" || typeof value !== "string") throw new Error("Invalid sync args")
+    const r = await authService.fetch(`/sync/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    })
+    if (!r.ok) throw new Error(`sync put failed: ${r.status}`)
+    return await r.json()
+  })
+
+  // ── Project: create new (folder) ──
+  ipcMain.handle("project-create", async (event: IpcMainInvokeEvent) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) throw new Error("No window")
+    const result = await dialog.showSaveDialog(win, {
+      title: "New Project",
+      buttonLabel: "Create",
+      properties: ["showOverwriteConfirmation", "createDirectory", "showHiddenFiles"],
+      defaultPath: app.getPath("documents"),
+    })
+    if (result.canceled || !result.filePath) return null
+    try {
+      mkdirSync(result.filePath, { recursive: true })
+    } catch (err) {
+      throw new Error(`Could not create directory: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    return { directory: result.filePath }
+  })
 
   ipcMain.handle("admin-status", () => ({ unlocked: adminSession.isUnlocked() }))
 

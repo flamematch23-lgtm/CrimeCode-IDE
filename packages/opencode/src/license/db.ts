@@ -82,6 +82,43 @@ CREATE TABLE IF NOT EXISTS payment_offers (
 CREATE INDEX IF NOT EXISTS payment_offers_order_idx ON payment_offers(order_id);
 CREATE INDEX IF NOT EXISTS payment_offers_open_idx ON payment_offers(currency, wallet_address)
   WHERE matched_tx_hash IS NULL;
+
+-- Authentication: short-lived PINs bridge the desktop / web client to a
+-- Telegram identity. Client posts /auth/start → gets a PIN → user clicks
+-- t.me/CrimeCodeSub_bot?start=auth_<PIN> → bot links the PIN to the
+-- customer → client polls /auth/poll/<PIN> → receives a session token.
+CREATE TABLE IF NOT EXISTS auth_pins (
+  pin           TEXT PRIMARY KEY,
+  customer_id   TEXT,
+  created_at    INTEGER NOT NULL,
+  expires_at    INTEGER NOT NULL,
+  claimed_at    INTEGER,
+  device_label  TEXT,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id            TEXT PRIMARY KEY,
+  customer_id   TEXT NOT NULL,
+  device_label  TEXT,
+  created_at    INTEGER NOT NULL,
+  last_seen_at  INTEGER NOT NULL,
+  revoked_at    INTEGER,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+CREATE INDEX IF NOT EXISTS auth_sessions_customer_idx ON auth_sessions(customer_id);
+
+-- Cross-device sync of small JSON blobs (preferences, recent projects, ...).
+-- The client owns the schema of `value`; the server is just a key-value store
+-- with a per-customer namespace.
+CREATE TABLE IF NOT EXISTS sync_kv (
+  customer_id   TEXT NOT NULL,
+  key           TEXT NOT NULL,
+  value         TEXT NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (customer_id, key),
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
 `
 
 function resolvePath(): string {

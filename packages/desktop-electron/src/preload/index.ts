@@ -86,6 +86,17 @@ const api: ElectronAPI = {
     extendTrial: (days) => ipcRenderer.invoke("admin-extend-trial", days),
     reset: () => ipcRenderer.invoke("admin-reset"),
   },
+  account: {
+    get: () => ipcRenderer.invoke("account-get"),
+    startSignIn: () => ipcRenderer.invoke("account-start-signin"),
+    pollSignIn: (pin: string) => ipcRenderer.invoke("account-poll-signin", pin),
+    logout: () => ipcRenderer.invoke("account-logout"),
+    syncGet: (key: string) => ipcRenderer.invoke("account-sync-get", key),
+    syncPut: (key: string, value: string) => ipcRenderer.invoke("account-sync-put", key, value),
+  },
+  project: {
+    create: () => ipcRenderer.invoke("project-create"),
+  },
 
   // Enhancement 3: Native context menus
   showContextMenu: (items: ContextMenuItem[]) => ipcRenderer.invoke("show-context-menu", items),

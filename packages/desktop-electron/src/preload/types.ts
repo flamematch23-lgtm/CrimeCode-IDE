@@ -120,6 +120,32 @@ export type ElectronAPI = {
     readonly extendTrial: (days: number) => Promise<LicenseSnapshot>
     readonly reset: () => Promise<LicenseSnapshot>
   }
+  account: {
+    readonly get: () => Promise<{
+      token: string
+      customer_id: string
+      telegram_user_id: number | null
+      expires_at: number
+      signed_in_at: number
+    } | null>
+    readonly startSignIn: () => Promise<{ pin: string; expires_at: number; bot_url: string }>
+    readonly pollSignIn: (pin: string) => Promise<
+      | {
+          token: string
+          customer_id: string
+          telegram_user_id: number | null
+          expires_at: number
+          signed_in_at: number
+        }
+      | null
+    >
+    readonly logout: () => Promise<void>
+    readonly syncGet: (key: string) => Promise<{ key: string; value: string; updated_at: number } | null>
+    readonly syncPut: (key: string, value: string) => Promise<{ key: string; value: string; updated_at: number }>
+  }
+  project: {
+    readonly create: () => Promise<{ directory: string } | null>
+  }
 
   // Enhancement 3: Native context menus
   showContextMenu: (items: ContextMenuItem[]) => Promise<string | null>

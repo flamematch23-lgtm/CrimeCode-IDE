@@ -1,5 +1,6 @@
 import { Log } from "../util/log"
 import { captureException } from "./sentry"
+import { claimPinForCustomer } from "./auth"
 import {
   attachPaymentOffer,
   cancelOrder,
@@ -248,7 +249,9 @@ async function handle(update: TgUpdate) {
   switch (cmd) {
     case "start":
     case "help": {
-      // Telegram deep-link payload: /start order_<interval>
+      // Telegram deep-link payload variants:
+      //   /start order_<interval>   — create a paid order
+      //   /start auth_<PIN>          — link the desktop/web client session
       const deepLinkInterval = args.match(/^order_(monthly|annual|lifetime)\b/)?.[1]
       if (deepLinkInterval && VALID_INTERVALS.has(deepLinkInterval)) {
         const o = createOrder({
@@ -257,6 +260,26 @@ async function handle(update: TgUpdate) {
           interval: deepLinkInterval as "monthly" | "annual" | "lifetime",
         })
         await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD), "Markdown")
+        return
+      }
+      const authPin = args.match(/^auth_([A-Z0-9]{4,32})\b/i)?.[1]
+      if (authPin) {
+        const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+        const r = claimPinForCustomer(authPin.toUpperCase(), customer.id)
+        if (r.ok) {
+          await send(
+            chatId,
+            `✅ *Signed in*\n\nYou are now logged in${username ? ` as *${username}*` : ""} on the device that started this PIN. You can close this chat.`,
+            "Markdown",
+          )
+        } else {
+          const reasons: Record<string, string> = {
+            unknown_pin: "PIN not found — it may have already been used.",
+            expired: "PIN expired — go back to the app and request a new one.",
+            already_claimed: "PIN already claimed.",
+          }
+          await send(chatId, `⚠️ Sign-in failed: ${reasons[r.reason] ?? r.reason}`)
+        }
         return
       }
       await send(chatId, HELP_USER + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
