@@ -431,7 +431,7 @@ export function registerIpcHandlers(deps: Deps) {
 
   ipcMain.handle("account-sync-get", async (_e, key: string) => {
     if (typeof key !== "string") throw new Error("Invalid sync key")
-    const r = await authService.fetch(`/sync/${encodeURIComponent(key)}`)
+    const r = await authService.fetch(`/license/sync/${encodeURIComponent(key)}`)
     if (r.status === 404) return null
     if (!r.ok) throw new Error(`sync get failed: ${r.status}`)
     return await r.json()
@@ -439,7 +439,7 @@ export function registerIpcHandlers(deps: Deps) {
 
   ipcMain.handle("account-sync-put", async (_e, key: string, value: string) => {
     if (typeof key !== "string" || typeof value !== "string") throw new Error("Invalid sync args")
-    const r = await authService.fetch(`/sync/${encodeURIComponent(key)}`, {
+    const r = await authService.fetch(`/license/sync/${encodeURIComponent(key)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ value }),

@@ -69,7 +69,7 @@ export class AuthService {
   }
 
   async startSignIn(): Promise<StartResponse> {
-    const res = await fetch(`${API_BASE_URL}/auth/start`, {
+    const res = await fetch(`${API_BASE_URL}/license/auth/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_label: deviceLabel() }),
@@ -83,7 +83,7 @@ export class AuthService {
 
   /** Single poll. Returns null if still pending. */
   async pollSignIn(pin: string): Promise<SessionState | null> {
-    const res = await fetch(`${API_BASE_URL}/auth/poll/${encodeURIComponent(pin)}`)
+    const res = await fetch(`${API_BASE_URL}/license/auth/poll/${encodeURIComponent(pin)}`)
     if (!res.ok) {
       const txt = await res.text().catch(() => "")
       throw new Error(`auth/poll failed: ${res.status} ${txt.slice(0, 200)}`)
@@ -110,7 +110,7 @@ export class AuthService {
     const s = readSession()
     if (s) {
       try {
-        await fetch(`${API_BASE_URL}/auth/logout`, {
+        await fetch(`${API_BASE_URL}/license/auth/logout`, {
           method: "POST",
           headers: { Authorization: `Bearer ${s.token}` },
         })
