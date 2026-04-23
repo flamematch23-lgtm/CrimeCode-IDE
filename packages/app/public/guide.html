@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Guide — CrimeCode</title>
+<meta name="description" content="CrimeCode usage guide — getting started, keyboard shortcuts, team collaboration, offline mode, troubleshooting." />
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="/_shared.css" />
+<style>
+  .toc {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 0 0 40px;
+  }
+  .toc h3 {
+    margin: 0 0 12px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--orange);
+  }
+  .toc ol { list-style: none; padding: 0; margin: 0; }
+  .toc li { margin-bottom: 6px; font-size: 14px; }
+  .toc a { color: var(--text); }
+  .toc a:hover { color: var(--orange); }
+
+  .tip {
+    background: rgba(255,87,34,0.05);
+    border-left: 3px solid var(--orange);
+    border-radius: 4px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  .tip strong { color: var(--orange); }
+  .tip p { margin: 0; }
+
+  .note {
+    background: rgba(74,222,128,0.05);
+    border-left: 3px solid #4ade80;
+    border-radius: 4px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  .note strong { color: #4ade80; }
+
+  .warn {
+    background: rgba(251,191,36,0.05);
+    border-left: 3px solid #fbbf24;
+    border-radius: 4px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  .warn strong { color: #fbbf24; }
+
+  .kbd {
+    display: inline-block;
+    padding: 1px 8px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #f5f5f5;
+    white-space: nowrap;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05);
+  }
+
+  table.kbd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 16px 0 24px;
+  }
+  table.kbd-table th, table.kbd-table td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.kbd-table th {
+    color: var(--orange);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  table.kbd-table td:first-child { white-space: nowrap; }
+
+  section.chapter { scroll-margin-top: 80px; }
+
+  .steps { counter-reset: step; padding-left: 0; list-style: none; margin: 16px 0; }
+  .steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 10px 0 10px 44px;
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 10px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(255,87,34,0.15);
+    border: 1px solid rgba(255,87,34,0.4);
+    color: var(--orange);
+    font-weight: 700; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="/home" aria-label="CrimeCode home">
+      <span class="logo">CC</span>
+      <span class="name">CRIMECODE</span>
+    </a>
+    <nav>
+      <a href="/home">Home</a>
+      <a href="/guide" aria-current="page">Guide</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/faq">FAQ</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+    <a class="cta" href="/">Open app</a>
+  </div>
+</header>
+
+<main class="page">
+  <h1>Guide &amp; tips</h1>
+  <p class="lead">
+    A practical tour of CrimeCode: install it, sign in, pay, build a team, learn the
+    keyboard shortcuts, and get the most out of the live collaboration features.
+    Keep this page open in a tab while you set things up — most chapters are
+    three-minute reads.
+  </p>
+
+  <nav class="toc" aria-label="Table of contents">
+    <h3>On this page</h3>
+    <ol>
+      <li>1.&nbsp; <a href="#install">Install &amp; first launch</a></li>
+      <li>2.&nbsp; <a href="#trial">Start the 2-day free trial</a></li>
+      <li>3.&nbsp; <a href="#payment">Pay for a plan (crypto)</a></li>
+      <li>4.&nbsp; <a href="#signin">Sign in with Telegram</a></li>
+      <li>5.&nbsp; <a href="#projects">Open and create projects</a></li>
+      <li>6.&nbsp; <a href="#terminal">Integrated terminal</a></li>
+      <li>7.&nbsp; <a href="#ai">AI assistants (Copilot &amp; more)</a></li>
+      <li>8.&nbsp; <a href="#teams">Teams: create, invite, roles, ownership transfer</a></li>
+      <li>9.&nbsp; <a href="#collab">Live collaboration &amp; cursors</a></li>
+      <li>10. <a href="#sync">Cloud sync (settings &amp; recent projects)</a></li>
+      <li>11. <a href="#offline">Offline mode &amp; the 7-day cache</a></li>
+      <li>12. <a href="#keyboard">Keyboard shortcuts</a></li>
+      <li>13. <a href="#privacy-tips">Privacy hardening tips</a></li>
+      <li>14. <a href="#troubleshooting">Troubleshooting</a></li>
+    </ol>
+  </nav>
+
+  <section id="install" class="chapter">
+    <h2>1. Install &amp; first launch</h2>
+    <p>CrimeCode ships as a native desktop app on every major OS, plus a web build at <a href="/">crimecode.cc</a>. Pick whichever path matches where you work.</p>
+
+    <h3>Windows</h3>
+    <ol class="steps">
+      <li>Download <code>opencode-electron-win-x64.exe</code> from the <a href="https://github.com/flamematch23-lgtm/CrimeCode-IDE/releases/latest">latest GitHub release</a>.</li>
+      <li>Run it. Windows SmartScreen will say "Unknown Publisher" — click <em>More info</em> → <em>Run anyway</em>. (We're in the process of getting a commercial code-signing certificate.)</li>
+      <li>The installer creates a Start Menu shortcut and auto-launches.</li>
+    </ol>
+
+    <h3>macOS</h3>
+    <ol class="steps">
+      <li>Download <code>opencode-electron-mac-arm64.dmg</code> (Apple Silicon) from the latest release.</li>
+      <li>Open the DMG and drag CrimeCode into your Applications folder.</li>
+      <li>First run: right-click → <em>Open</em>, then confirm (Gatekeeper blocks non-notarized apps unless you explicitly allow them).</li>
+    </ol>
+
+    <h3>Linux</h3>
+    <p>Three formats are published per release:</p>
+    <ul>
+      <li><strong>.AppImage</strong> — <code>chmod +x</code> then double-click. No install needed.</li>
+      <li><strong>.deb</strong> — Ubuntu / Debian / Mint: <code>sudo dpkg -i opencode-electron-linux-amd64.deb</code>.</li>
+      <li><strong>.rpm</strong> — Fedora / RHEL / openSUSE.</li>
+    </ul>
+
+    <h3>Web</h3>
+    <p>No install. Just open <a href="/">crimecode.cc</a>. The web build has ~95% feature parity with desktop — the only gap is the native terminal sidecar, which means longer-running shell commands live on whichever server you connect to.</p>
+
+    <div class="tip">
+      <strong>Tip:</strong> <p>Desktop and web share the same account. Sign in on one, sync works across both — your recent projects and preferences follow you.</p>
+    </div>
+  </section>
+
+  <section id="trial" class="chapter">
+    <h2>2. Start the 2-day free trial</h2>
+    <p>On first launch you'll see the <strong>Subscription gate</strong> — a full-screen page with three plan cards (Monthly, Annual, Lifetime) and a big <em>Start 2-day free trial</em> button.</p>
+    <ol class="steps">
+      <li>Click <em>Start 2-day free trial</em>.</li>
+      <li>The gate disappears and you're in the editor. No sign-up, no card, no email.</li>
+      <li>The trial lasts 48 hours per device. If you re-install the app or switch devices, the trial does NOT reset — we track the trial-consumed flag in the local license store.</li>
+    </ol>
+
+    <div class="note">
+      <strong>Note:</strong> <p>A single trial per person, by design. If something blocks you from using the trial productively (e.g. a bug) message <a href="https://t.me/OpCrime1312">@OpCrime1312</a> and we'll extend it.</p>
+    </div>
+  </section>
+
+  <section id="payment" class="chapter">
+    <h2>3. Pay for a plan</h2>
+    <p>Three tiers — <strong>Monthly $20</strong>, <strong>Annual $200</strong>, <strong>Lifetime $500</strong>. All are crypto-only. BTC, LTC, and ETH are supported natively, other chains (Monero, USDT) are available by DM.</p>
+
+    <ol class="steps">
+      <li>On the Subscription gate, click <strong>Pay via Telegram bot</strong> under the plan you want.</li>
+      <li>Telegram opens at <code>@CrimeCodeSub_bot</code> with the order pre-filled.</li>
+      <li>The bot replies with three wallet addresses and the <em>exact</em> amount to send on each chain (the last digits are a unique discriminator so we can match your payment to your order without you quoting anything).</li>
+      <li>Send the <em>exact</em> amount to ANY one of those addresses from any non-custodial wallet.</li>
+      <li>Wait 1–15 minutes. The bot's on-chain poller detects your transaction and DMs you the license token (format: <code>CC2-...</code>).</li>
+      <li>Back in the app, click <em>I have a license token</em> on the Subscription gate, paste the token, click <em>Activate</em>. Done.</li>
+    </ol>
+
+    <div class="warn">
+      <strong>Warning:</strong> <p>Send the exact amount the bot gives you. If you round up or down, the poller won't match and a human (us) has to reconcile manually. That delay can be hours, not minutes.</p>
+    </div>
+
+    <div class="tip">
+      <strong>Tip:</strong> <p>The order expires 60 minutes after creation. If you miss the window, just run <code>/order &lt;plan&gt;</code> again in the bot and you'll get fresh addresses at the current exchange rate.</p>
+    </div>
+  </section>
+
+  <section id="signin" class="chapter">
+    <h2>4. Sign in with Telegram</h2>
+    <p>Sign-in is optional — the app works without it — but it unlocks cloud sync, teams, and cross-device license portability. No email, no password.</p>
+    <ol class="steps">
+      <li>Menu → <em>File</em> → <em>Account / Sign in…</em> (web: click the account icon in the workspace dock).</li>
+      <li>Click <strong>Sign in via Telegram</strong>.</li>
+      <li>An 8-character PIN appears (e.g. <span class="kbd">ABCDEF12</span>). The app also opens the bot at <code>t.me/CrimeCodeSub_bot?start=auth_&lt;PIN&gt;</code>.</li>
+      <li>On Telegram, tap <em>Start</em>. The bot replies "Signed in as @handle. You can close this chat."</li>
+      <li>The app auto-detects within 2–4 seconds and shows "✓ Signed in" with your customer ID.</li>
+    </ol>
+
+    <div class="note">
+      <strong>Security:</strong> <p>Every new sign-in triggers a Telegram DM to you saying "New device signed in to your CrimeCode account" with the device label and time. If it wasn't you, hit <em>Sign out</em> immediately and tell <a href="https://t.me/OpCrime1312">@OpCrime1312</a>.</p>
+    </div>
+  </section>
+
+  <section id="projects" class="chapter">
+    <h2>5. Open and create projects</h2>
+    <p>A project in CrimeCode is just a directory. No <code>.crimecode</code> config file, no special format.</p>
+
+    <h3>Open an existing project</h3>
+    <p>Menu → <em>File</em> → <em>Open Project…</em> (<span class="kbd">Ctrl+O</span> / <span class="kbd">Cmd+O</span>), pick a folder. The project becomes your default workspace for sessions, terminals, and AI chats.</p>
+
+    <h3>Create a new project</h3>
+    <p>Menu → <em>File</em> → <em>New Project…</em> (<span class="kbd">Ctrl+N</span> / <span class="kbd">Cmd+N</span>), pick where to create it, give it a name. The app creates the directory and opens it as a project.</p>
+
+    <div class="tip">
+      <strong>Tip:</strong> <p>If you're signed in, every new project is recorded in your cloud-synced recents list — switch devices and it shows up in <em>Open Project</em>'s "Recent projects" shortcut.</p>
+    </div>
+  </section>
+
+  <section id="terminal" class="chapter">
+    <h2>6. Integrated terminal</h2>
+    <p>Toggle the terminal panel with <span class="kbd">Ctrl+`</span>. Each terminal runs inside a pseudo-terminal (PTY) managed by the sidecar — so it survives an app restart as long as the backend keeps running.</p>
+    <ul>
+      <li>New terminal: <span class="kbd">Shift+Ctrl+` </span> or the <code>+</code> button in the terminal panel tabs.</li>
+      <li>Next / previous terminal: <span class="kbd">Alt+↑</span> / <span class="kbd">Alt+↓</span> on the terminal panel.</li>
+      <li>Kill terminal: click the × on the tab. The PTY is torn down and the tab removed.</li>
+    </ul>
+
+    <div class="note">
+      <strong>Offline tolerance:</strong> <p>If the backend redeploys while you have terminals open, the tabs auto-reconnect — new PTYs are spawned to replace the dead ones and your command history for the session is preserved in the scrollback (though not the live process state).</p>
+    </div>
+  </section>
+
+  <section id="ai" class="chapter">
+    <h2>7. AI assistants</h2>
+    <p>CrimeCode ships with multi-provider AI support out of the box — you connect whichever accounts you already have.</p>
+
+    <h3>Supported providers</h3>
+    <ul>
+      <li><strong>Anthropic</strong> (Claude) — API key or OAuth via <a href="https://console.anthropic.com">console.anthropic.com</a>.</li>
+      <li><strong>OpenAI</strong> (GPT-5, GPT-4 family).</li>
+      <li><strong>Google Gemini</strong>.</li>
+      <li><strong>GitHub Copilot</strong> — authorize with your GitHub.com or Enterprise account.</li>
+      <li><strong>Local</strong> models via Ollama, LM Studio, any OpenAI-compatible endpoint.</li>
+      <li>Full list: Cerebras, Cohere, DeepInfra, Groq, Mistral, Amazon Bedrock, Vercel AI Gateway, and more.</li>
+    </ul>
+
+    <h3>Add a provider</h3>
+    <ol class="steps">
+      <li>Settings → <em>AI providers</em>.</li>
+      <li>Pick one, click <em>Connect</em>. For OAuth providers a browser-style flow opens (or a device code if the provider doesn't support redirect).</li>
+      <li>Select a default model and you're done.</li>
+    </ol>
+
+    <div class="tip">
+      <strong>Tip:</strong> <p>AI calls go <em>directly</em> from your machine (desktop) or browser (web) to the provider. CrimeCode never proxies chat content. The sidecar at <code>api.crimecode.cc</code> handles licensing and teams — nothing else.</p>
+    </div>
+  </section>
+
+  <section id="teams" class="chapter">
+    <h2>8. Teams — create, invite, roles, ownership transfer</h2>
+    <p>Teams are shared workspaces with role-based access. Annual and Lifetime plans include up to 20 members per team.</p>
+
+    <h3>Create a team</h3>
+    <ol class="steps">
+      <li>Sign in (teams require a real account).</li>
+      <li>Workspace dock (bottom-left) → click the workspace switcher → <em>⊕ Create Team</em>.</li>
+      <li>Type a team name, click <em>Create Team</em>. You become the owner automatically.</li>
+    </ol>
+
+    <h3>Invite members</h3>
+    <p>Open the team in the switcher → click the ⚙ gear → <em>Add Team Member</em>. Two identifier formats:</p>
+    <ul>
+      <li><code>@telegram-handle</code> — invite via Telegram. If the user isn't registered yet, the invite is saved and auto-accepted the moment they sign in.</li>
+      <li><code>email@example.com</code> — pending invite that matches on sign-in if the user has linked that email.</li>
+    </ul>
+
+    <h3>Roles</h3>
+    <table class="kbd-table">
+      <thead><tr><th>Role</th><th>Can do</th></tr></thead>
+      <tbody>
+        <tr><td>Owner</td><td>Everything: add/remove members, rename team, delete team, change roles, transfer ownership.</td></tr>
+        <tr><td>Admin</td><td>Add/remove members, cancel invites. Cannot delete team or change other admins' roles.</td></tr>
+        <tr><td>Member</td><td>Read-only access to the team's workspace metadata and live sessions.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Transfer ownership</h3>
+    <p>Open the team's Manage dialog → next to any non-owner member click <span class="kbd">👑</span>. A confirmation lists what you lose (delete team, further transfers, changing admins). Once confirmed, you're demoted to admin and the new owner has full control.</p>
+
+    <div class="warn">
+      <strong>Warning:</strong> <p>Ownership transfer is reversible only by the new owner transferring back. Don't hit the crown unless you really mean it.</p>
+    </div>
+  </section>
+
+  <section id="collab" class="chapter">
+    <h2>9. Live collaboration &amp; cursors</h2>
+    <p>When you switch to a team workspace, a green "N live" badge appears in the workspace dock whenever another member is active. The collaboration layer is powered by Server-Sent Events — changes propagate in under a second.</p>
+
+    <h3>Publish your session</h3>
+    <p>Open a project, start working. The team workspace can "advertise" your session (title + state JSON) to other members. When you do, your cursor is visible to everyone else on the team who's viewing the same workspace.</p>
+
+    <h3>Watch someone else</h3>
+    <p>With the team workspace active, other members' cursors appear as coloured arrows with their usernames. Each user gets a deterministic hue so you recognise them instantly. Cursors fade out after 4 seconds of silence.</p>
+
+    <div class="note">
+      <strong>Performance:</strong> <p>Cursor publishing is rate-limited client-side to ~10 Hz, and only fires while you have an active live session. It's designed to be invisible — you should never see lag or notice it in dev tools.</p>
+    </div>
+  </section>
+
+  <section id="sync" class="chapter">
+    <h2>10. Cloud sync</h2>
+    <p>Once signed in, two snapshots are synced to our cloud key-value store:</p>
+    <ul>
+      <li><code>client.settings</code> — your full settings.v3 blob (theme, editor prefs, AI defaults).</li>
+      <li><code>client.recent-projects</code> — deduped list of your last 30 opened projects.</li>
+    </ul>
+
+    <h3>Manual backup / restore</h3>
+    <p>Account dialog → <em>Cloud sync</em> section:</p>
+    <ul>
+      <li><strong>📤 Backup to cloud</strong> — push both snapshots immediately.</li>
+      <li><strong>📥 Restore from cloud</strong> — pull down and merge; settings apply on next restart.</li>
+      <li><em>Last synced: N minutes ago</em> shown next to the buttons.</li>
+    </ul>
+
+    <div class="tip">
+      <strong>Tip:</strong> <p>Sign-in automatically triggers a pull so a freshly installed app lands on your existing setup instead of defaults. Creating a new project auto-schedules a debounced push after 5 seconds.</p>
+    </div>
+  </section>
+
+  <section id="offline" class="chapter">
+    <h2>11. Offline mode &amp; the 7-day cache</h2>
+    <p>CrimeCode is designed to work offline. The license is cached locally for 7 days after the last successful online validation:</p>
+    <ul>
+      <li>Activate a token online → license stored locally with expiry timestamp.</li>
+      <li>Background check every 7 days (or on app start if last check &gt; 7 days ago).</li>
+      <li>If the server says "revoked" or "expired", local copy is updated.</li>
+      <li>Network errors during background check leave the cached state alone — you stay productive.</li>
+    </ul>
+
+    <div class="warn">
+      <strong>Limits:</strong> <p>After 7 days fully offline, you must reconnect once to refresh the cache. AI calls and team features obviously need internet on each use.</p>
+    </div>
+  </section>
+
+  <section id="keyboard" class="chapter">
+    <h2>12. Keyboard shortcuts</h2>
+    <p>The most useful shortcuts across the app. Swap <span class="kbd">Ctrl</span> for <span class="kbd">Cmd</span> on macOS.</p>
+
+    <table class="kbd-table">
+      <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
+      <tbody>
+        <tr><td>New session</td><td><span class="kbd">Shift</span> + <span class="kbd">Ctrl</span> + <span class="kbd">S</span></td></tr>
+        <tr><td>New project…</td><td><span class="kbd">Ctrl</span> + <span class="kbd">N</span></td></tr>
+        <tr><td>Open project…</td><td><span class="kbd">Ctrl</span> + <span class="kbd">O</span></td></tr>
+        <tr><td>New window</td><td><span class="kbd">Ctrl</span> + <span class="kbd">Shift</span> + <span class="kbd">N</span></td></tr>
+        <tr><td>Toggle sidebar</td><td><span class="kbd">Ctrl</span> + <span class="kbd">B</span></td></tr>
+        <tr><td>Toggle terminal panel</td><td><span class="kbd">Ctrl</span> + <span class="kbd">`</span></td></tr>
+        <tr><td>Back / forward navigation</td><td><span class="kbd">Alt</span> + <span class="kbd">←</span> / <span class="kbd">→</span></td></tr>
+        <tr><td>Previous / next session</td><td><span class="kbd">Alt</span> + <span class="kbd">↑</span> / <span class="kbd">↓</span></td></tr>
+        <tr><td>Command palette / search</td><td><span class="kbd">Ctrl</span> + <span class="kbd">K</span></td></tr>
+        <tr><td>Developer tools</td><td><span class="kbd">Ctrl</span> + <span class="kbd">Shift</span> + <span class="kbd">I</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="privacy-tips" class="chapter">
+    <h2>13. Privacy hardening tips</h2>
+    <ul>
+      <li><strong>Use a Telegram account you don't tie to real-name identity.</strong> CrimeCode only knows your Telegram handle + user ID — if those are anonymous, so are you to us.</li>
+      <li><strong>Pay from a non-custodial wallet.</strong> Exchange withdrawals are traceable to KYC'd identities. Send from a wallet where the chain source isn't linked back to you.</li>
+      <li><strong>Review the admin session list periodically.</strong> Account → Sessions. Revoke anything you don't recognise.</li>
+      <li><strong>Turn off cloud sync if you prefer.</strong> Sync is opt-in through the Account dialog — if you never click "Backup to cloud" and never sign in, we literally cannot store anything for you.</li>
+      <li><strong>Disable error telemetry.</strong> Set <code>SENTRY_DSN=</code> empty in your local desktop env vars (create a <code>.env</code> in the opencode config dir). The default build ships Sentry enabled but it can be turned off.</li>
+    </ul>
+  </section>
+
+  <section id="troubleshooting" class="chapter">
+    <h2>14. Troubleshooting</h2>
+
+    <h3>Subscription gate won't go away after activation</h3>
+    <p>Usually a token typo — re-paste the full token (starts with <code>CC2-</code>) making sure there are no trailing spaces. If the server says "unknown", the token wasn't issued by our instance (double-check you copied from the right bot).</p>
+
+    <h3>"Unknown Publisher" / "Gatekeeper blocked"</h3>
+    <p>Expected — we haven't paid for a commercial code-signing certificate yet. Windows: <em>More info</em> → <em>Run anyway</em>. macOS: right-click → <em>Open</em> → confirm.</p>
+
+    <h3>Payment sent but no token arrived</h3>
+    <p>Check the transaction has ≥1 confirmation (BTC/LTC) or ≥6 confirmations (ETH) on a block explorer. If yes but still no bot message: DM <a href="https://t.me/OpCrime1312">@OpCrime1312</a> with your order ID + tx hash.</p>
+
+    <h3>Terminal shows "404 Not Found" repeatedly</h3>
+    <p>The server redeployed and forgot your in-memory PTY state. The app self-heals by cloning each dead terminal into a fresh one — just wait a few seconds and the panels come back. Your scrollback is preserved locally; the live process is gone (same as if you closed the terminal).</p>
+
+    <h3>Web app says "Failed to connect"</h3>
+    <p>Our backend might be mid-deploy (usually resolves in 60–90 seconds). If it persists, check <a href="https://fly.io/apps/crimecode-api">status</a> or ping <a href="https://t.me/OpCrime1312">@OpCrime1312</a>. For self-hosted users, verify your server URL is correct in the Self-hosted tab of the AuthGate.</p>
+
+    <h3>Desktop auto-update isn't working</h3>
+    <p>Force-check: Menu → Help → <em>Check for updates…</em>. If nothing happens, uninstall and re-download from <a href="https://github.com/flamematch23-lgtm/CrimeCode-IDE/releases/latest">GitHub releases</a> — auto-update requires the installed version to be &gt; 2.0.0.</p>
+
+    <h3>Still stuck?</h3>
+    <p>Telegram: <a href="https://t.me/OpCrime1312">@OpCrime1312</a> or <a href="https://t.me/JollyFraud">@JollyFraud</a>. Include your order ID (if any), operating system, and a screenshot of the error.</p>
+  </section>
+
+  <div class="big-cta" style="background:rgba(255,87,34,0.06);border:1px solid rgba(255,87,34,0.25);border-radius:16px;padding:32px;text-align:center;margin-top:48px">
+    <h2 style="margin:0 0 12px;color:#fff">Did we miss something?</h2>
+    <p style="margin:0 0 20px;color:var(--text-dim)">The FAQ covers sales / legal / refunds. This page covers usage. If your question is "how do I …", send us a DM and we'll either fix the app, fix this guide, or both.</p>
+    <div class="actions" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a class="cta-primary" href="https://t.me/OpCrime1312" style="background:linear-gradient(135deg,var(--orange),var(--orange-dark));color:#fff;padding:14px 28px;border-radius:10px;font-weight:700;font-size:15px;min-height:48px;display:inline-flex;align-items:center">💬 Message support</a>
+      <a class="cta-secondary" href="/faq" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:14px 28px;border-radius:10px;font-weight:600;font-size:15px;min-height:48px;display:inline-flex;align-items:center">Read the FAQ</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="links">
+    <a href="/home">Home</a>
+    <a href="/guide">Guide</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/faq">FAQ</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="https://t.me/CrimeCodeSub_bot">Telegram bot</a>
+    <a href="https://github.com/flamematch23-lgtm/CrimeCode-IDE">GitHub</a>
+  </div>
+  <p>© 2026 CrimeCode. Built for security researchers.</p>
+</footer>
+</body>
+</html>

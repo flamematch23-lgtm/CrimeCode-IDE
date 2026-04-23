@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CrimeCode — The IDE for fraud researchers and security pros</title>
+<meta name="description" content="CrimeCode is a desktop + web IDE built for fraud researchers and security pros. Anonymous Telegram sign-in, crypto-only payments, team workspaces with live cursors. Download Windows, macOS, Linux, or use in browser." />
+<meta property="og:title" content="CrimeCode — Built for fraud researchers." />
+<meta property="og:description" content="A privacy-first IDE with auto-payment, teams, live collaboration. No email, no cards." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://crimecode.cc/home" />
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="/_shared.css" />
+<style>
+  /* Extras for the landing page only */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 18px;
+    margin: 40px 0;
+  }
+  .feature {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 26px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .feature:hover { border-color: rgba(255,87,34,0.4); transform: translateY(-3px); }
+  .feature .icon {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: #07070a; margin-bottom: 16px;
+  }
+  .feature h3 {
+    margin: 0 0 8px 0; font-size: 18px; color: #fff;
+    letter-spacing: -0.01em; text-transform: none;
+  }
+  .feature p { margin: 0; color: var(--text-dim); font-size: 14px; line-height: 1.6; }
+
+  .platforms {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+    margin: 32px 0 48px;
+  }
+  .platform {
+    position: relative;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    overflow: hidden;
+  }
+  .platform .badge {
+    position: absolute; top: 12px; right: 12px;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--orange);
+    background: rgba(255,87,34,0.15); padding: 3px 8px; border-radius: 999px;
+    border: 1px solid rgba(255,87,34,0.35);
+  }
+  .platform h3 {
+    margin: 0 0 8px 0; font-size: 20px; color: #fff;
+    display: flex; align-items: center; gap: 10px; text-transform: none; letter-spacing: 0;
+  }
+  .platform h3 .dot { font-size: 26px; line-height: 1; }
+  .platform p { color: var(--text-dim); font-size: 14px; margin: 0 0 12px; line-height: 1.55; }
+  .platform ul { padding-left: 20px; color: var(--text-dim); font-size: 13px; margin: 0 0 14px; }
+  .platform li { margin-bottom: 4px; }
+  .platform .cta {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: #fff; padding: 9px 18px; border-radius: 8px;
+    font-weight: 700; font-size: 13px;
+    min-height: 44px;
+    display: inline-flex; align-items: center;
+    box-shadow: 0 4px 14px rgba(255,87,34,0.3);
+  }
+  .platform .cta:hover { text-decoration: none; transform: translateY(-1px); }
+
+  .flow-steps {
+    counter-reset: step;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 24px 0 40px;
+  }
+  .step {
+    position: relative;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px 20px 56px;
+  }
+  .step::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute; left: 16px; top: 18px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: #07070a; font-weight: 800; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step h4 {
+    margin: 0 0 6px 0; font-size: 15px; color: #fff;
+    text-transform: none; letter-spacing: 0;
+  }
+  .step p { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+
+  .big-cta {
+    background: linear-gradient(135deg, rgba(255,87,34,0.08), rgba(255,87,34,0.02));
+    border: 1px solid rgba(255,87,34,0.3);
+    border-radius: 16px;
+    padding: 40px 32px;
+    text-align: center;
+    margin: 48px 0 0;
+  }
+  .big-cta h2 { margin: 0 0 12px; color: #fff; font-size: 28px; }
+  .big-cta p { margin: 0 0 24px; color: var(--text-dim); font-size: 15px; }
+  .big-cta .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+  .trust-bar {
+    display: flex; gap: 28px; justify-content: center; flex-wrap: wrap;
+    margin: 40px 0;
+    color: var(--text-faint); font-size: 12px;
+  }
+  .trust-bar span {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .trust-bar span::before { content: "✓"; color: #4ade80; font-weight: 800; }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="/home" aria-label="CrimeCode home">
+      <span class="logo">CC</span>
+      <span class="name">CRIMECODE</span>
+    </a>
+    <nav>
+      <a href="/home" aria-current="page">Home</a>
+      <a href="/guide">Guide</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/faq">FAQ</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+    <a class="cta" href="/">Open app</a>
+  </div>
+</header>
+
+<section class="hero">
+  <h1>The IDE for <span class="accent">fraud researchers</span> and security pros.</h1>
+  <p class="lead">
+    A privacy-first development environment that runs as a desktop app on
+    Windows, macOS, Linux, and in the browser. Anonymous Telegram sign-in,
+    crypto-only subscriptions, real-time team collaboration.
+    No email. No card data. No KYC.
+  </p>
+  <div class="actions">
+    <a class="cta-primary" href="/">⚡ Open the app</a>
+    <a class="cta-secondary" href="/pricing">See plans</a>
+  </div>
+  <div class="trust-bar">
+    <span>Crypto-only payments (BTC / LTC / ETH)</span>
+    <span>EU-hosted, GDPR compliant</span>
+    <span>Open-source backend</span>
+  </div>
+</section>
+
+<main class="page">
+  <h2 style="text-align:center">Built for a specific kind of work.</h2>
+  <p class="lead" style="text-align:center;margin:0 auto 24px">
+    Every feature exists because the team using it needed it on a real investigation.
+  </p>
+
+  <div class="features">
+    <div class="feature">
+      <div class="icon" aria-hidden="true">🔒</div>
+      <h3>Anonymous by design</h3>
+      <p>Sign in with a one-time PIN through <code>@CrimeCodeSub_bot</code>. We never see your email, real name, or device fingerprint. Your Telegram handle is the whole identity you expose to us.</p>
+    </div>
+    <div class="feature">
+      <div class="icon" aria-hidden="true">⚡</div>
+      <h3>Crypto-only, auto-confirmed</h3>
+      <p>Pay in BTC, LTC, or ETH to one of our wallets. The bot detects your payment on-chain within 1–15 minutes and ships your license token automatically — no human in the loop.</p>
+    </div>
+    <div class="feature">
+      <div class="icon" aria-hidden="true">👥</div>
+      <h3>Teams with live cursors</h3>
+      <p>Create a team, invite members by Telegram handle or email, switch to the team workspace and watch each other's cursors in real time while a session is active. Owner / admin / member roles.</p>
+    </div>
+    <div class="feature">
+      <div class="icon" aria-hidden="true">☁️</div>
+      <h3>Cross-device cloud sync</h3>
+      <p>Sign in on desktop, sign in on the web — your preferences, recent projects, and active license follow you. Everything cached locally for offline work up to 7 days.</p>
+    </div>
+    <div class="feature">
+      <div class="icon" aria-hidden="true">🧩</div>
+      <h3>Every editor feature you need</h3>
+      <p>Integrated terminal, AI assistants (incl. GitHub Copilot), file browser, session export, project management, WSL support on Windows, multiple themes. Built on top of a forked OpenCode with the features security research actually uses.</p>
+    </div>
+    <div class="feature">
+      <div class="icon" aria-hidden="true">🛡</div>
+      <h3>Battle-tested privacy</h3>
+      <p>Sentry receives error traces without your IP or user agent. Daily encrypted backups in EU. Two-factor rate limits (free 10/min, Pro 60/min). Device-level session revocation one click away.</p>
+    </div>
+  </div>
+
+  <h2 style="text-align:center;margin-top:40px">Pick the way you want to run it.</h2>
+  <div class="platforms">
+    <div class="platform">
+      <h3><span class="dot" aria-hidden="true">💻</span> Desktop app</h3>
+      <p>The full experience. Native binaries, auto-updates via <code>electron-updater</code>, local sidecar for instant terminal + file system access.</p>
+      <ul>
+        <li>Windows (.exe installer)</li>
+        <li>macOS (.dmg, arm64)</li>
+        <li>Linux (.AppImage, .deb, .rpm)</li>
+        <li>WSL support on Windows</li>
+      </ul>
+      <a class="cta" href="https://github.com/flamematch23-lgtm/CrimeCode-IDE/releases/latest">Download latest</a>
+    </div>
+    <div class="platform">
+      <span class="badge">Same UI</span>
+      <h3><span class="dot" aria-hidden="true">🌐</span> Web app</h3>
+      <p>No install, open anywhere. Sign in with Telegram, connect to a CrimeCode sidecar or any self-hosted OpenCode instance.</p>
+      <ul>
+        <li>Runs on Chromium, Firefox, Safari</li>
+        <li>Same teams + live cursors</li>
+        <li>Great for a second screen</li>
+      </ul>
+      <a class="cta" href="/">Open in browser</a>
+    </div>
+    <div class="platform">
+      <span class="badge">Developer</span>
+      <h3><span class="dot" aria-hidden="true">🔧</span> Self-hosted</h3>
+      <p>Bring your own server. Point the desktop or web app at any OpenCode API. Classic Basic Auth, no Telegram required.</p>
+      <ul>
+        <li>Single-binary deploy</li>
+        <li>Fly.io / Railway / your own box</li>
+        <li>Full control of your data</li>
+      </ul>
+      <a class="cta" href="https://github.com/flamematch23-lgtm/CrimeCode-IDE">GitHub repo</a>
+    </div>
+  </div>
+
+  <h2 style="text-align:center;margin-top:40px">How a new account gets going.</h2>
+  <p class="lead" style="text-align:center;margin:0 auto 20px">
+    From zero to a working Pro license in under 15 minutes — no support ticket needed.
+  </p>
+
+  <ol class="flow-steps" style="list-style:none;padding:0">
+    <li class="step">
+      <h4>Open CrimeCode</h4>
+      <p>Download the desktop binary or open <a href="/">crimecode.cc</a> in a browser. On first launch you see the Subscription gate.</p>
+    </li>
+    <li class="step">
+      <h4>Pick a plan</h4>
+      <p>Click <em>Pay via Telegram bot</em> on Monthly, Annual, or Lifetime. The bot opens with your order pre-filled.</p>
+    </li>
+    <li class="step">
+      <h4>Send crypto</h4>
+      <p>The bot replies with three wallets (BTC / LTC / ETH) and the <em>exact</em> amount per wallet. Send from any non-custodial wallet.</p>
+    </li>
+    <li class="step">
+      <h4>Get your token</h4>
+      <p>Payment confirmed on-chain (~1–15 min) → bot DMs the license token. Paste it into the app's Subscription screen.</p>
+    </li>
+    <li class="step">
+      <h4>Optional: sign in</h4>
+      <p>Menu → Account → Sign in via Telegram. Enables cloud sync, teams, and device management.</p>
+    </li>
+    <li class="step">
+      <h4>Build a team</h4>
+      <p>Workspace switcher (bottom-left) → Create Team → invite by handle or email. Role management is built in.</p>
+    </li>
+  </ol>
+
+  <div class="big-cta">
+    <h2>Ready to dig in?</h2>
+    <p>Two-day free trial, no card, no email. Cancel never because there's nothing to cancel.</p>
+    <div class="actions">
+      <a class="cta-primary" href="/">⚡ Start the trial</a>
+      <a class="cta-secondary" href="/guide">Read the guide</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="links">
+    <a href="/home">Home</a>
+    <a href="/guide">Guide</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/faq">FAQ</a>
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="https://t.me/CrimeCodeSub_bot">Telegram bot</a>
+    <a href="https://github.com/flamematch23-lgtm/CrimeCode-IDE">GitHub</a>
+  </div>
+  <p>© 2026 CrimeCode. Built for security researchers.</p>
+</footer>
+</body>
+</html>

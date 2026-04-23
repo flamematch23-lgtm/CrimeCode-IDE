@@ -230,6 +230,9 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
         >
           <div data-auth-gate="form" style={formStyle}>
             <div style={cardStyle}>
+              <a href="/home" style={newHereStyle}>
+                🆕 New to CrimeCode? <span style={{ "text-decoration": "underline" }}>Learn what it is →</span>
+              </a>
               <h1 style={titleStyle}>Sign in to CrimeCode</h1>
               <p style={subtitleStyle}>Pick a sign-in method below.</p>
 
@@ -348,6 +351,10 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
 
               <p style={hintStyle}>Credentials stay in your browser's localStorage and travel only over HTTPS.</p>
               <p style={footerLinksStyle}>
+                <a href="/home" style={footerLinkStyle}>Home</a>
+                <span style={dotStyle}>·</span>
+                <a href="/guide" style={footerLinkStyle}>Guide</a>
+                <span style={dotStyle}>·</span>
                 <a href="/pricing" style={footerLinkStyle}>Pricing</a>
                 <span style={dotStyle}>·</span>
                 <a href="/faq" style={footerLinkStyle}>FAQ</a>
@@ -525,4 +532,17 @@ const footerLinkStyle: JSX.CSSProperties = {
 }
 const dotStyle: JSX.CSSProperties = {
   color: "rgba(255,255,255,0.25)",
+}
+const newHereStyle: JSX.CSSProperties = {
+  display: "block",
+  "margin-bottom": "16px",
+  padding: "10px 14px",
+  background: "rgba(255,87,34,0.08)",
+  border: "1px solid rgba(255,87,34,0.25)",
+  "border-radius": "8px",
+  color: "#ff8a4a",
+  "text-decoration": "none",
+  "font-size": "13px",
+  "font-weight": "600",
+  "text-align": "center",
 }
