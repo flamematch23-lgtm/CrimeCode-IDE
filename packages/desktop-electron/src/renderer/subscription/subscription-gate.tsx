@@ -125,10 +125,14 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
 
           <div data-slot="panel">
             <header>
-              <div data-slot="logo" data-text="CRIMECODE" aria-hidden="true">
-                CRIMECODE
+              <div data-slot="brand-row" aria-hidden="true">
+                <div data-slot="brand-tile">CC</div>
+                <div data-slot="logo" data-text="CRIMECODE">CRIMECODE</div>
               </div>
-              <h1 id="gate-title">{t("gate.title")}</h1>
+              <h1 id="gate-title">
+                <span data-slot="h1-pre">Unlock</span>{" "}
+                <span data-slot="h1-emph">CrimeCode Pro</span>
+              </h1>
               <p data-slot="tagline">{t("gate.tagline")}</p>
               <p data-slot="subtitle">
                 <Switch>

@@ -38,15 +38,15 @@
   -webkit-app-region: no-drag;
 }
 
-/* Animated grid background */
 [data-component="subscription-gate"] [data-slot="bg-grid"] {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background-image:
     linear-gradient(rgba(255, 87, 34, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 87, 34, 0.06) 1px, transparent 1px);
   background-size: 40px 40px;
-  mask-image: radial-gradient(ellipse at center, rgba(0,0,0,0.7), transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, rgba(0,0,0,0.7), transparent 75%);
+          mask-image: radial-gradient(ellipse at center, rgba(0,0,0,0.7), transparent 75%);
   pointer-events: none;
   animation: grid-pan 20s linear infinite;
 }
@@ -56,7 +56,7 @@
 }
 
 [data-component="subscription-gate"] [data-slot="bg-glow"] {
-  position: absolute;
+  position: fixed;
   top: -20%;
   left: 50%;
   transform: translateX(-50%);
@@ -78,29 +78,61 @@
   z-index: 1;
   max-width: 1080px;
   width: 100%;
-  background: rgba(15, 15, 20, 0.7);
+  background: rgba(15, 15, 20, 0.78);
   border: 1px solid rgba(255, 87, 34, 0.25);
   border-radius: 18px;
-  padding: 48px 56px;
+  padding: 44px 56px 40px;
   box-shadow: 0 20px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.05);
-  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+          backdrop-filter: blur(12px);
+  animation: panel-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1) both;
 }
 
-/* Glitch CRIMECODE logo */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Header — brand row */
 [data-component="subscription-gate"] header {
   text-align: center;
   margin-bottom: 36px;
 }
 
+[data-component="subscription-gate"] [data-slot="brand-row"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+[data-component="subscription-gate"] [data-slot="brand-tile"] {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ff5722, #f4511e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 800;
+  font-size: 18px;
+  color: #07070a;
+  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+  letter-spacing: -0.02em;
+}
+
+/* Glitch wordmark — bigger and more visible than v2.3.0 */
 [data-component="subscription-gate"] [data-slot="logo"] {
   position: relative;
   display: inline-block;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
-  letter-spacing: 0.32em;
+  letter-spacing: 0.34em;
   color: #ff5722;
-  margin-bottom: 16px;
-  text-shadow: 0 0 12px rgba(255, 87, 34, 0.6);
+  text-shadow: 0 0 14px rgba(255, 87, 34, 0.6);
+  line-height: 1;
 }
 
 [data-component="subscription-gate"] [data-slot="logo"]::before,
@@ -116,14 +148,16 @@
 [data-component="subscription-gate"] [data-slot="logo"]::before {
   color: #00e0ff;
   animation: glitch-1 2.4s infinite linear alternate-reverse;
-  clip-path: polygon(0 0, 100% 0, 100% 33%, 0 33%);
+  -webkit-clip-path: polygon(0 0, 100% 0, 100% 33%, 0 33%);
+          clip-path: polygon(0 0, 100% 0, 100% 33%, 0 33%);
   transform: translateX(-2px);
 }
 
 [data-component="subscription-gate"] [data-slot="logo"]::after {
   color: #ff00aa;
   animation: glitch-2 1.8s infinite linear alternate-reverse;
-  clip-path: polygon(0 67%, 100% 67%, 100% 100%, 0 100%);
+  -webkit-clip-path: polygon(0 67%, 100% 67%, 100% 100%, 0 100%);
+          clip-path: polygon(0 67%, 100% 67%, 100% 100%, 0 100%);
   transform: translateX(2px);
 }
 
@@ -141,16 +175,34 @@
   97%           { transform: translateX(4px); }
 }
 
+/* Heading — solid white, no gradient (gradient + clip:text was causing the
+   bottom-half clipping in webkit). Generous line-height + padding-bottom
+   makes sure descenders never touch the baseline of the box. */
 [data-component="subscription-gate"] h1 {
-  font-size: 38px;
+  font-size: 42px;
   font-weight: 800;
-  margin: 0 0 10px 0;
+  margin: 0 0 12px 0;
+  padding: 6px 0 10px;
   color: #ffffff;
-  letter-spacing: -0.02em;
-  background: linear-gradient(180deg, #ffffff 0%, #c4c4cc 100%);
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  text-shadow: 0 2px 24px rgba(255, 87, 34, 0.25);
+}
+
+[data-component="subscription-gate"] [data-slot="h1-pre"] {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+[data-component="subscription-gate"] [data-slot="h1-emph"] {
+  background: linear-gradient(135deg, #ffffff 0%, #ffd0bd 100%);
   -webkit-background-clip: text;
-  background-clip: text;
+          background-clip: text;
   -webkit-text-fill-color: transparent;
+  /* webkit clipping safety: reserve a bit of vertical room so the gradient
+     box doesn't crop the descenders. */
+  padding-bottom: 4px;
+  display: inline-block;
 }
 
 [data-component="subscription-gate"] [data-slot="tagline"] {
@@ -166,7 +218,7 @@
   margin: 8px 0 0 0;
 }
 
-/* Features list */
+/* Features ribbon */
 [data-component="subscription-gate"] [data-slot="features"] {
   background: rgba(255, 87, 34, 0.04);
   border: 1px solid rgba(255, 87, 34, 0.15);
@@ -179,9 +231,9 @@
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   color: #ff5722;
-  margin: 0 0 10px 0;
+  margin: 0 0 12px 0;
 }
 
 [data-component="subscription-gate"] [data-slot="features"] ul {
@@ -190,22 +242,32 @@
   margin: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 6px 24px;
+  gap: 8px 24px;
 }
 
 [data-component="subscription-gate"] [data-slot="features"] li {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.85);
-  padding-left: 22px;
+  padding-left: 24px;
   position: relative;
+  line-height: 1.45;
 }
 
 [data-component="subscription-gate"] [data-slot="features"] li::before {
   content: "✓";
   position: absolute;
   left: 0;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 87, 34, 0.18);
   color: #ff5722;
   font-weight: 800;
+  font-size: 11px;
+  border-radius: 50%;
 }
 
 /* Plans grid */
@@ -221,20 +283,40 @@
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  padding: 24px 20px 20px;
+  padding: 28px 22px 22px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition:
+    border-color 0.25s ease,
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease;
   overflow: hidden;
+  isolation: isolate;
+}
+
+[data-component="subscription-gate"] [data-slot="plan-card"]::after {
+  /* hover halo */
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(circle at top, rgba(255, 87, 34, 0.25), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+  z-index: -1;
 }
 
 [data-component="subscription-gate"] [data-slot="plan-card"]:hover {
   border-color: rgba(255, 87, 34, 0.6);
-  transform: translateY(-4px);
-  box-shadow: 0 12px 40px rgba(255, 87, 34, 0.15);
+  transform: translateY(-6px);
+  box-shadow: 0 18px 50px rgba(255, 87, 34, 0.18);
   background: rgba(255, 87, 34, 0.05);
 }
+
+[data-component="subscription-gate"] [data-slot="plan-card"]:hover::after { opacity: 1; }
 
 [data-component="subscription-gate"] [data-slot="plan-card"][data-interval="lifetime"] {
   border-color: rgba(255, 87, 34, 0.5);
@@ -248,7 +330,7 @@
   left: -50%;
   width: 200%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 87, 34, 0.15), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 87, 34, 0.18), transparent);
   animation: shimmer 4s linear infinite;
   pointer-events: none;
 }
@@ -262,48 +344,64 @@
   top: 12px;
   right: 12px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: #ff5722;
   background: rgba(255, 87, 34, 0.18);
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
   border: 1px solid rgba(255, 87, 34, 0.4);
+  z-index: 1;
+}
+
+[data-component="subscription-gate"] [data-slot="plan-card"][data-interval="lifetime"] [data-slot="plan-badge"] {
+  animation: badge-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 87, 34, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 87, 34, 0); }
 }
 
 [data-component="subscription-gate"] [data-slot="plan-emoji"] {
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1;
+  filter: drop-shadow(0 4px 12px rgba(255, 87, 34, 0.4));
 }
 
 [data-component="subscription-gate"] [data-slot="plan-title"] {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
   color: #ffffff;
   letter-spacing: 0.02em;
+  margin-top: 4px;
 }
 
 [data-component="subscription-gate"] [data-slot="plan-price"] {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 800;
   color: #ff5722;
-  text-shadow: 0 0 20px rgba(255, 87, 34, 0.3);
+  text-shadow: 0 0 22px rgba(255, 87, 34, 0.4);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  padding: 2px 0;
 }
 
 [data-component="subscription-gate"] [data-slot="plan-desc"] {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
-  line-height: 1.5;
+  line-height: 1.55;
   flex: 1;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  min-height: 36px;
 }
 
 [data-component="subscription-gate"] button[data-slot="pay-btn"] {
   background: linear-gradient(135deg, #ff5722, #f4511e);
   border: none;
   color: #ffffff;
-  padding: 12px 16px;
+  padding: 13px 18px;
   border-radius: 10px;
   font-size: 14px;
   font-weight: 700;
@@ -318,7 +416,7 @@
 
 [data-component="subscription-gate"] button[data-slot="pay-btn"]:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(255, 87, 34, 0.5);
+  box-shadow: 0 10px 28px rgba(255, 87, 34, 0.55);
 }
 
 [data-component="subscription-gate"] button[data-slot="pay-btn"][data-interval="lifetime"] {
@@ -361,21 +459,24 @@
 }
 
 [data-component="subscription-gate"] [data-slot="trial-cta"] button[data-kind="primary"] {
-  background: rgba(255, 87, 34, 0.15);
+  background: rgba(255, 87, 34, 0.12);
   border: 1px solid rgba(255, 87, 34, 0.5);
-  color: #ff5722;
-  padding: 12px 28px;
+  color: #ff8a4a;
+  padding: 14px 32px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  letter-spacing: 0.02em;
+  transition: all 0.18s ease;
 }
 
 [data-component="subscription-gate"] [data-slot="trial-cta"] button[data-kind="primary"]:hover:not(:disabled) {
-  background: rgba(255, 87, 34, 0.25);
+  background: rgba(255, 87, 34, 0.22);
   border-color: #ff5722;
-  transform: scale(1.02);
+  color: #ffffff;
+  transform: scale(1.03);
+  box-shadow: 0 6px 24px rgba(255, 87, 34, 0.35);
 }
 
 [data-component="subscription-gate"] [data-slot="trial-cta"] button[data-kind="primary"]:disabled {
@@ -399,7 +500,7 @@
   background: transparent;
   border: 1px dashed rgba(255, 255, 255, 0.2);
   color: rgba(255, 255, 255, 0.6);
-  padding: 8px 18px;
+  padding: 9px 20px;
   border-radius: 8px;
   font-size: 13px;
   cursor: pointer;
@@ -486,9 +587,9 @@
   text-decoration: none;
   font-size: 13px;
   font-weight: 500;
-  padding: 6px 14px;
+  padding: 7px 16px;
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
+  border-radius: 8px;
   transition: all 0.15s ease;
 }
 
@@ -496,6 +597,7 @@
   background: rgba(255, 87, 34, 0.1);
   border-color: #ff5722;
   color: #ff5722;
+  transform: translateY(-1px);
 }
 
 /* ===== Admin panel ===== */
