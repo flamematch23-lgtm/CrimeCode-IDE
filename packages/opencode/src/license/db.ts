@@ -62,6 +62,25 @@ CREATE TABLE IF NOT EXISTS audit (
   ts        INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_ts_idx ON audit(ts DESC);
+
+-- Multi-currency payment offers attached to a pending order. One order has
+-- 1..N offers (typically 3: BTC, LTC, ETH). The first offer matched on-chain
+-- closes the order and emits the license.
+CREATE TABLE IF NOT EXISTS payment_offers (
+  id              TEXT PRIMARY KEY,
+  order_id        TEXT NOT NULL,
+  currency        TEXT NOT NULL CHECK (currency IN ('BTC','LTC','ETH')),
+  expected_units  TEXT NOT NULL,           -- BigInt-as-text, smallest unit
+  wallet_address  TEXT NOT NULL,
+  expires_at      INTEGER NOT NULL,
+  matched_tx_hash TEXT,
+  matched_at      INTEGER,
+  created_at      INTEGER NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+CREATE INDEX IF NOT EXISTS payment_offers_order_idx ON payment_offers(order_id);
+CREATE INDEX IF NOT EXISTS payment_offers_open_idx ON payment_offers(currency, wallet_address)
+  WHERE matched_tx_hash IS NULL;
 `
 
 function resolvePath(): string {

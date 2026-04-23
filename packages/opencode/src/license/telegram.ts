@@ -1,10 +1,12 @@
 import { Log } from "../util/log"
 import {
+  attachPaymentOffer,
   cancelOrder,
   confirmOrderAndIssue,
   createOrder,
   findOrCreateCustomerByTelegram,
   getLicense,
+  getOffersForOrder,
   getOrder,
   listOrdersForUser,
   listLicenses,
@@ -13,6 +15,9 @@ import {
   statsCounts,
 } from "./store"
 import { verifyToken } from "./token"
+import { formatAmount, usdToSmallestUnit, type Currency } from "./prices"
+import { paymentUri, qrCodeUrl, withDiscriminator } from "./payments"
+import { getWallets } from "./wallets"
 
 const log = Log.create({ service: "telegram-bot" })
 
@@ -113,22 +118,74 @@ const HELP_ADMIN = `🛠️ *Admin commands* (you only)
 
 Dashboard web: \`https://api.crimecode.cc/license/admin\``
 
-function newOrderMessage(orderId: string, interval: string): string {
-  return `✅ *Order created!*
+const PRICE_USD: Record<"monthly" | "annual" | "lifetime", number> = {
+  monthly: 20,
+  annual: 200,
+  lifetime: 500,
+}
 
-ID: \`${orderId}\`
-Plan: *${interval}*
-Status: *pending payment*
+const PAY_WINDOW_MINUTES = 60
 
-📨 *Next step* — contact one of:
-   • @OpCrime1312
-   • @JollyFraud
+const CURRENCY_EMOJI: Record<Currency, string> = {
+  BTC: "🟠",
+  LTC: "🪙",
+  ETH: "🔷",
+}
 
-Send them this order ID along with your preferred payment method (USDT / BTC / ETH / XMR). They'll reply with the wallet address.
+interface OfferDetail {
+  currency: Currency
+  units: bigint
+  address: string
+  amountStr: string
+  uri: string
+  qr: string
+}
 
-As soon as the payment lands, you'll receive your license token *here automatically*. ⚡
+async function buildOfferLines(orderId: string, usd: number): Promise<{ lines: string[]; offers: OfferDetail[] }> {
+  const wallets = getWallets()
+  const out: OfferDetail[] = []
+  const lines: string[] = []
+  for (const w of wallets) {
+    const baseUnits = await usdToSmallestUnit(usd, w.currency)
+    if (baseUnits == null) continue
+    const units = withDiscriminator(baseUnits, orderId)
+    const amountStr = formatAmount(units, w.currency)
+    const uri = paymentUri(w.currency, w.address, units)
+    const qr = qrCodeUrl(uri)
+    out.push({ currency: w.currency, units, address: w.address, amountStr, uri, qr })
+    lines.push(
+      `${CURRENCY_EMOJI[w.currency]} *${w.currency}* — send EXACTLY \`${amountStr}\` ${w.currency}\n` +
+        `   \`${w.address}\`\n` +
+        `   [Open in wallet](${uri}) · [QR](${qr})`,
+    )
+  }
+  return { lines, offers: out }
+}
 
-Use \`/status ${orderId}\` to check the status anytime.`
+async function newOrderMessage(orderId: string, interval: keyof typeof PRICE_USD): Promise<string> {
+  const usd = PRICE_USD[interval]
+  const expires = Math.floor(Date.now() / 1000) + PAY_WINDOW_MINUTES * 60
+  const { lines, offers } = await buildOfferLines(orderId, usd)
+  // Persist offers so the poller can match incoming txs.
+  for (const o of offers) {
+    attachPaymentOffer({
+      order_id: orderId,
+      currency: o.currency,
+      expected_units: o.units,
+      wallet_address: o.address,
+      expires_at: expires,
+    })
+  }
+  const body =
+    `✅ *Order created!*\n\n` +
+    `ID: \`${orderId}\`\n` +
+    `Plan: *${interval}* — *$${usd} USD*\n` +
+    `Status: *pending payment*\n\n` +
+    `💸 *Pay with ANY of these wallets* — use the EXACT amount shown so the bot can match it back to your order:\n\n` +
+    lines.join("\n\n") +
+    `\n\n⏱ This order expires in *${PAY_WINDOW_MINUTES} minutes*. As soon as the transaction is confirmed on-chain you'll receive your license token *here automatically*.\n\n` +
+    `Need help? Contact @OpCrime1312 or @JollyFraud and quote order \`${orderId}\`.`
+  return body
 }
 
 function tokenDeliveryMessage(licenseId: string, interval: string, expiresAt: number | null, token: string): string {
@@ -183,9 +240,21 @@ async function handle(update: TgUpdate) {
 
   switch (cmd) {
     case "start":
-    case "help":
+    case "help": {
+      // Telegram deep-link payload: /start order_<interval>
+      const deepLinkInterval = args.match(/^order_(monthly|annual|lifetime)\b/)?.[1]
+      if (deepLinkInterval && VALID_INTERVALS.has(deepLinkInterval)) {
+        const o = createOrder({
+          customer_telegram: username,
+          customer_user_id: userId,
+          interval: deepLinkInterval as "monthly" | "annual" | "lifetime",
+        })
+        await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD), "Markdown")
+        return
+      }
       await send(chatId, HELP_USER + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
       return
+    }
     case "order": {
       const interval = args.toLowerCase()
       if (!VALID_INTERVALS.has(interval)) {
@@ -197,7 +266,7 @@ async function handle(update: TgUpdate) {
         customer_user_id: userId,
         interval: interval as "monthly" | "annual" | "lifetime",
       })
-      await send(chatId, newOrderMessage(o.id, o.interval), "Markdown")
+      await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD), "Markdown")
       return
     }
     case "status": {

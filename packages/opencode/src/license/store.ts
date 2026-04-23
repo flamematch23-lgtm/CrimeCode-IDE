@@ -1,5 +1,6 @@
 import { getDb } from "./db"
 import { expiryFor, makeToken, newId, type Interval } from "./token"
+import type { Currency } from "./prices"
 
 export interface CustomerRow {
   id: string
@@ -239,6 +240,69 @@ export function listAudit(limit = 100): Array<{ id: number; action: string; deta
 
 export function getLicense(id: string): LicenseRow | null {
   return getDb().prepare<LicenseRow, [string]>("SELECT * FROM licenses WHERE id = ?").get(id) ?? null
+}
+
+export interface PaymentOfferRow {
+  id: string
+  order_id: string
+  currency: Currency
+  expected_units: string // BigInt as text
+  wallet_address: string
+  expires_at: number
+  matched_tx_hash: string | null
+  matched_at: number | null
+  created_at: number
+}
+
+export function attachPaymentOffer(opts: {
+  order_id: string
+  currency: Currency
+  expected_units: bigint
+  wallet_address: string
+  expires_at: number
+}): PaymentOfferRow {
+  const db = getDb()
+  const id = newId("po")
+  db.prepare(
+    "INSERT INTO payment_offers (id, order_id, currency, expected_units, wallet_address, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, opts.order_id, opts.currency, opts.expected_units.toString(), opts.wallet_address, opts.expires_at, now())
+  audit("payment.offer", { id, order_id: opts.order_id, currency: opts.currency, units: opts.expected_units.toString() })
+  return db.prepare<PaymentOfferRow, [string]>("SELECT * FROM payment_offers WHERE id = ?").get(id)!
+}
+
+export function listOpenOffersForWallet(currency: Currency, wallet: string): PaymentOfferRow[] {
+  return getDb()
+    .prepare<PaymentOfferRow, [string, string, number]>(
+      `SELECT * FROM payment_offers
+       WHERE currency = ? AND wallet_address = ?
+         AND matched_tx_hash IS NULL
+         AND expires_at > ?
+       ORDER BY created_at ASC`,
+    )
+    .all(currency, wallet, now())
+}
+
+export function markOfferMatched(id: string, txHash: string): void {
+  getDb()
+    .prepare("UPDATE payment_offers SET matched_tx_hash = ?, matched_at = ? WHERE id = ? AND matched_tx_hash IS NULL")
+    .run(txHash, now(), id)
+  audit("payment.match", { offer_id: id, tx_hash: txHash })
+}
+
+export function getOffersForOrder(orderId: string): PaymentOfferRow[] {
+  return getDb()
+    .prepare<PaymentOfferRow, [string]>("SELECT * FROM payment_offers WHERE order_id = ? ORDER BY currency")
+    .all(orderId)
+}
+
+export function listOpenOffers(limit = 200): PaymentOfferRow[] {
+  return getDb()
+    .prepare<PaymentOfferRow, [number, number]>(
+      `SELECT * FROM payment_offers
+       WHERE matched_tx_hash IS NULL AND expires_at > ?
+       ORDER BY created_at ASC LIMIT ?`,
+    )
+    .all(now(), limit)
 }
 
 export function statsCounts(): {

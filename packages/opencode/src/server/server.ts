@@ -47,6 +47,7 @@ import { LiveShareRoutes } from "./routes/liveshare"
 import { InviteRoutes } from "./routes/invite"
 import { LicenseRoutes } from "./routes/license"
 import { startTelegramBot } from "../license/telegram"
+import { startPaymentPoller } from "../license/poller"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 import { initProjectors } from "./projectors"
@@ -623,6 +624,15 @@ export namespace Server {
         startTelegramBot()
       } catch (err) {
         log.warn("failed to start telegram bot", { error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    // Crypto payment poller — only runs when at least one wallet env var is
+    // configured (BTC_WALLET_ADDRESS / LTC_WALLET_ADDRESS / ETH_WALLET_ADDRESS).
+    if (process.env.LICENSE_HMAC_SECRET && process.env.TELEGRAM_BOT_TOKEN) {
+      try {
+        startPaymentPoller()
+      } catch (err) {
+        log.warn("failed to start payment poller", { error: err instanceof Error ? err.message : String(err) })
       }
     }
 
