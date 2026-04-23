@@ -74,25 +74,82 @@ async function send(chatId: number, text: string, parseMode: "Markdown" | "Markd
   if (!r.ok) log.warn("sendMessage failed", { description: r.description })
 }
 
-const HELP_USER = `*CrimeCode license bot*
+const HELP_USER = `🔥 *Welcome to CrimeCode* 🔥
 
-Commands:
-\`/start\` — show this help
+The IDE for fraud researchers and security professionals — built by the team, for the team.
+
+📋 *How to subscribe (3 simple steps)*
+
+*1.* Pick your plan with \`/order\`
+   • \`/order monthly\` — €X / month
+   • \`/order annual\` — €X / year (save ~30%)
+   • \`/order lifetime\` — €X one-time, forever
+
+*2.* Pay one of our wallets (USDT, BTC, ETH, Monero accepted):
+   👉 Contact @OpCrime1312 or @JollyFraud with your order ID — they'll give you the wallet address and confirm receipt.
+
+*3.* Receive your license token here automatically as soon as the payment is verified. Paste it into the desktop app → Subscription gate → "I have a token" → Activate. Done.
+
+📌 *Useful commands*
+\`/start\` — show this message
 \`/order monthly|annual|lifetime\` — create a new order
 \`/status <order_id>\` — check the status of one of your orders
 \`/myorders\` — list your last orders
 
-After ordering, contact @OpCrime1312 or @JollyFraud for payment instructions. Once payment is confirmed, you'll receive your license token here.`
+🔒 *Privacy*
+We only store: your Telegram handle, your order, the issued license token signature. No emails, no payment data, no personal IDs unless you give them to us.
 
-const HELP_ADMIN = `*Admin commands*
+🆘 *Need help?* Reply to this chat or message @OpCrime1312 directly.`
 
-\`/confirm <order_id> [tx_hash]\` — confirm payment and issue token
+const HELP_ADMIN = `🛠️ *Admin commands* (you only)
+
+\`/confirm <order_id> [tx_hash]\` — confirm payment + auto-deliver token
 \`/cancel <order_id>\` — cancel a pending order
 \`/pending\` — list pending orders
-\`/list\` — last licenses
-\`/revoke <license_id> [reason...]\` — revoke a license
+\`/list\` — last 20 licenses
+\`/revoke <license_id> [reason]\` — revoke a license
 \`/lookup <token>\` — find license by token
-\`/stats\` — system stats`
+\`/stats\` — counters dashboard
+
+Dashboard web: \`https://api.crimecode.cc/license/admin\``
+
+function newOrderMessage(orderId: string, interval: string): string {
+  return `✅ *Order created!*
+
+ID: \`${orderId}\`
+Plan: *${interval}*
+Status: *pending payment*
+
+📨 *Next step* — contact one of:
+   • @OpCrime1312
+   • @JollyFraud
+
+Send them this order ID along with your preferred payment method (USDT / BTC / ETH / XMR). They'll reply with the wallet address.
+
+As soon as the payment lands, you'll receive your license token *here automatically*. ⚡
+
+Use \`/status ${orderId}\` to check the status anytime.`
+}
+
+function tokenDeliveryMessage(licenseId: string, interval: string, expiresAt: number | null, token: string): string {
+  const exp = expiresAt
+    ? `\nExpires: *${new Date(expiresAt * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}*`
+    : "\nExpires: *never (lifetime)* 🎉"
+  return `🎉 *Your CrimeCode license is ready!*
+
+License ID: \`${licenseId}\`
+Plan: *${interval}*${exp}
+
+📋 *Activation*
+
+Open the CrimeCode desktop app → on the Subscription screen click *"I have a token"* → paste the token below → click *Activate*.
+
+\`${token}\`
+
+(Tap to copy — keep it safe, this is your proof of purchase.)
+
+Thanks for supporting CrimeCode 🖤`
+}
 
 const VALID_INTERVALS = new Set(["monthly", "annual", "lifetime"])
 
@@ -140,13 +197,7 @@ async function handle(update: TgUpdate) {
         customer_user_id: userId,
         interval: interval as "monthly" | "annual" | "lifetime",
       })
-      await send(
-        chatId,
-        `Order *${o.id}* created.\nPlan: *${o.interval}*\nStatus: *pending*\n\n` +
-          `Now pay via your preferred method and contact @OpCrime1312 or @JollyFraud with this order ID. ` +
-          `When payment is verified you'll receive your license token here.`,
-        "Markdown",
-      )
+      await send(chatId, newOrderMessage(o.id, o.interval), "Markdown")
       return
     }
     case "status": {
@@ -184,13 +235,14 @@ async function handle(update: TgUpdate) {
       if (r.customer.telegram_user_id) {
         await send(
           r.customer.telegram_user_id,
-          `*Your CrimeCode license is ready.*\n\nPlan: *${r.license.interval}*\nLicense ID: \`${r.license.id}\`\n\nToken (paste this into the app):\n\`${r.token}\``,
+          tokenDeliveryMessage(r.license.id, r.license.interval, r.license.expires_at, r.token),
           "Markdown",
         )
       }
+      const who = r.customer.telegram ?? (r.customer.telegram_user_id ? `user ${r.customer.telegram_user_id}` : "customer")
       await send(
         chatId,
-        `Confirmed order *${r.order.id}* → license *${r.license.id}* sent to ${r.customer.telegram ?? r.customer.telegram_user_id ?? "customer"}.\n\nToken:\n\`${r.token}\``,
+        `✅ Confirmed order \`${r.order.id}\` → license \`${r.license.id}\` delivered to ${who}.\n\nToken (for your records):\n\`${r.token}\``,
         "Markdown",
       )
       return
