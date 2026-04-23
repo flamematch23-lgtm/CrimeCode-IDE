@@ -54,6 +54,7 @@ interface HubStatus {
 
 async function apiGet(base: string, path: string) {
   const r = await fetch(`${base}${path}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
   return r.json()
 }
 

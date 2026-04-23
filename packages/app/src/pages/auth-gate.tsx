@@ -1,4 +1,4 @@
-import { createSignal, Show, Switch, Match, onMount } from "solid-js"
+import { createSignal, Show, Switch, Match, onCleanup, onMount } from "solid-js"
 import type { JSX } from "solid-js"
 import {
   readWebSession,
@@ -140,6 +140,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
     }
     setPolling(false)
   }
+  onCleanup(stopPoll)
 
   onMount(async () => {
     const stored = readCredentials()

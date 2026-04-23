@@ -221,6 +221,7 @@ export function AccountModal(props: { onClose: () => void }) {
     const trap = installFocusTrap(panelRef, close)
     onCleanup(() => trap.release())
   })
+  onCleanup(stopPoll)
 
   return (
     <div data-component="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-title" ref={(el) => (panelRef = el)}>
