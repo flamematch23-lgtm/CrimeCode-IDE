@@ -55,11 +55,12 @@ Replacement: GitHub CLI `gh auth login` (short-lived OAuth token, no manual PAT 
 
 ### 4. Cloudflare API Token
 
-**Exposed:** two `cfut_…` user tokens shared in chat during setup
+**Exposed:** three `cfut_…` user tokens shared in chat during setup
 (first IP-filtered, second no-IP-filter and used by the `CLOUDFLARE_API_TOKEN`
-CI secret). Both must be revoked together.
+CI secret, third used to verify Pages domains for `crimecode.cc`).
+All three must be revoked together.
 
-Revoke: https://dash.cloudflare.com/profile/api-tokens → delete both.
+Revoke: https://dash.cloudflare.com/profile/api-tokens → delete all three.
 
 Replace the CI one:
 1. Create new token (same scope: Cloudflare Pages: Edit, no IP filter, 7-day TTL)
