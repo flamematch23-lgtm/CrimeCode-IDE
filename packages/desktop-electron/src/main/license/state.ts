@@ -54,7 +54,7 @@ export const applyStartTrial = (record: LicenseRecord): LicenseRecord => {
 
 export const applyActivate = (
   record: LicenseRecord,
-  payload: { interval: ProInterval; token: string; issuedAt: Date },
+  payload: { interval: ProInterval; token: string; issuedAt: Date; expiry?: Date | null },
 ): LicenseRecord => ({
   ...record,
   status: "active",
@@ -62,7 +62,7 @@ export const applyActivate = (
   licenseToken: payload.token,
   issuedBy: "stripe",
   timeIssued: payload.issuedAt,
-  timeExpiry: null,
+  timeExpiry: payload.expiry ?? null,
   timeTrialConsumed: record.status === "trial" ? payload.issuedAt : record.timeTrialConsumed,
 })
 

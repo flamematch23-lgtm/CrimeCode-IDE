@@ -45,6 +45,8 @@ import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
 import { LiveShareRoutes } from "./routes/liveshare"
 import { InviteRoutes } from "./routes/invite"
+import { LicenseRoutes } from "./routes/license"
+import { startTelegramBot } from "../license/telegram"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 import { initProjectors } from "./projectors"
@@ -137,6 +139,9 @@ export namespace Server {
         // Allow CORS preflight requests to succeed without auth.
         // Browser clients sending Authorization headers will preflight with OPTIONS.
         if (c.req.method === "OPTIONS") return next()
+        // The Electron client validates licenses without server credentials —
+        // /license/validate must be reachable from the public internet.
+        if (c.req.path === "/license/validate") return next()
         const password = Flag.OPENCODE_SERVER_PASSWORD
         if (!password) return next()
         const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
@@ -165,6 +170,7 @@ export namespace Server {
       })
       .route("/global", GlobalRoutes())
       .route("/security", SecurityRoutes())
+      .route("/license", LicenseRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({
@@ -609,6 +615,16 @@ export namespace Server {
     }
     const server = opts.port === 0 ? (tryServe(4096) ?? tryServe(0)) : tryServe(opts.port)
     if (!server) throw new Error(`Failed to start server on port ${opts.port}`)
+
+    // License Telegram bot — only runs when both LICENSE_HMAC_SECRET and
+    // TELEGRAM_BOT_TOKEN are set, so it's a no-op for local dev.
+    if (process.env.LICENSE_HMAC_SECRET && process.env.TELEGRAM_BOT_TOKEN) {
+      try {
+        startTelegramBot()
+      } catch (err) {
+        log.warn("failed to start telegram bot", { error: err instanceof Error ? err.message : String(err) })
+      }
+    }
 
     const shouldPublishMDNS =
       opts.mdns &&

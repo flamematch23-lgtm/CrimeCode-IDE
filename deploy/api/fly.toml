@@ -21,6 +21,15 @@ primary_region = "fra"  # Frankfurt — low latency for EU users. See `fly platf
 [env]
   OPENCODE_CHANNEL = "prod"
   # OPENCODE_SERVER_PASSWORD is set via `fly secrets set` and NEVER committed.
+  # License DB lives on the persistent volume mounted at /data.
+  LICENSE_DB_PATH = "/data/licenses.db"
+  # OPENCODE_ADMIN_PASSPHRASE_SHA256, LICENSE_HMAC_SECRET, TELEGRAM_BOT_TOKEN,
+  # TELEGRAM_ADMIN_USER_IDS are set via `fly secrets set`.
+
+[mounts]
+  source = "license_data"
+  destination = "/data"
+  initial_size = "1gb"
 
 [http_service]
   internal_port = 4096

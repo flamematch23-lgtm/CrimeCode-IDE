@@ -45,6 +45,7 @@ import type { CommandChild } from "./cli"
 import { getSidecarPath, installCli, syncCli } from "./cli"
 import { CHANNEL, UPDATER_ENABLED } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendSqliteMigrationProgress } from "./ipc"
+import { scheduleLicenseRefresh } from "./license"
 import { licenseService, VALID_INTERVALS } from "./license"
 import { initLogging } from "./logging"
 import { parseMarkdown } from "./markdown"
@@ -131,6 +132,8 @@ function setupApp() {
     // Start CLI sync in background; don't wait for it
     void syncCli()
     perf.mark("cli_sync_started")
+    // Periodic license re-check so revocations propagate within ~7 days.
+    scheduleLicenseRefresh()
     await initialize()
   })
 }
