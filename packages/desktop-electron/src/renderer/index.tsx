@@ -343,16 +343,16 @@ render(() => {
         <Show when={!defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading}>
           {(_) => {
             return (
-              <AppInterface
-                defaultServer={defaultServer.latest ?? ServerConnection.Key.make("sidecar")}
-                servers={servers()}
-                router={MemoryRouter}
-              >
-                <SubscriptionOverlay />
-                <SubscriptionGate>
+              <SubscriptionGate>
+                <AppInterface
+                  defaultServer={defaultServer.latest ?? ServerConnection.Key.make("sidecar")}
+                  servers={servers()}
+                  router={MemoryRouter}
+                >
+                  <SubscriptionOverlay />
                   <Inner />
-                </SubscriptionGate>
-              </AppInterface>
+                </AppInterface>
+              </SubscriptionGate>
             )
           }}
         </Show>
