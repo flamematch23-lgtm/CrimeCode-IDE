@@ -31,6 +31,20 @@ import {
   verifySessionToken,
   type SessionPayload,
 } from "../../license/auth"
+import {
+  addMemberByIdentifier,
+  cancelInvite,
+  createTeam,
+  createTeamSession,
+  deleteTeam,
+  endSession,
+  getTeamDetail,
+  heartbeatSession,
+  listActiveSessions,
+  listTeamsForCustomer,
+  removeMember,
+  renameTeam,
+} from "../../license/teams"
 
 const ADMIN_HASH = (process.env.OPENCODE_ADMIN_PASSPHRASE_SHA256 ?? "").toLowerCase()
 
@@ -461,6 +475,158 @@ export const LicenseRoutes = lazy(() => {
     const sess = sessionGuard(c as never)
     if (!sess) return c.json({ error: "unauthorized" }, 401)
     syncDelete(sess.sub, c.req.param("key"))
+    return c.json({ ok: true })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  //  Teams — workspaces shared by multiple accounts with live sessions
+  // ────────────────────────────────────────────────────────────────────────
+
+  const teamError = (err: unknown): { status: number; body: { error: string } } => {
+    const msg = err instanceof Error ? err.message : String(err)
+    const codes: Record<string, number> = {
+      forbidden: 403,
+      only_owner: 403,
+      invalid_name: 400,
+      not_found: 404,
+      already_member: 409,
+      cannot_remove_owner: 409,
+      not_member: 403,
+    }
+    return { status: codes[msg] ?? 500, body: { error: msg } }
+  }
+
+  app.get("/teams", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    return c.json({ teams: listTeamsForCustomer(sess.sub) })
+  })
+
+  app.post("/teams", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { name?: string }
+    try {
+      const team = createTeam(sess.sub, body.name ?? "")
+      return c.json({ team })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.get("/teams/:id", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const detail = getTeamDetail(c.req.param("id"), sess.sub)
+    if (!detail) return c.json({ error: "not_found" }, 404)
+    return c.json(detail)
+  })
+
+  app.patch("/teams/:id", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { name?: string }
+    try {
+      const team = renameTeam(c.req.param("id"), sess.sub, body.name ?? "")
+      return c.json({ team })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.delete("/teams/:id", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    try {
+      deleteTeam(c.req.param("id"), sess.sub)
+      return c.json({ ok: true })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.post("/teams/:id/members", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { identifier?: string }
+    if (!body.identifier) return c.json({ error: "missing_identifier" }, 400)
+    try {
+      const r = addMemberByIdentifier(c.req.param("id"), sess.sub, body.identifier)
+      return c.json(r)
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.delete("/teams/:id/members/:customerId", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    try {
+      removeMember(c.req.param("id"), sess.sub, c.req.param("customerId"))
+      return c.json({ ok: true })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.delete("/teams/:id/invites/:inviteId", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    try {
+      cancelInvite(c.req.param("id"), sess.sub, c.req.param("inviteId"))
+      return c.json({ ok: true })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  // Live sessions — a team member advertises an editor session; other
+  // members see it in their workspace switcher.
+  app.get("/teams/:id/sessions", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    return c.json({ sessions: listActiveSessions(c.req.param("id"), sess.sub) })
+  })
+
+  app.post("/teams/:id/sessions", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { title?: string; state?: unknown }
+    if (!body.title) return c.json({ error: "missing_title" }, 400)
+    try {
+      const row = createTeamSession({
+        team_id: c.req.param("id"),
+        host: sess.sub,
+        title: body.title,
+        state: body.state,
+      })
+      return c.json(row)
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.post("/teams/:id/sessions/:sid/heartbeat", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { state?: unknown }
+    const row = heartbeatSession(c.req.param("sid"), sess.sub, body.state)
+    if (!row) return c.json({ error: "not_found_or_not_host" }, 404)
+    return c.json(row)
+  })
+
+  app.delete("/teams/:id/sessions/:sid", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const ok = endSession(c.req.param("sid"), sess.sub)
+    if (!ok) return c.json({ error: "not_found" }, 404)
     return c.json({ ok: true })
   })
 

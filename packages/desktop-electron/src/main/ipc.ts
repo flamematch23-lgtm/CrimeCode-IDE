@@ -448,6 +448,92 @@ export function registerIpcHandlers(deps: Deps) {
     return await r.json()
   })
 
+  // ── Teams ──
+  const teamJson = async (path: string, init?: RequestInit) => {
+    const r = await authService.fetch(path, init)
+    const text = await r.text()
+    let body: unknown
+    try {
+      body = text ? JSON.parse(text) : null
+    } catch {
+      body = text
+    }
+    if (!r.ok) {
+      const msg = typeof body === "object" && body && "error" in body ? (body as { error: string }).error : `${r.status}`
+      throw new Error(msg)
+    }
+    return body
+  }
+
+  ipcMain.handle("teams-list", () => teamJson(`/license/teams`))
+  ipcMain.handle("teams-create", (_e, name: string) =>
+    teamJson(`/license/teams`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  )
+  ipcMain.handle("teams-detail", (_e, teamId: string) => teamJson(`/license/teams/${encodeURIComponent(teamId)}`))
+  ipcMain.handle("teams-rename", (_e, teamId: string, name: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  )
+  ipcMain.handle("teams-delete", (_e, teamId: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}`, { method: "DELETE" }),
+  )
+  ipcMain.handle("teams-add-member", (_e, teamId: string, identifier: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier }),
+    }),
+  )
+  ipcMain.handle("teams-remove-member", (_e, teamId: string, customerId: string) =>
+    teamJson(
+      `/license/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(customerId)}`,
+      { method: "DELETE" },
+    ),
+  )
+  ipcMain.handle("teams-cancel-invite", (_e, teamId: string, inviteId: string) =>
+    teamJson(
+      `/license/teams/${encodeURIComponent(teamId)}/invites/${encodeURIComponent(inviteId)}`,
+      { method: "DELETE" },
+    ),
+  )
+  ipcMain.handle("teams-list-sessions", (_e, teamId: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`),
+  )
+  ipcMain.handle(
+    "teams-publish-session",
+    (_e, teamId: string, title: string, state: unknown) =>
+      teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, state }),
+      }),
+  )
+  ipcMain.handle(
+    "teams-heartbeat-session",
+    (_e, teamId: string, sid: string, state: unknown) =>
+      teamJson(
+        `/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}/heartbeat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state }),
+        },
+      ),
+  )
+  ipcMain.handle("teams-end-session", (_e, teamId: string, sid: string) =>
+    teamJson(
+      `/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}`,
+      { method: "DELETE" },
+    ),
+  )
+
   // ── Project: create new (folder) ──
   ipcMain.handle("project-create", async (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)

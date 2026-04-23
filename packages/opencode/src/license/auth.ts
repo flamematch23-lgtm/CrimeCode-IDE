@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { Log } from "../util/log"
 import { getDb } from "./db"
+import { claimPendingInvitesForCustomer } from "./teams"
 
 const log = Log.create({ service: "license-auth" })
 
@@ -174,6 +175,14 @@ export function pollAuth(pin: string): PollResult {
 
   // Burn the pin so it can't be reused.
   db.prepare("DELETE FROM auth_pins WHERE pin = ?").run(pin)
+
+  // Auto-accept any pending team invites addressed to this customer's
+  // identifiers (Telegram handle / email).
+  try {
+    claimPendingInvitesForCustomer(customer.id)
+  } catch (err) {
+    log.warn("failed to claim pending invites", { customer: customer.id, error: err instanceof Error ? err.message : String(err) })
+  }
 
   const { token, exp } = makeSessionToken({
     sub: customer.id,

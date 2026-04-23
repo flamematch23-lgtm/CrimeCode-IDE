@@ -119,6 +119,57 @@ CREATE TABLE IF NOT EXISTS sync_kv (
   PRIMARY KEY (customer_id, key),
   FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
+
+-- Teams: one owner + N members sharing a workspace with live session metadata.
+CREATE TABLE IF NOT EXISTS teams (
+  id                  TEXT PRIMARY KEY,
+  name                TEXT NOT NULL,
+  owner_customer_id   TEXT NOT NULL,
+  created_at          INTEGER NOT NULL,
+  FOREIGN KEY (owner_customer_id) REFERENCES customers(id)
+);
+CREATE INDEX IF NOT EXISTS teams_owner_idx ON teams(owner_customer_id);
+
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id      TEXT NOT NULL,
+  customer_id  TEXT NOT NULL,
+  role         TEXT NOT NULL CHECK (role IN ('owner','admin','member')),
+  added_at     INTEGER NOT NULL,
+  PRIMARY KEY (team_id, customer_id),
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+CREATE INDEX IF NOT EXISTS team_members_customer_idx ON team_members(customer_id);
+
+-- Pending invites — claimed when the invitee signs in and their Telegram
+-- handle or email matches. The invite is then deleted.
+CREATE TABLE IF NOT EXISTS team_invites (
+  id           TEXT PRIMARY KEY,
+  team_id      TEXT NOT NULL,
+  identifier   TEXT NOT NULL,           -- @telegramhandle or email
+  role         TEXT NOT NULL DEFAULT 'member',
+  invited_by   TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS team_invites_team_idx ON team_invites(team_id);
+CREATE INDEX IF NOT EXISTS team_invites_identifier_idx ON team_invites(identifier);
+
+-- Live sessions advertised by a team member to the rest of the team.
+-- "state" is a JSON blob the client owns (project path, current file, etc).
+CREATE TABLE IF NOT EXISTS team_sessions (
+  id                 TEXT PRIMARY KEY,
+  team_id            TEXT NOT NULL,
+  host_customer_id   TEXT NOT NULL,
+  title              TEXT NOT NULL,
+  state              TEXT,
+  created_at         INTEGER NOT NULL,
+  last_heartbeat_at  INTEGER NOT NULL,
+  ended_at           INTEGER,
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (host_customer_id) REFERENCES customers(id)
+);
+CREATE INDEX IF NOT EXISTS team_sessions_team_idx ON team_sessions(team_id, ended_at);
 `
 
 function resolvePath(): string {

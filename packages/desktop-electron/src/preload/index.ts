@@ -97,6 +97,22 @@ const api: ElectronAPI = {
   project: {
     create: () => ipcRenderer.invoke("project-create"),
   },
+  teams: {
+    list: () => ipcRenderer.invoke("teams-list"),
+    create: (name: string) => ipcRenderer.invoke("teams-create", name),
+    detail: (id: string) => ipcRenderer.invoke("teams-detail", id),
+    rename: (id: string, name: string) => ipcRenderer.invoke("teams-rename", id, name),
+    delete: (id: string) => ipcRenderer.invoke("teams-delete", id),
+    addMember: (id: string, identifier: string) => ipcRenderer.invoke("teams-add-member", id, identifier),
+    removeMember: (id: string, customerId: string) => ipcRenderer.invoke("teams-remove-member", id, customerId),
+    cancelInvite: (id: string, inviteId: string) => ipcRenderer.invoke("teams-cancel-invite", id, inviteId),
+    listSessions: (id: string) => ipcRenderer.invoke("teams-list-sessions", id),
+    publishSession: (id: string, title: string, state: unknown) =>
+      ipcRenderer.invoke("teams-publish-session", id, title, state),
+    heartbeatSession: (id: string, sid: string, state: unknown) =>
+      ipcRenderer.invoke("teams-heartbeat-session", id, sid, state),
+    endSession: (id: string, sid: string) => ipcRenderer.invoke("teams-end-session", id, sid),
+  },
 
   // Enhancement 3: Native context menus
   showContextMenu: (items: ContextMenuItem[]) => ipcRenderer.invoke("show-context-menu", items),

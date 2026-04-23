@@ -146,6 +146,20 @@ export type ElectronAPI = {
   project: {
     readonly create: () => Promise<{ directory: string } | null>
   }
+  teams: {
+    readonly list: () => Promise<{ teams: Array<TeamSummary> }>
+    readonly create: (name: string) => Promise<{ team: TeamSummary }>
+    readonly detail: (id: string) => Promise<TeamDetailPayload>
+    readonly rename: (id: string, name: string) => Promise<{ team: TeamSummary }>
+    readonly delete: (id: string) => Promise<{ ok: true }>
+    readonly addMember: (id: string, identifier: string) => Promise<AddMemberPayload>
+    readonly removeMember: (id: string, customerId: string) => Promise<{ ok: true }>
+    readonly cancelInvite: (id: string, inviteId: string) => Promise<{ ok: true }>
+    readonly listSessions: (id: string) => Promise<{ sessions: TeamLiveSession[] }>
+    readonly publishSession: (id: string, title: string, state: unknown) => Promise<TeamLiveSession>
+    readonly heartbeatSession: (id: string, sid: string, state: unknown) => Promise<TeamLiveSession | null>
+    readonly endSession: (id: string, sid: string) => Promise<{ ok: true }>
+  }
 
   // Enhancement 3: Native context menus
   showContextMenu: (items: ContextMenuItem[]) => Promise<string | null>
@@ -193,4 +207,58 @@ export type ElectronAPI = {
   }) => Promise<
     Array<{ id: string; name: string; type: "screen" | "window"; thumbnail: string; appIcon: string | null }>
   >
+}
+
+export type TeamRole = "owner" | "admin" | "member"
+
+export interface TeamSummary {
+  id: string
+  name: string
+  owner_customer_id: string
+  created_at: number
+  role?: TeamRole
+  member_count?: number
+}
+
+export interface TeamMember {
+  team_id: string
+  customer_id: string
+  role: TeamRole
+  added_at: number
+  display: string | null
+  telegram_user_id: number | null
+  telegram: string | null
+}
+
+export interface TeamInvite {
+  id: string
+  team_id: string
+  identifier: string
+  role: TeamRole
+  invited_by: string
+  created_at: number
+}
+
+export interface TeamDetailPayload {
+  team: TeamSummary
+  members: TeamMember[]
+  invites: TeamInvite[]
+  self_role: TeamRole
+}
+
+export interface AddMemberPayload {
+  mode: "added" | "invited"
+  member?: TeamMember
+  invite?: TeamInvite
+}
+
+export interface TeamLiveSession {
+  id: string
+  team_id: string
+  host_customer_id: string
+  title: string
+  state: string | null
+  created_at: number
+  last_heartbeat_at: number
+  ended_at: number | null
 }

@@ -1,6 +1,7 @@
 import { Log } from "../util/log"
 import { captureException } from "./sentry"
 import { claimPinForCustomer } from "./auth"
+import { listTeamsForCustomer } from "./teams"
 import {
   attachPaymentOffer,
   cancelOrder,
@@ -108,6 +109,7 @@ The IDE built for fraud researchers and security pros — by the team, for the t
 \`/order monthly|annual|lifetime\` — create a new order
 \`/status <order_id>\` — check the status of one of your orders
 \`/myorders\` — list your last orders
+\`/teams\` — list your teams
 
 🔒 *Privacy*
 We store only your Telegram handle, your order, and the license token signature. No email, no card data, no KYC.
@@ -311,6 +313,23 @@ async function handle(update: TgUpdate) {
       if (o.tx_hash) body += `\ntx: \`${escapeMd(o.tx_hash)}\``
       if (o.license_id) body += `\nLicense: \`${o.license_id}\``
       await send(chatId, body, "Markdown")
+      return
+    }
+    case "teams": {
+      const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+      const teams = listTeamsForCustomer(customer.id)
+      if (teams.length === 0) {
+        await send(
+          chatId,
+          "You're not in any team yet. Ask an admin to invite you, or create one from the CrimeCode desktop app (*Personal ▸ Create Team*).",
+          "Markdown",
+        )
+        return
+      }
+      const lines = teams.map(
+        (t) => `• *${escapeMd(t.name)}* — role: *${t.role}*, members: ${t.member_count}`,
+      )
+      await send(chatId, "Your teams:\n" + lines.join("\n"), "Markdown")
       return
     }
     case "myorders": {
