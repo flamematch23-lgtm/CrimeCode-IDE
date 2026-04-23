@@ -9,6 +9,7 @@ import { handleNotificationClick } from "@/utils/notification-click"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 import { AuthGate, buildAuthHeader, readCredentials } from "./pages/auth-gate"
+import { LiveCursors } from "./components/teams/live-cursors"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 
@@ -165,6 +166,7 @@ if (root instanceof HTMLElement) {
                   servers={[server]}
                   disableHealthCheck
                 />
+                <LiveCursors />
               </AppBaseProviders>
             </PlatformProvider>
           )
