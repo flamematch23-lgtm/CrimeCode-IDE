@@ -185,6 +185,39 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
   })
   onCleanup(unsub)
 
+  /**
+   * Startup reconciliation: ask the server which of our persisted PTYs
+   * still exist. Everything that's gone is silently dropped so we don't
+   * trigger a cascade of "connect → 404 → clone" on boot after the server
+   * restarted. The clone path still runs for PTYs that are genuinely alive
+   * on the server but the websocket fails — that's a different failure
+   * mode that deserves the retry.
+   */
+  void (async () => {
+    try {
+      // `ready` is a callable signal, its `.promise` settles when storage
+      // has been fully hydrated on async storages.
+      const readyPromise = (ready as unknown as { promise?: Promise<unknown> }).promise
+      if (readyPromise) await readyPromise
+      const resp = await sdk.client.pty.list()
+      const alive = new Set<string>((resp.data ?? []).map((p: { id: string }) => p.id))
+      const stale = store.all.filter((p) => !alive.has(p.id))
+      if (stale.length === 0) return
+      console.debug("[terminal-ctx] ","dropping stale persisted PTYs", { ids: stale.map((s) => s.id) })
+      batch(() => {
+        const nextAll = store.all.filter((p) => alive.has(p.id))
+        setStore("all", nextAll)
+        if (store.active && !alive.has(store.active)) {
+          setStore("active", nextAll[0]?.id)
+        }
+      })
+    } catch (err) {
+      // Server unreachable at boot — leave the store alone so the reconnect
+      // loop handles recovery the hard way.
+      console.debug("[terminal-ctx] ","pty reconciliation failed at boot", err)
+    }
+  })()
+
   const update = (client: ReturnType<typeof useSDK>["client"], pty: Partial<LocalPTY> & { id: string }) => {
     const index = store.all.findIndex((x) => x.id === pty.id)
     const previous = index >= 0 ? store.all[index] : undefined

@@ -99,13 +99,27 @@ export function DiagnosticOverlay() {
 
     // wrap fetch to capture failed requests with URL/method/status
     const origFetch = window.fetch.bind(window)
+    /**
+     * Self-healing paths we intentionally suppress from the diagnostic feed.
+     * The app recovers from these automatically (clone/retry), so surfacing
+     * them creates scary counts of "errors" that aren't actionable for the
+     * user. If these start returning OTHER statuses (500, 403) they'll fall
+     * through and be recorded normally.
+     */
+    const isExpected404 = (method: string, url: string, status: number): boolean => {
+      if (status !== 404) return false
+      if (method !== "GET" && method !== "DELETE") return false
+      // /pty/pty_<id>... — the client prunes stale IDs via the clone flow.
+      if (/\/pty\/pty_[A-Za-z0-9]+(\?|$)/.test(url)) return true
+      return false
+    }
     const wrappedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
       const method = init?.method ?? (input instanceof Request ? input.method : "GET")
       const startedAt = performance.now()
       try {
         const res = await origFetch(input as RequestInfo, init)
-        if (!res.ok) {
+        if (!res.ok && !isExpected404(method, url, res.status)) {
           push({
             kind: "fetch",
             message: `${method} ${url} → ${res.status} ${res.statusText}`,
