@@ -90,7 +90,7 @@ async function putObject(key: string, body: Uint8Array, contentType = "applicati
       "Content-Type": contentType,
       "Content-Length": String(body.byteLength),
     },
-    body,
+    body: body as BodyInit,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")

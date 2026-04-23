@@ -497,6 +497,16 @@ export function registerIpcHandlers(deps: Deps) {
       { method: "DELETE" },
     ),
   )
+  ipcMain.handle("teams-set-member-role", (_e, teamId: string, customerId: string, role: string) =>
+    teamJson(
+      `/license/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(customerId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      },
+    ),
+  )
   ipcMain.handle("teams-cancel-invite", (_e, teamId: string, inviteId: string) =>
     teamJson(
       `/license/teams/${encodeURIComponent(teamId)}/invites/${encodeURIComponent(inviteId)}`,

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 import { getDb } from "./db"
+import { emitTeamEvent } from "./team-events"
 
 type Role = "owner" | "admin" | "member"
 
@@ -89,6 +90,7 @@ export function renameTeam(teamId: string, actor: string, name: string): TeamRow
   const role = getMemberRole(teamId, actor)
   if (role !== "owner" && role !== "admin") throw new Error("forbidden")
   getDb().prepare("UPDATE teams SET name = ? WHERE id = ?").run(cleanName, teamId)
+  emitTeamEvent({ type: "team_renamed", team_id: teamId, name: cleanName })
   return getTeam(teamId)!
 }
 
@@ -99,6 +101,7 @@ export function deleteTeam(teamId: string, actor: string): void {
   const db = getDb()
   // ON DELETE CASCADE handles team_members / team_invites / team_sessions.
   db.prepare("DELETE FROM teams WHERE id = ?").run(teamId)
+  emitTeamEvent({ type: "team_deleted", team_id: teamId })
 }
 
 export function getTeam(teamId: string): TeamRow | null {
@@ -204,6 +207,7 @@ export function addMemberByIdentifier(
         "SELECT * FROM team_members WHERE team_id = ? AND customer_id = ?",
       )
       .get(teamId, match.id)!
+    emitTeamEvent({ type: "member_added", team_id: teamId, customer_id: match.id })
     return { mode: "added", member }
   }
 
@@ -225,6 +229,32 @@ export function removeMember(teamId: string, actor: string, customerId: string):
   if (role !== "owner" && actor !== customerId) throw new Error("forbidden")
   if (customerId === team.owner_customer_id) throw new Error("cannot_remove_owner")
   getDb().prepare("DELETE FROM team_members WHERE team_id = ? AND customer_id = ?").run(teamId, customerId)
+  emitTeamEvent({ type: "member_removed", team_id: teamId, customer_id: customerId })
+}
+
+/**
+ * Owner can promote a member to admin or demote an admin back to member.
+ * Owners cannot be demoted (they must transfer ownership first — out of scope
+ * for this pass).
+ */
+export function setMemberRole(
+  teamId: string,
+  actor: string,
+  customerId: string,
+  newRole: Role,
+): TeamMemberRow {
+  const team = getTeam(teamId)
+  if (!team) throw new Error("not_found")
+  if (team.owner_customer_id !== actor) throw new Error("only_owner")
+  if (customerId === team.owner_customer_id) throw new Error("cannot_change_owner_role")
+  if (newRole !== "admin" && newRole !== "member") throw new Error("invalid_role")
+  const current = getMemberRole(teamId, customerId)
+  if (!current) throw new Error("not_member")
+  getDb().prepare("UPDATE team_members SET role = ? WHERE team_id = ? AND customer_id = ?").run(newRole, teamId, customerId)
+  emitTeamEvent({ type: "member_role_changed", team_id: teamId, customer_id: customerId, role: newRole })
+  return getDb()
+    .prepare<TeamMemberRow, [string, string]>("SELECT * FROM team_members WHERE team_id = ? AND customer_id = ?")
+    .get(teamId, customerId)!
 }
 
 export function cancelInvite(teamId: string, actor: string, inviteId: string): void {
@@ -289,6 +319,13 @@ export function createTeamSession(opts: { team_id: string; host: string; title: 
     now(),
     now(),
   )
+  emitTeamEvent({
+    type: "session_started",
+    team_id: opts.team_id,
+    session_id: id,
+    host: opts.host,
+    title: opts.title.slice(0, 200),
+  })
   return db.prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?").get(id)!
 }
 
@@ -316,6 +353,7 @@ export function heartbeatSession(sessionId: string, actor: string, state?: unkno
   db.prepare(
     "UPDATE team_sessions SET last_heartbeat_at = ?, state = COALESCE(?, state) WHERE id = ?",
   ).run(now(), state !== undefined ? JSON.stringify(state).slice(0, 16_000) : null, sessionId)
+  emitTeamEvent({ type: "session_heartbeat", team_id: row.team_id, session_id: sessionId })
   return db.prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?").get(sessionId) ?? null
 }
 
@@ -330,5 +368,6 @@ export function endSession(sessionId: string, actor: string): boolean {
     if (role !== "owner") return false
   }
   db.prepare("UPDATE team_sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL").run(now(), sessionId)
+  emitTeamEvent({ type: "session_ended", team_id: row.team_id, session_id: sessionId })
   return true
 }

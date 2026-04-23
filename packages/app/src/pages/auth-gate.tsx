@@ -1,16 +1,19 @@
-import { createSignal, Show, onMount } from "solid-js"
+import { createSignal, Show, Switch, Match, onMount } from "solid-js"
 import type { JSX } from "solid-js"
+import { readWebSession, writeWebSession } from "../utils/teams-client"
 
 /**
- * AuthGate — wraps the AppInterface with a simple login form that collects
- * (server URL, username, password), stores them in localStorage, and only
- * renders the protected tree once we've verified the credentials work.
+ * AuthGate — wraps the AppInterface. Two sign-in paths:
+ *   1. Telegram magic-link (primary): /license/auth/start → user taps the
+ *      bot link → client polls → JWT session is written to localStorage.
+ *   2. Self-hosted Basic Auth (advanced): keeps the legacy (url,user,pass)
+ *      combo for people running their own opencode server.
  *
- * Security notes:
- * - localStorage is scoped per-origin; other sites can't read it.
- * - Credentials are sent as HTTP Basic Auth over HTTPS (transport-encrypted).
- * - No credentials are bundled into the JS; only the DEFAULT URL is.
- * - Logout wipes all three keys and reloads the page.
+ * The rest of the app reads credentials via readCredentials() and always
+ * gets a {url, username, password} shape — for Bearer sessions `username`
+ * is "bearer" and `password` is the JWT, so the app's `fetch` wrapper that
+ * builds `Authorization: Basic ${btoa(user:pass)}` has been replaced by
+ * a branching helper (`buildAuthHeader`) that emits the right header.
  */
 
 const STORAGE_KEYS = {
@@ -19,22 +22,28 @@ const STORAGE_KEYS = {
   password: "opencode.auth.password",
 } as const
 
-const DEFAULT_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
+const DEFAULT_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.crimecode.cc"
 const DEFAULT_USERNAME = "opencode"
 
 export type Credentials = {
   url: string
   username: string
   password: string
+  /** "basic" for legacy self-hosted auth, "bearer" for Telegram JWT. */
+  kind?: "basic" | "bearer"
 }
 
 export function readCredentials(): Credentials | null {
   if (typeof localStorage === "undefined") return null
+  const session = readWebSession()
+  if (session) {
+    return { url: DEFAULT_URL, username: "bearer", password: session.token, kind: "bearer" }
+  }
   const url = localStorage.getItem(STORAGE_KEYS.url)
   const username = localStorage.getItem(STORAGE_KEYS.username)
   const password = localStorage.getItem(STORAGE_KEYS.password)
   if (!url) return null
-  return { url, username: username ?? "", password: password ?? "" }
+  return { url, username: username ?? "", password: password ?? "", kind: "basic" }
 }
 
 export function writeCredentials(creds: Credentials): void {
@@ -49,20 +58,25 @@ export function clearCredentials(): void {
   localStorage.removeItem(STORAGE_KEYS.url)
   localStorage.removeItem(STORAGE_KEYS.username)
   localStorage.removeItem(STORAGE_KEYS.password)
+  writeWebSession(null)
+}
+
+export function buildAuthHeader(creds: Credentials): string {
+  if (creds.kind === "bearer") return `Bearer ${creds.password}`
+  return "Basic " + btoa(`${creds.username}:${creds.password}`)
 }
 
 async function verifyCredentials(creds: Credentials): Promise<{ ok: boolean; message?: string }> {
   try {
-    const auth = "Basic " + btoa(`${creds.username}:${creds.password}`)
     const url = creds.url.replace(/\/+$/, "") + "/global/config"
     const response = await fetch(url, {
       method: "GET",
-      headers: { Authorization: auth },
+      headers: { Authorization: buildAuthHeader(creds) },
       mode: "cors",
       credentials: "omit",
     })
     if (response.ok) return { ok: true }
-    if (response.status === 401) return { ok: false, message: "Invalid username or password." }
+    if (response.status === 401) return { ok: false, message: "Not authorized. Please sign in again." }
     return { ok: false, message: `Server returned HTTP ${response.status}.` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -70,14 +84,57 @@ async function verifyCredentials(creds: Credentials): Promise<{ ok: boolean; mes
   }
 }
 
+interface PinState {
+  pin: string
+  bot_url: string
+  expires_at: number
+}
+
+async function startTgAuth(): Promise<PinState> {
+  const res = await fetch(`${DEFAULT_URL}/license/auth/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device_label: navigator.userAgent.slice(0, 80) }),
+  })
+  if (!res.ok) throw new Error(`auth/start ${res.status}`)
+  return (await res.json()) as PinState
+}
+
+async function pollTgAuth(pin: string): Promise<
+  | { status: "pending" }
+  | { status: "expired" }
+  | { status: "ok"; token: string; exp: number; customer_id: string }
+  | { status: "unknown" }
+> {
+  const res = await fetch(`${DEFAULT_URL}/license/auth/poll/${encodeURIComponent(pin)}`)
+  if (!res.ok) throw new Error(`auth/poll ${res.status}`)
+  return (await res.json()) as never
+}
+
 export function AuthGate(props: { children: (creds: Credentials) => JSX.Element }) {
   const [creds, setCreds] = createSignal<Credentials | null>(null)
   const [checking, setChecking] = createSignal(true)
   const [error, setError] = createSignal<string | null>(null)
+  const [mode, setMode] = createSignal<"telegram" | "basic">("telegram")
+
+  // Telegram flow state
+  const [pinState, setPinState] = createSignal<PinState | null>(null)
+  const [polling, setPolling] = createSignal(false)
+
+  // Basic flow state
   const [url, setUrl] = createSignal(DEFAULT_URL)
   const [username, setUsername] = createSignal(DEFAULT_USERNAME)
   const [password, setPassword] = createSignal("")
   const [submitting, setSubmitting] = createSignal(false)
+
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  function stopPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+    setPolling(false)
+  }
 
   onMount(async () => {
     const stored = readCredentials()
@@ -90,13 +147,56 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
       setCreds(stored)
     } else {
       setError(result.message ?? "Stored credentials are no longer valid.")
-      setUrl(stored.url)
-      setUsername(stored.username)
+      if (stored.kind === "basic") {
+        setMode("basic")
+        setUrl(stored.url)
+        setUsername(stored.username)
+      }
     }
     setChecking(false)
   })
 
-  async function handleSubmit(e: Event) {
+  async function startTelegram() {
+    stopPoll()
+    setError(null)
+    try {
+      const s = await startTgAuth()
+      setPinState(s)
+      setPolling(true)
+      window.open(s.bot_url, "_blank", "noopener")
+      pollTimer = setInterval(async () => {
+        try {
+          const r = await pollTgAuth(s.pin)
+          if (r.status === "ok") {
+            stopPoll()
+            writeWebSession({
+              token: r.token,
+              customer_id: r.customer_id,
+              telegram_user_id: null,
+              expires_at: r.exp,
+            })
+            const next: Credentials = { url: DEFAULT_URL, username: "bearer", password: r.token, kind: "bearer" }
+            writeCredentials(next)
+            setCreds(next)
+            setPinState(null)
+          }
+          if (r.status === "expired" || r.status === "unknown") {
+            stopPoll()
+            setPinState(null)
+            setError("PIN expired. Please start again.")
+          }
+        } catch (err) {
+          stopPoll()
+          setPinState(null)
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      }, 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function submitBasic(e: Event) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
@@ -104,6 +204,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
       url: url().replace(/\/+$/, ""),
       username: username(),
       password: password(),
+      kind: "basic",
     }
     const result = await verifyCredentials(next)
     setSubmitting(false)
@@ -127,46 +228,115 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             </div>
           }
         >
-          <form data-auth-gate="form" onSubmit={handleSubmit} style={formStyle}>
+          <div data-auth-gate="form" style={formStyle}>
             <div style={cardStyle}>
               <h1 style={titleStyle}>Sign in to CrimeCode</h1>
-              <p style={subtitleStyle}>Connect to your self-hosted CrimeCode server.</p>
+              <p style={subtitleStyle}>Pick a sign-in method below.</p>
 
-              <label style={labelStyle}>
-                <span>Server URL</span>
-                <input
-                  type="url"
-                  required
-                  value={url()}
-                  onInput={(e) => setUrl(e.currentTarget.value)}
-                  placeholder="https://crimecode-api.fly.dev"
-                  style={inputStyle}
-                />
-              </label>
+              <div style={tabsStyle}>
+                <button
+                  type="button"
+                  data-active={mode() === "telegram"}
+                  onClick={() => setMode("telegram")}
+                  style={tabStyle(mode() === "telegram")}
+                >
+                  📱 Telegram
+                </button>
+                <button
+                  type="button"
+                  data-active={mode() === "basic"}
+                  onClick={() => setMode("basic")}
+                  style={tabStyle(mode() === "basic")}
+                >
+                  🖥 Self-hosted
+                </button>
+              </div>
 
-              <label style={labelStyle}>
-                <span>Username</span>
-                <input
-                  type="text"
-                  required
-                  value={username()}
-                  onInput={(e) => setUsername(e.currentTarget.value)}
-                  autocomplete="username"
-                  style={inputStyle}
-                />
-              </label>
-
-              <label style={labelStyle}>
-                <span>Password</span>
-                <input
-                  type="password"
-                  required
-                  value={password()}
-                  onInput={(e) => setPassword(e.currentTarget.value)}
-                  autocomplete="current-password"
-                  style={inputStyle}
-                />
-              </label>
+              <Switch>
+                <Match when={mode() === "telegram"}>
+                  <Show
+                    when={pinState() && polling()}
+                    fallback={
+                      <div>
+                        <p style={descriptionStyle}>
+                          Sign in with your Telegram account via <b>@CrimeCodeSub_bot</b>. No email, no password —
+                          you'll get a one-time PIN to link this browser.
+                        </p>
+                        <button type="button" onClick={startTelegram} style={primaryButtonStyle}>
+                          Continue with Telegram
+                        </button>
+                      </div>
+                    }
+                  >
+                    {(_) => {
+                      const s = pinState()!
+                      return (
+                        <div>
+                          <p style={descriptionStyle}>Open Telegram and enter this one-time PIN:</p>
+                          <div style={pinStyle}>{s.pin}</div>
+                          <p style={descriptionStyle}>
+                            Or open the bot directly:{" "}
+                            <a href={s.bot_url} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+                              {s.bot_url}
+                            </a>
+                          </p>
+                          <p style={hintStyle}>Waiting for confirmation… (auto-detected)</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              stopPoll()
+                              setPinState(null)
+                            }}
+                            style={ghostButtonStyle}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )
+                    }}
+                  </Show>
+                </Match>
+                <Match when={mode() === "basic"}>
+                  <form onSubmit={submitBasic}>
+                    <label style={labelStyle}>
+                      <span>Server URL</span>
+                      <input
+                        type="url"
+                        required
+                        value={url()}
+                        onInput={(e) => setUrl(e.currentTarget.value)}
+                        placeholder="https://your-server.fly.dev"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      <span>Username</span>
+                      <input
+                        type="text"
+                        required
+                        value={username()}
+                        onInput={(e) => setUsername(e.currentTarget.value)}
+                        autocomplete="username"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      <span>Password</span>
+                      <input
+                        type="password"
+                        required
+                        value={password()}
+                        onInput={(e) => setPassword(e.currentTarget.value)}
+                        autocomplete="current-password"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <button type="submit" disabled={submitting()} style={primaryButtonStyle}>
+                      {submitting() ? "Signing in…" : "Sign in"}
+                    </button>
+                  </form>
+                </Match>
+              </Switch>
 
               <Show when={error()}>
                 {(msg) => (
@@ -176,15 +346,9 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                 )}
               </Show>
 
-              <button type="submit" disabled={submitting()} style={buttonStyle}>
-                {submitting() ? "Signing in…" : "Sign in"}
-              </button>
-
-              <p style={hintStyle}>
-                Credentials are stored in your browser&apos;s localStorage and sent as HTTP Basic Auth over HTTPS.
-              </p>
+              <p style={hintStyle}>Credentials stay in your browser's localStorage and travel only over HTTPS.</p>
             </div>
-          </form>
+          </div>
         </Show>
       }
     >
@@ -198,10 +362,9 @@ export function logout(): void {
   window.location.reload()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Inline styles — keep the login screen standalone so it renders before the
-// theme system is initialized.
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
+// Inline styles (no theme deps so the gate renders standalone).
+// ───────────────────────────────────────────────────────────────────────
 
 const loadingStyle: JSX.CSSProperties = {
   display: "flex",
@@ -210,87 +373,131 @@ const loadingStyle: JSX.CSSProperties = {
   "min-height": "100vh",
   "font-family": "system-ui, -apple-system, sans-serif",
   color: "#ccc",
-  background: "#111",
+  background: "#07070a",
 }
-
 const formStyle: JSX.CSSProperties = {
   display: "flex",
   "align-items": "center",
   "justify-content": "center",
   "min-height": "100vh",
   padding: "24px",
-  background: "#111",
+  background: "radial-gradient(ellipse at top, #1a0a0a 0%, #07070a 70%)",
   "font-family": "system-ui, -apple-system, sans-serif",
 }
-
 const cardStyle: JSX.CSSProperties = {
   width: "100%",
-  "max-width": "380px",
+  "max-width": "440px",
   padding: "32px",
-  background: "#1a1a1a",
-  border: "1px solid #333",
-  "border-radius": "12px",
-  "box-shadow": "0 8px 32px rgba(0,0,0,0.4)",
+  background: "rgba(15,15,20,0.9)",
+  border: "1px solid rgba(255,87,34,0.3)",
+  "border-radius": "14px",
+  "box-shadow": "0 20px 60px rgba(0,0,0,0.5)",
 }
-
 const titleStyle: JSX.CSSProperties = {
   margin: "0 0 8px 0",
-  "font-size": "22px",
-  "font-weight": "600",
+  "font-size": "24px",
+  "font-weight": "800",
   color: "#fff",
 }
-
 const subtitleStyle: JSX.CSSProperties = {
-  margin: "0 0 24px 0",
+  margin: "0 0 18px 0",
   "font-size": "14px",
-  color: "#999",
+  color: "rgba(255,255,255,0.55)",
 }
-
+const tabsStyle: JSX.CSSProperties = {
+  display: "flex",
+  gap: "8px",
+  "margin-bottom": "18px",
+}
+const tabStyle = (active: boolean): JSX.CSSProperties => ({
+  flex: "1",
+  padding: "10px 14px",
+  background: active ? "rgba(255,87,34,0.15)" : "transparent",
+  border: `1px solid ${active ? "rgba(255,87,34,0.5)" : "rgba(255,255,255,0.1)"}`,
+  color: active ? "#ff5722" : "#aaa",
+  "border-radius": "8px",
+  cursor: "pointer",
+  "font-size": "13px",
+  "font-weight": "600",
+})
+const descriptionStyle: JSX.CSSProperties = {
+  margin: "0 0 14px 0",
+  "font-size": "13px",
+  color: "rgba(255,255,255,0.8)",
+  "line-height": "1.55",
+}
 const labelStyle: JSX.CSSProperties = {
   display: "flex",
   "flex-direction": "column",
   gap: "6px",
-  "margin-bottom": "16px",
-  "font-size": "13px",
-  color: "#ccc",
+  "margin-bottom": "14px",
+  "font-size": "12px",
+  color: "rgba(255,255,255,0.7)",
+  "font-weight": "600",
 }
-
 const inputStyle: JSX.CSSProperties = {
-  padding: "10px 12px",
-  background: "#0a0a0a",
-  border: "1px solid #333",
-  "border-radius": "6px",
+  padding: "11px 14px",
+  background: "#07070a",
+  border: "1px solid rgba(255,255,255,0.15)",
+  "border-radius": "8px",
   color: "#fff",
   "font-size": "14px",
   "font-family": "inherit",
   outline: "none",
 }
-
-const buttonStyle: JSX.CSSProperties = {
+const primaryButtonStyle: JSX.CSSProperties = {
   width: "100%",
   padding: "12px",
-  background: "#2563eb",
+  background: "linear-gradient(135deg, #ff5722, #f4511e)",
   color: "#fff",
   border: "none",
-  "border-radius": "6px",
+  "border-radius": "8px",
   "font-size": "14px",
-  "font-weight": "500",
+  "font-weight": "700",
   cursor: "pointer",
 }
-
+const ghostButtonStyle: JSX.CSSProperties = {
+  width: "100%",
+  padding: "10px",
+  background: "transparent",
+  border: "1px solid rgba(255,255,255,0.15)",
+  color: "#ccc",
+  "border-radius": "8px",
+  cursor: "pointer",
+  "font-size": "13px",
+  "margin-top": "8px",
+}
+const pinStyle: JSX.CSSProperties = {
+  "font-family": "ui-monospace, Menlo, Consolas, monospace",
+  "font-size": "32px",
+  "font-weight": "800",
+  "letter-spacing": "0.2em",
+  color: "#ff5722",
+  "text-align": "center",
+  padding: "20px",
+  margin: "12px 0",
+  background: "rgba(255,87,34,0.08)",
+  border: "1px dashed rgba(255,87,34,0.4)",
+  "border-radius": "10px",
+  "user-select": "all",
+}
+const linkStyle: JSX.CSSProperties = {
+  color: "#ff5722",
+  "text-decoration": "none",
+  "word-break": "break-all",
+}
 const errorStyle: JSX.CSSProperties = {
-  margin: "0 0 12px 0",
+  margin: "14px 0 0 0",
   padding: "10px 12px",
-  background: "#451717",
-  border: "1px solid #7f1d1d",
+  background: "rgba(255,0,0,0.08)",
+  border: "1px solid rgba(255,0,0,0.25)",
   "border-radius": "6px",
-  color: "#fca5a5",
+  color: "#ff8a8a",
   "font-size": "13px",
 }
-
 const hintStyle: JSX.CSSProperties = {
-  margin: "16px 0 0 0",
+  margin: "18px 0 0 0",
   "font-size": "11px",
-  color: "#666",
-  "line-height": "1.4",
+  color: "rgba(255,255,255,0.4)",
+  "line-height": "1.5",
 }

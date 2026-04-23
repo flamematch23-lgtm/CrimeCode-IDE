@@ -105,6 +105,8 @@ const api: ElectronAPI = {
     delete: (id: string) => ipcRenderer.invoke("teams-delete", id),
     addMember: (id: string, identifier: string) => ipcRenderer.invoke("teams-add-member", id, identifier),
     removeMember: (id: string, customerId: string) => ipcRenderer.invoke("teams-remove-member", id, customerId),
+    setMemberRole: (id: string, customerId: string, role: string) =>
+      ipcRenderer.invoke("teams-set-member-role", id, customerId, role),
     cancelInvite: (id: string, inviteId: string) => ipcRenderer.invoke("teams-cancel-invite", id, inviteId),
     listSessions: (id: string) => ipcRenderer.invoke("teams-list-sessions", id),
     publishSession: (id: string, title: string, state: unknown) =>

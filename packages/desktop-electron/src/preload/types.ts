@@ -154,6 +154,7 @@ export type ElectronAPI = {
     readonly delete: (id: string) => Promise<{ ok: true }>
     readonly addMember: (id: string, identifier: string) => Promise<AddMemberPayload>
     readonly removeMember: (id: string, customerId: string) => Promise<{ ok: true }>
+    readonly setMemberRole: (id: string, customerId: string, role: string) => Promise<{ member: TeamMember }>
     readonly cancelInvite: (id: string, inviteId: string) => Promise<{ ok: true }>
     readonly listSessions: (id: string) => Promise<{ sessions: TeamLiveSession[] }>
     readonly publishSession: (id: string, title: string, state: unknown) => Promise<TeamLiveSession>

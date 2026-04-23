@@ -9,6 +9,12 @@ export function createSdkForServer({
 }) {
   const auth = (() => {
     if (!server.password) return
+    // AuthGate stores Telegram JWT sessions as { username: "bearer", password: <jwt> }.
+    // Emit a Bearer token in that case, otherwise stick with Basic for legacy
+    // self-hosted servers.
+    if (server.username === "bearer") {
+      return { Authorization: `Bearer ${server.password}` }
+    }
     return {
       Authorization: `Basic ${btoa(`${server.username ?? "opencode"}:${server.password}`)}`,
     }

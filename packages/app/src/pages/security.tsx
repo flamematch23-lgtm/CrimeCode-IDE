@@ -262,10 +262,14 @@ export default function Security() {
   const fetcher = ((input: RequestInfo | URL, init?: RequestInit) => {
     const current = server.current
     const http = current && current.type === "http" ? current.http : null
-    if (!http?.username || !http?.password) return rawFetcher(input, init)
+    if (!http?.password) return rawFetcher(input, init)
     const headers = new Headers(init?.headers ?? {})
     if (!headers.has("Authorization")) {
-      headers.set("Authorization", "Basic " + btoa(`${http.username}:${http.password}`))
+      if (http.username === "bearer") {
+        headers.set("Authorization", `Bearer ${http.password}`)
+      } else {
+        headers.set("Authorization", "Basic " + btoa(`${http.username ?? "opencode"}:${http.password}`))
+      }
     }
     return rawFetcher(input, { ...init, headers })
   }) as typeof fetch

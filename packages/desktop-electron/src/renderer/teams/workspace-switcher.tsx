@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createResource, createSignal, onCleanup } from "solid-js"
-import type { TeamSummary } from "../../preload/types"
+import { getTeamsClient, readWebSession, type TeamSummary } from "@opencode-ai/app/utils/teams-client"
 import { CreateTeamDialog } from "./create-team-dialog"
 import { ManageTeamDialog } from "./manage-team-dialog"
 
@@ -26,12 +26,23 @@ function writeActive(ws: ActiveWorkspace): void {
 }
 
 export function WorkspaceSwitcher() {
+  const client = getTeamsClient()
   const [open, setOpen] = createSignal(false)
   const [active, setActive] = createSignal<ActiveWorkspace>(readActive())
-  const [account] = createResource(() => window.api.account.get())
-  const [teams, { refetch: refetchTeams }] = createResource(() =>
-    window.api.account.get().then((a) => (a ? window.api.teams.list().then((r) => r.teams) : [])),
-  )
+  const [account] = createResource(async () => {
+    // Desktop: window.api.account.get is authoritative.
+    // Web: fall back to the localStorage session.
+    if (typeof window !== "undefined" && (window as any).api?.account?.get) {
+      return (window as any).api.account.get()
+    }
+    return readWebSession()
+  })
+  const [teams, { refetch: refetchTeams }] = createResource(async () => {
+    const acc = await account()
+    if (!acc) return []
+    const r = await client.list()
+    return r.teams
+  })
   const [showCreate, setShowCreate] = createSignal(false)
   const [manageId, setManageId] = createSignal<string | null>(null)
 
@@ -97,7 +108,7 @@ export function WorkspaceSwitcher() {
               >
                 <span data-slot="item-icon">👤</span>
                 <span data-slot="item-labels">
-                  <span data-slot="item-title">{account()?.customer_id.slice(0, 16)}</span>
+                  <span data-slot="item-title">{account()?.customer_id?.slice(0, 16)}</span>
                   <span data-slot="item-subtitle">Your private workspace</span>
                 </span>
                 <Show when={active().kind === "personal"}>

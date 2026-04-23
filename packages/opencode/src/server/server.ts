@@ -143,21 +143,28 @@ export namespace Server {
           },
         }),
       )
-      .use((c, next) => {
+      .use(async (c, next) => {
         // Allow CORS preflight requests to succeed without auth.
         // Browser clients sending Authorization headers will preflight with OPTIONS.
         if (c.req.method === "OPTIONS") return next()
-        // The license sub-app has its own auth layer:
-        //   - /license/validate is intentionally public (used by Electron clients
-        //     that don't have the server password).
-        //   - /license/admin and other admin endpoints enforce a separate
-        //     Basic-Auth check against OPENCODE_ADMIN_PASSPHRASE_SHA256.
-        // Bypassing the server-wide Basic Auth here lets a single Authorization
-        // header reach those layers; without this, /license/admin would return
-        // 401 from the outer layer before the inner admin check could run.
+        // The license sub-app has its own auth layer (Bearer JWT for user
+        // endpoints, admin Basic Auth for admin endpoints). Let it through
+        // unconditionally — it enforces its own authz downstream.
         if (c.req.path.startsWith("/license/")) return next()
         const password = Flag.OPENCODE_SERVER_PASSWORD
         if (!password) return next()
+        // Accept EITHER classic Basic Auth with the server password OR a
+        // Bearer JWT issued by /license/auth/poll. This lets the web app
+        // reach /global /session /project etc. with only a Telegram sign-in.
+        const auth = c.req.header("Authorization") ?? ""
+        if (auth.startsWith("Bearer ")) {
+          const { verifySessionToken, touchSession } = await import("../license/auth")
+          const v = verifySessionToken(auth.slice(7))
+          if (v.ok) {
+            touchSession(v.payload.sid)
+            return next()
+          }
+        }
         const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
         return basicAuth({ username, password })(c, next)
       })

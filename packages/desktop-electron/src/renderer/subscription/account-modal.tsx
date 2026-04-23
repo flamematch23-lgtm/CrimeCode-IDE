@@ -1,6 +1,7 @@
 import { Match, Show, Switch, createResource, createSignal } from "solid-js"
 import { useLicense } from "./use-license"
 import { lastSyncAt, pullAll, pushAll } from "./sync-manager"
+import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
 
 interface SignInState {
   pin: string
@@ -17,8 +18,23 @@ function formatSyncAt(ts: number | null): string {
   return new Date(ts * 1000).toLocaleString()
 }
 
+async function loadAndMirrorSession() {
+  const session = await window.api.account.get()
+  writeWebSession(
+    session
+      ? {
+          token: session.token,
+          customer_id: session.customer_id,
+          telegram_user_id: session.telegram_user_id,
+          expires_at: session.expires_at,
+        }
+      : null,
+  )
+  return session
+}
+
 export function AccountModal(props: { onClose: () => void }) {
-  const [account, { refetch }] = createResource(() => window.api.account.get())
+  const [account, { refetch }] = createResource(loadAndMirrorSession)
   const [signIn, setSignIn] = createSignal<SignInState | null>(null)
   const [busy, setBusy] = createSignal<string | null>(null)
   const [err, setErr] = createSignal<string | null>(null)

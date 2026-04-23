@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./vite": "./vite.js",
-    "./index.css": "./src/index.css"
+    "./index.css": "./src/index.css",
+    "./utils/teams-client": "./src/utils/teams-client.ts"
   },
   "scripts": {
     "typecheck": "tsgo -b",

@@ -8,7 +8,7 @@ import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
-import { AuthGate, readCredentials } from "./pages/auth-gate"
+import { AuthGate, buildAuthHeader, readCredentials } from "./pages/auth-gate"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 
@@ -114,18 +114,20 @@ const getDefaultUrl = () => {
 }
 
 /**
- * Web-only fetch wrapper that auto-attaches HTTP Basic Auth from credentials
- * saved by AuthGate. Used by raw `platform.fetch(...)` call sites (security.tsx,
- * highlights.tsx, server-health.ts) that bypass the SDK client auth.
+ * Web-only fetch wrapper that auto-attaches the right Authorization header
+ * (Bearer for Telegram sessions, Basic for legacy self-hosted servers) based
+ * on the credentials saved by AuthGate. Used by raw `platform.fetch(...)`
+ * call sites (security.tsx, highlights.tsx, server-health.ts) that bypass
+ * the SDK client auth.
  */
 const authFetch = ((input, init) => {
   const creds = readCredentials()
-  if (!creds?.username || !creds?.password) {
+  if (!creds?.password) {
     return fetch(input, init)
   }
   const headers = new Headers(init?.headers ?? {})
   if (!headers.has("Authorization")) {
-    headers.set("Authorization", "Basic " + btoa(`${creds.username}:${creds.password}`))
+    headers.set("Authorization", buildAuthHeader(creds))
   }
   return fetch(input, { ...init, headers })
 }) as Platform["fetch"]

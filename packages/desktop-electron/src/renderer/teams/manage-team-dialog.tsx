@@ -1,11 +1,33 @@
-import { For, Show, createResource, createSignal } from "solid-js"
+import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js"
+import { getTeamsClient } from "@opencode-ai/app/utils/teams-client"
 
 export function ManageTeamDialog(props: { teamId: string; onClose: () => void; onDeleted: () => void }) {
-  const [detail, { refetch }] = createResource(() => window.api.teams.detail(props.teamId))
+  const client = getTeamsClient()
+  const [detail, { refetch }] = createResource(() => client.detail(props.teamId))
   const [identifier, setIdentifier] = createSignal("")
   const [busy, setBusy] = createSignal<string | null>(null)
   const [err, setErr] = createSignal<string | null>(null)
   const [info, setInfo] = createSignal<string | null>(null)
+
+  // Live updates — role changes, new members, removals all push an SSE event
+  // so the dialog reflects reality even while open on multiple devices.
+  onMount(() => {
+    const unsub = client.subscribe(props.teamId, (ev) => {
+      if (ev.type === "team_deleted") {
+        props.onDeleted()
+        return
+      }
+      if (
+        ev.type === "member_added" ||
+        ev.type === "member_removed" ||
+        ev.type === "member_role_changed" ||
+        ev.type === "team_renamed"
+      ) {
+        void refetch()
+      }
+    })
+    onCleanup(unsub)
+  })
 
   async function onAdd(e: Event) {
     e.preventDefault()
@@ -15,7 +37,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     setErr(null)
     setInfo(null)
     try {
-      const r = await window.api.teams.addMember(props.teamId, value)
+      const r = await client.addMember(props.teamId, value)
       setIdentifier("")
       await refetch()
       setInfo(r.mode === "added" ? "Member added." : `Invited ${value} — they'll join on next sign-in.`)
@@ -31,7 +53,20 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     setBusy("remove:" + customerId)
     setErr(null)
     try {
-      await window.api.teams.removeMember(props.teamId, customerId)
+      await client.removeMember(props.teamId, customerId)
+      await refetch()
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : String(ex))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onRoleChange(customerId: string, role: "admin" | "member") {
+    setBusy("role:" + customerId)
+    setErr(null)
+    try {
+      await client.setMemberRole(props.teamId, customerId, role)
       await refetch()
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : String(ex))
@@ -44,7 +79,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     setBusy("invite:" + inviteId)
     setErr(null)
     try {
-      await window.api.teams.cancelInvite(props.teamId, inviteId)
+      await client.cancelInvite(props.teamId, inviteId)
       await refetch()
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : String(ex))
@@ -58,7 +93,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     setBusy("delete")
     setErr(null)
     try {
-      await window.api.teams.delete(props.teamId)
+      await client.remove(props.teamId)
       props.onDeleted()
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : String(ex))
@@ -115,7 +150,22 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                             <span data-slot="member-telegram">{m.telegram}</span>
                           </Show>
                         </span>
-                        <span data-slot="member-role" data-role={m.role}>{m.role}</span>
+                        <Show
+                          when={d().self_role === "owner" && m.role !== "owner"}
+                          fallback={<span data-slot="member-role" data-role={m.role}>{m.role}</span>}
+                        >
+                          <select
+                            data-slot="role-select"
+                            value={m.role}
+                            disabled={busy() === "role:" + m.customer_id}
+                            onChange={(e) =>
+                              onRoleChange(m.customer_id, e.currentTarget.value as "admin" | "member")
+                            }
+                          >
+                            <option value="member">member</option>
+                            <option value="admin">admin</option>
+                          </select>
+                        </Show>
                         <Show when={d().self_role === "owner" && m.role !== "owner"}>
                           <button
                             data-kind="ghost"

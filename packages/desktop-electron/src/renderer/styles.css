@@ -1037,6 +1037,21 @@
 [data-component="team-dialog"] [data-slot="member-role"][data-role="member"] {
   color: #a0a0a8; background: rgba(255, 255, 255, 0.06);
 }
+[data-component="team-dialog"] [data-slot="role-select"] {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f5f5f5;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+[data-component="team-dialog"] [data-slot="role-select"]:focus {
+  outline: none;
+  border-color: #ff5722;
+}
 [data-component="team-dialog"] [data-slot="member"] button,
 [data-component="team-dialog"] [data-slot="invite"] button {
   padding: 4px 10px; font-size: 11px;

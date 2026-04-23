@@ -1,5 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import type { TeamLiveSession } from "../../preload/types"
+import { getTeamsClient } from "@opencode-ai/app/utils/teams-client"
 import { WorkspaceSwitcher } from "./workspace-switcher"
 
 export { WorkspaceSwitcher }
@@ -29,27 +30,31 @@ function readActive(): ActiveWorkspace {
  * Cleaned up automatically when the user switches back to personal.
  */
 export function TeamPresenceBadge() {
+  const client = getTeamsClient()
   const [ws, setWs] = createSignal<ActiveWorkspace>(readActive())
   const [sessions, setSessions] = createSignal<TeamLiveSession[]>([])
-  const [err, setErr] = createSignal<string | null>(null)
 
-  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let unsubscribeSse: (() => void) | null = null
+  let safetyTimer: ReturnType<typeof setInterval> | null = null
 
   function stop() {
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
+    if (unsubscribeSse) {
+      unsubscribeSse()
+      unsubscribeSse = null
+    }
+    if (safetyTimer) {
+      clearInterval(safetyTimer)
+      safetyTimer = null
     }
     setSessions([])
   }
 
-  async function tick(teamId: string) {
+  async function refreshSessions(teamId: string) {
     try {
-      const r = await window.api.teams.listSessions(teamId)
+      const r = await client.listSessions(teamId)
       setSessions(r.sessions ?? [])
-      setErr(null)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+    } catch {
+      // network errors are fine — SSE will recover on the next event
     }
   }
 
@@ -58,8 +63,20 @@ export function TeamPresenceBadge() {
     const w = ws()
     if (w.kind !== "team" || !w.id) return
     const teamId = w.id
-    void tick(teamId)
-    pollTimer = setInterval(() => void tick(teamId), 15_000)
+    // Prime with a fetch so the badge renders immediately...
+    void refreshSessions(teamId)
+    // ...then subscribe to pushes.
+    unsubscribeSse = client.subscribe(teamId, (ev) => {
+      if (ev.type === "session_started" || ev.type === "session_ended" || ev.type === "session_heartbeat") {
+        void refreshSessions(teamId)
+      }
+      if (ev.type === "team_deleted") {
+        stop()
+      }
+    })
+    // Safety net: if SSE dropped for whatever reason and didn't re-subscribe,
+    // still refresh every 2 minutes so the UI eventually catches up.
+    safetyTimer = setInterval(() => void refreshSessions(teamId), 120_000)
   })
 
   onMount(() => {

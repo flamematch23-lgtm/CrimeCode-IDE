@@ -38,13 +38,17 @@ import {
   createTeamSession,
   deleteTeam,
   endSession,
+  getMemberRole,
   getTeamDetail,
   heartbeatSession,
   listActiveSessions,
   listTeamsForCustomer,
   removeMember,
   renameTeam,
+  setMemberRole,
 } from "../../license/teams"
+import { subscribeTeam } from "../../license/team-events"
+import { streamSSE } from "hono/streaming"
 
 const ADMIN_HASH = (process.env.OPENCODE_ADMIN_PASSPHRASE_SHA256 ?? "").toLowerCase()
 
@@ -574,6 +578,22 @@ export const LicenseRoutes = lazy(() => {
     }
   })
 
+  app.patch("/teams/:id/members/:customerId", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const body = (await c.req.json().catch(() => ({}))) as { role?: string }
+    if (body.role !== "admin" && body.role !== "member") {
+      return c.json({ error: "invalid_role" }, 400)
+    }
+    try {
+      const member = setMemberRole(c.req.param("id"), sess.sub, c.req.param("customerId"), body.role)
+      return c.json({ member })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
   app.delete("/teams/:id/invites/:inviteId", (c) => {
     const sess = sessionGuard(c as never)
     if (!sess) return c.json({ error: "unauthorized" }, 401)
@@ -628,6 +648,54 @@ export const LicenseRoutes = lazy(() => {
     const ok = endSession(c.req.param("sid"), sess.sub)
     if (!ok) return c.json({ error: "not_found" }, 404)
     return c.json({ ok: true })
+  })
+
+  // SSE stream: live push of team events (sessions, member changes, renames).
+  // EventSource can't send Authorization headers, so the browser client passes
+  // the session token as `?access_token=` — we verify it the same way as the
+  // Bearer header.
+  app.get("/teams/:id/events", async (c) => {
+    const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/, "")
+    const qToken = c.req.query("access_token")
+    const token = bearer || qToken
+    if (!token) return c.json({ error: "unauthorized" }, 401)
+    const verified = verifySessionToken(token)
+    if (!verified.ok) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    if (!getMemberRole(teamId, verified.payload.sub)) return c.json({ error: "forbidden" }, 403)
+    touchSession(verified.payload.sid)
+
+    return streamSSE(c, async (stream) => {
+      let closed = false
+      const unsubscribe = subscribeTeam(teamId, (event) => {
+        if (closed) return
+        void stream.writeSSE({ data: JSON.stringify(event), event: event.type })
+      })
+      // Send an initial hello + snapshot so the client has something to render
+      // before the first real event arrives.
+      await stream.writeSSE({ data: JSON.stringify({ type: "hello", team_id: teamId }), event: "hello" })
+      // Heartbeat every 25s keeps intermediaries (Cloudflare, Fly proxies)
+      // from closing the idle connection.
+      const hb = setInterval(() => {
+        if (closed) return
+        void stream.writeSSE({ data: String(Date.now()), event: "ping" }).catch(() => undefined)
+      }, 25_000)
+      stream.onAbort(() => {
+        closed = true
+        clearInterval(hb)
+        unsubscribe()
+      })
+      // Keep the promise pending forever (until the client disconnects).
+      await new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (closed) {
+            clearInterval(check)
+            clearInterval(hb)
+            resolve()
+          }
+        }, 1_000)
+      })
+    })
   })
 
   // ────────────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import { AccountModal } from "./account-modal"
 import { TrialBanner } from "./trial-banner"
 import { recordProjectOpen, schedulePush } from "./sync-manager"
 import { TeamPresenceBadge, WorkspaceSwitcher } from "../teams"
+import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
 
 export function SubscriptionOverlay() {
   const [sub, setSub] = createSignal(false)
@@ -12,6 +13,24 @@ export function SubscriptionOverlay() {
   const [showAccount, setShowAccount] = createSignal(false)
 
   onMount(() => {
+    // Mirror the electron-store session into localStorage so the shared
+    // teams client (EventSource-based SSE) can reach it the same way the
+    // web build does. Runs once at startup.
+    void window.api.account
+      .get()
+      .then((s) =>
+        writeWebSession(
+          s
+            ? {
+                token: s.token,
+                customer_id: s.customer_id,
+                telegram_user_id: s.telegram_user_id,
+                expires_at: s.expires_at,
+              }
+            : null,
+        ),
+      )
+      .catch(() => undefined)
     const unsub = window.api.onMenuCommand((id) => {
       if (id === "open-subscription") setSub(true)
       if (id === "open-admin-panel") setShowAdminPanel(true)
