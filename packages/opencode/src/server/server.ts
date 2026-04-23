@@ -141,9 +141,15 @@ export namespace Server {
         // Allow CORS preflight requests to succeed without auth.
         // Browser clients sending Authorization headers will preflight with OPTIONS.
         if (c.req.method === "OPTIONS") return next()
-        // The Electron client validates licenses without server credentials —
-        // /license/validate must be reachable from the public internet.
-        if (c.req.path === "/license/validate") return next()
+        // The license sub-app has its own auth layer:
+        //   - /license/validate is intentionally public (used by Electron clients
+        //     that don't have the server password).
+        //   - /license/admin and other admin endpoints enforce a separate
+        //     Basic-Auth check against OPENCODE_ADMIN_PASSPHRASE_SHA256.
+        // Bypassing the server-wide Basic Auth here lets a single Authorization
+        // header reach those layers; without this, /license/admin would return
+        // 401 from the outer layer before the inner admin check could run.
+        if (c.req.path.startsWith("/license/")) return next()
         const password = Flag.OPENCODE_SERVER_PASSWORD
         if (!password) return next()
         const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
