@@ -137,7 +137,7 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
   }
   .stat:hover { border-color: rgba(255, 87, 34, 0.4); transform: translateY(-2px); }
   .stat .v { font-size: 24px; font-weight: 800; color: #ff5722; line-height: 1; }
-  .stat .k { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+  .stat .k { font-size: 10px; color: #b5b5bd; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; font-weight: 600; }
   section {
     background: rgba(21, 21, 26, 0.85); border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 10px; padding: 20px; margin-bottom: 18px;
@@ -186,7 +186,10 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
     word-break: break-all;
   }
   .toast.copy { user-select: all; cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px; }
-  .empty { color: #666; text-align: center; padding: 16px; font-style: italic; }
+  .empty { color: #b5b5bd; text-align: center; padding: 16px; font-style: italic; }
+  .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  form input, form select, form textarea, form button { min-height: 40px; }
+  form :focus-visible { outline: 2px solid #ff5722; outline-offset: 2px; }
   .row-actions { display: flex; gap: 6px; }
 </style>
 </head>
@@ -200,24 +203,28 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
     </div>
   </div>
   <div class="row-actions">
-    <button class="ghost" onclick="triggerBackup()">📦 Backup now</button>
-    <button class="ghost" onclick="refreshAll()">↻ Refresh</button>
+    <button class="ghost" onclick="triggerBackup()" aria-label="Trigger a manual database backup">📦 Backup now</button>
+    <button class="ghost" onclick="refreshAll()" aria-label="Refresh dashboard data">↻ Refresh</button>
   </div>
 </header>
-<main>
+<main aria-label="License admin dashboard">
   <div class="stats" id="stats"></div>
 
   <section>
     <h2>Issue License (manual)</h2>
     <form id="issueForm">
-      <input name="customer_telegram" placeholder="Telegram @handle" required />
-      <select name="interval">
+      <label class="sr-only" for="issue-telegram">Customer Telegram handle</label>
+      <input id="issue-telegram" name="customer_telegram" placeholder="Telegram @handle" required aria-label="Customer Telegram handle" />
+      <label class="sr-only" for="issue-interval">Plan</label>
+      <select id="issue-interval" name="interval" aria-label="Plan">
         <option value="monthly">monthly</option>
         <option value="annual">annual</option>
         <option value="lifetime">lifetime</option>
       </select>
-      <input name="tx_hash" placeholder="tx_hash (optional)" />
-      <input name="note" placeholder="note (optional)" />
+      <label class="sr-only" for="issue-txhash">Transaction hash (optional)</label>
+      <input id="issue-txhash" name="tx_hash" placeholder="tx_hash (optional)" aria-label="Transaction hash (optional)" />
+      <label class="sr-only" for="issue-note">Note (optional)</label>
+      <input id="issue-note" name="note" placeholder="note (optional)" aria-label="Note (optional)" />
       <button type="submit">Issue Token</button>
     </form>
   </section>
@@ -244,7 +251,7 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
   </section>
 </main>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script>
 const fmt = (ts) => ts ? new Date(ts * 1000).toLocaleString() : "—"

@@ -160,9 +160,7 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
                     <Show when={plan.badgeKey}>
                       {(key) => <span data-slot="plan-badge">{t(key())}</span>}
                     </Show>
-                    <div data-slot="plan-emoji" aria-hidden="true">
-                      {plan.emoji}
-                    </div>
+                    <div data-slot="plan-emoji" aria-hidden="true">{plan.emoji}</div>
                     <div data-slot="plan-title">{t(plan.titleKey)}</div>
                     <div data-slot="plan-price">{t(plan.priceKey)}</div>
                     <div data-slot="plan-desc">{t(plan.descKey)}</div>
@@ -204,18 +202,24 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
                   </button>
                 }
               >
-                <form onSubmit={onActivateToken}>
+                <form onSubmit={onActivateToken} aria-label="Activate license token">
+                  <label class="sr-only" for="gate-token-interval">Plan</label>
                   <select
+                    id="gate-token-interval"
                     value={tokenInterval()}
                     onChange={(e) => setTokenInterval(e.currentTarget.value as ProInterval)}
+                    aria-label="Plan"
                   >
                     <For each={PLANS}>{(plan) => <option value={plan.id}>{t(plan.titleKey)}</option>}</For>
                   </select>
+                  <label class="sr-only" for="gate-token-input">License token</label>
                   <input
+                    id="gate-token-input"
                     type="text"
                     placeholder={t("gate.tokenPlaceholder")}
                     value={tokenValue()}
                     onInput={(e) => setTokenValue(e.currentTarget.value)}
+                    aria-label="License token"
                   />
                   <button type="submit" disabled={!!busy() || !tokenValue().trim()}>
                     {t("gate.tokenSubmit")}

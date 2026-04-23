@@ -223,7 +223,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
         <Show
           when={!checking()}
           fallback={
-            <div data-auth-gate="loading" style={loadingStyle}>
+            <div data-auth-gate="loading" style={loadingStyle} role="status" aria-live="polite">
               <p>Checking saved credentials…</p>
             </div>
           }
@@ -411,10 +411,11 @@ const tabsStyle: JSX.CSSProperties = {
 }
 const tabStyle = (active: boolean): JSX.CSSProperties => ({
   flex: "1",
+  "min-height": "44px",
   padding: "10px 14px",
   background: active ? "rgba(255,87,34,0.15)" : "transparent",
   border: `1px solid ${active ? "rgba(255,87,34,0.5)" : "rgba(255,255,255,0.1)"}`,
-  color: active ? "#ff5722" : "#aaa",
+  color: active ? "#ff5722" : "#d0d0d5",
   "border-radius": "8px",
   cursor: "pointer",
   "font-size": "13px",
@@ -447,6 +448,7 @@ const inputStyle: JSX.CSSProperties = {
 }
 const primaryButtonStyle: JSX.CSSProperties = {
   width: "100%",
+  "min-height": "44px",
   padding: "12px",
   background: "linear-gradient(135deg, #ff5722, #f4511e)",
   color: "#fff",
@@ -458,6 +460,7 @@ const primaryButtonStyle: JSX.CSSProperties = {
 }
 const ghostButtonStyle: JSX.CSSProperties = {
   width: "100%",
+  "min-height": "44px",
   padding: "10px",
   background: "transparent",
   border: "1px solid rgba(255,255,255,0.15)",

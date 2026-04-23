@@ -143,7 +143,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                   <For each={d().members}>
                     {(m) => (
                       <li data-slot="member">
-                        <span data-slot="avatar">{(m.display ?? "?").slice(0, 1).toUpperCase()}</span>
+                        <span data-slot="avatar" aria-hidden="true">{(m.display ?? "?").slice(0, 1).toUpperCase()}</span>
                         <span data-slot="member-labels">
                           <span data-slot="member-name">{m.display ?? m.customer_id}</span>
                           <Show when={m.telegram}>
@@ -161,6 +161,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                             onChange={(e) =>
                               onRoleChange(m.customer_id, e.currentTarget.value as "admin" | "member")
                             }
+                            aria-label={`Role for ${m.display ?? m.customer_id}`}
                           >
                             <option value="member">member</option>
                             <option value="admin">admin</option>
@@ -171,9 +172,9 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                             data-kind="ghost"
                             onClick={() => onRemove(m.customer_id)}
                             disabled={busy() === "remove:" + m.customer_id}
-                            title="Remove member"
+                            aria-label={`Remove ${m.display ?? m.customer_id}`}
                           >
-                            ✕
+                            <span aria-hidden="true">✕</span>
                           </button>
                         </Show>
                       </li>

@@ -88,13 +88,19 @@ export function WorkspaceSwitcher() {
   return (
     <>
       <div data-component="workspace-switcher">
-        <button data-slot="trigger" onClick={() => setOpen(!open())}>
-          <span data-slot="icon">{activeLabel().icon}</span>
+        <button
+          data-slot="trigger"
+          onClick={() => setOpen(!open())}
+          aria-haspopup="menu"
+          aria-expanded={open()}
+          aria-label={`Current workspace: ${activeLabel().title}. Click to change.`}
+        >
+          <span data-slot="icon" aria-hidden="true">{activeLabel().icon}</span>
           <span data-slot="labels">
             <span data-slot="title">{activeLabel().title}</span>
             <span data-slot="subtitle">{activeLabel().subtitle}</span>
           </span>
-          <span data-slot="chevron">{open() ? "▲" : "▼"}</span>
+          <span data-slot="chevron" aria-hidden="true">{open() ? "▲" : "▼"}</span>
         </button>
 
         <Show when={open()}>
@@ -106,13 +112,13 @@ export function WorkspaceSwitcher() {
                 data-active={active().kind === "personal"}
                 onClick={onPickPersonal}
               >
-                <span data-slot="item-icon">👤</span>
+                <span data-slot="item-icon" aria-hidden="true">👤</span>
                 <span data-slot="item-labels">
                   <span data-slot="item-title">{account()?.customer_id?.slice(0, 16)}</span>
                   <span data-slot="item-subtitle">Your private workspace</span>
                 </span>
                 <Show when={active().kind === "personal"}>
-                  <span data-slot="check">✓</span>
+                  <span data-slot="check" aria-label="Currently active">✓</span>
                 </Show>
               </button>
 
@@ -125,7 +131,7 @@ export function WorkspaceSwitcher() {
                       data-active={active().kind === "team" && active().id === team.id}
                       onClick={() => onPickTeam(team)}
                     >
-                      <span data-slot="item-icon">👥</span>
+                      <span data-slot="item-icon" aria-hidden="true">👥</span>
                       <span data-slot="item-labels">
                         <span data-slot="item-title">
                           {team.name}
@@ -135,18 +141,18 @@ export function WorkspaceSwitcher() {
                           {team.member_count ?? 1} {team.member_count === 1 ? "member" : "members"}
                         </span>
                       </span>
-                      <span
+                      <button
+                        type="button"
                         data-slot="gear"
                         onClick={(e) => {
                           e.stopPropagation()
                           setManageId(team.id)
                           close()
                         }}
-                        role="button"
-                        title="Manage team"
+                        aria-label={`Manage team ${team.name}`}
                       >
-                        ⚙
-                      </span>
+                        <span aria-hidden="true">⚙</span>
+                      </button>
                     </button>
                   )}
                 </For>
