@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 CREATE INDEX IF NOT EXISTS auth_sessions_customer_idx ON auth_sessions(customer_id);
 
 -- Cross-device sync of small JSON blobs (preferences, recent projects, ...).
--- The client owns the schema of `value`; the server is just a key-value store
+-- The client owns the schema of "value"; the server is just a key-value store
 -- with a per-customer namespace.
 CREATE TABLE IF NOT EXISTS sync_kv (
   customer_id   TEXT NOT NULL,
