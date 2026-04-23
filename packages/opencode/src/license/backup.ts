@@ -4,6 +4,7 @@ import { readFileSync, statSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Log } from "../util/log"
+import { captureException } from "./sentry"
 import { getDb } from "./db"
 
 const log = Log.create({ service: "license-backup" })
@@ -126,6 +127,7 @@ export async function backupOnce(): Promise<{ ok: true; key: string; size: numbe
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     log.warn("backup failed", { error: msg })
+    captureException(err, { tags: { surface: "license-backup" } })
     return { ok: false, error: msg }
   } finally {
     try {

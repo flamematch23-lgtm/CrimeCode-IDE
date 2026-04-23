@@ -17,6 +17,7 @@ import {
   validateBySig,
 } from "../../license/store"
 import { backupOnce } from "../../license/backup"
+import { checkRateLimit } from "../../license/rate-limit"
 
 const ADMIN_HASH = (process.env.OPENCODE_ADMIN_PASSPHRASE_SHA256 ?? "").toLowerCase()
 
@@ -341,6 +342,28 @@ export const LicenseRoutes = lazy(() => {
 
   // --- Public endpoint (no admin auth — used by Electron client) ---
   app.post("/validate", async (c) => {
+    // Rate limit per source IP — 10 requests / 60 s. Trust CF-Connecting-IP
+    // (set by Cloudflare proxy) first, then fall back to the leftmost
+    // X-Forwarded-For (Fly's edge proxy) and finally to the connection
+    // remote address.
+    const ip =
+      c.req.header("CF-Connecting-IP") ??
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
+      c.req.header("Fly-Client-IP") ??
+      "unknown"
+    const rl = checkRateLimit(ip)
+    if (!rl.ok) {
+      return new Response(
+        JSON.stringify({ status: "rate_limited", retry_after: rl.retryAfterSeconds }),
+        {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": String(rl.retryAfterSeconds ?? 60),
+          },
+        },
+      )
+    }
     let body: { token?: string; machine_id?: string }
     try {
       body = await c.req.json()

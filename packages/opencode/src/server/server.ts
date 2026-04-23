@@ -49,6 +49,8 @@ import { LicenseRoutes } from "./routes/license"
 import { startTelegramBot } from "../license/telegram"
 import { startPaymentPoller } from "../license/poller"
 import { startBackupScheduler } from "../license/backup"
+import { startRenewalReminders } from "../license/reminders"
+import { captureException, initSentry } from "../license/sentry"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 import { initProjectors } from "./projectors"
@@ -86,6 +88,10 @@ export namespace Server {
       .onError((err, c) => {
         log.error("failed", {
           error: err,
+        })
+        captureException(err, {
+          tags: { surface: "http" },
+          extra: { path: c.req.path, method: c.req.method },
         })
         if (err instanceof NamedError) {
           let status: ContentfulStatusCode
@@ -624,6 +630,10 @@ export namespace Server {
     const server = opts.port === 0 ? (tryServe(4096) ?? tryServe(0)) : tryServe(opts.port)
     if (!server) throw new Error(`Failed to start server on port ${opts.port}`)
 
+    // Initialise Sentry first so any errors during the rest of boot are
+    // reported. No-op when SENTRY_DSN is unset (local dev).
+    void initSentry().catch(() => undefined)
+
     // License Telegram bot — only runs when both LICENSE_HMAC_SECRET and
     // TELEGRAM_BOT_TOKEN are set, so it's a no-op for local dev.
     if (process.env.LICENSE_HMAC_SECRET && process.env.TELEGRAM_BOT_TOKEN) {
@@ -631,6 +641,7 @@ export namespace Server {
         startTelegramBot()
       } catch (err) {
         log.warn("failed to start telegram bot", { error: err instanceof Error ? err.message : String(err) })
+        captureException(err, { tags: { surface: "telegram-bot-init" } })
       }
     }
     // Crypto payment poller — only runs when at least one wallet env var is
@@ -648,6 +659,17 @@ export namespace Server {
       startBackupScheduler()
     } catch (err) {
       log.warn("failed to start backup scheduler", { error: err instanceof Error ? err.message : String(err) })
+      captureException(err, { tags: { surface: "backup-init" } })
+    }
+    // Renewal reminders — DM customers ~7 days before their monthly/annual
+    // license expires.
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      try {
+        startRenewalReminders()
+      } catch (err) {
+        log.warn("failed to start renewal reminders", { error: err instanceof Error ? err.message : String(err) })
+        captureException(err, { tags: { surface: "reminders-init" } })
+      }
     }
 
     const shouldPublishMDNS =

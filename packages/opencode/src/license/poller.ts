@@ -1,4 +1,5 @@
 import { Log } from "../util/log"
+import { captureException } from "./sentry"
 import { fetchIncomingTxs } from "./payments"
 import {
   confirmOrderAndIssue,
@@ -101,6 +102,7 @@ export function startPaymentPoller(): void {
       await pollOnce()
     } catch (err) {
       log.warn("pollOnce error", { error: err instanceof Error ? err.message : String(err) })
+      captureException(err, { tags: { surface: "payment-poller" } })
     }
     timer = setTimeout(tick, POLL_INTERVAL_MS)
   }

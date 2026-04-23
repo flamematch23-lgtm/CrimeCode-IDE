@@ -38,17 +38,18 @@ CREATE INDEX IF NOT EXISTS orders_status_idx ON orders(status);
 CREATE INDEX IF NOT EXISTS orders_user_id_idx ON orders(customer_user_id);
 
 CREATE TABLE IF NOT EXISTS licenses (
-  id                TEXT PRIMARY KEY,
-  customer_id       TEXT NOT NULL,
-  order_id          TEXT,
-  token_sig         TEXT UNIQUE NOT NULL,
-  interval          TEXT NOT NULL CHECK (interval IN ('monthly','annual','lifetime')),
-  issued_at         INTEGER NOT NULL,
-  expires_at        INTEGER,
-  revoked_at        INTEGER,
-  revoked_reason    TEXT,
-  last_validated_at INTEGER,
-  machine_id        TEXT,
+  id                      TEXT PRIMARY KEY,
+  customer_id             TEXT NOT NULL,
+  order_id                TEXT,
+  token_sig               TEXT UNIQUE NOT NULL,
+  interval                TEXT NOT NULL CHECK (interval IN ('monthly','annual','lifetime')),
+  issued_at               INTEGER NOT NULL,
+  expires_at              INTEGER,
+  revoked_at              INTEGER,
+  revoked_reason          TEXT,
+  last_validated_at       INTEGER,
+  machine_id              TEXT,
+  expiry_warning_sent_at  INTEGER,
   FOREIGN KEY (customer_id) REFERENCES customers(id),
   FOREIGN KEY (order_id) REFERENCES orders(id)
 );
@@ -89,6 +90,28 @@ function resolvePath(): string {
   return DEFAULT_DEV_PATH
 }
 
+/**
+ * Idempotent ALTER TABLE migrations for schema changes that arrive after the
+ * initial CREATE TABLE has already been committed in production. Each entry
+ * runs at most once because we wrap it in try/catch — SQLite rejects
+ * duplicate-column ALTERs which is exactly what we want.
+ */
+function runMigrations(db: Database): void {
+  const ops: Array<[string, string]> = [
+    ["v1.licenses.expiry_warning_sent_at", "ALTER TABLE licenses ADD COLUMN expiry_warning_sent_at INTEGER"],
+  ]
+  for (const [name, sql] of ops) {
+    try {
+      db.exec(sql)
+      log.info("migration applied", { name })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes("duplicate column") || msg.includes("already exists")) continue
+      log.warn("migration failed", { name, error: msg })
+    }
+  }
+}
+
 export function getDb(): Database {
   if (_db) return _db
   const p = resolvePath()
@@ -102,6 +125,7 @@ export function getDb(): Database {
   db.exec("PRAGMA journal_mode = WAL")
   db.exec("PRAGMA foreign_keys = ON")
   db.exec(SCHEMA)
+  runMigrations(db)
   _db = db
   return db
 }

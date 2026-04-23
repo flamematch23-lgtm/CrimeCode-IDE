@@ -1,4 +1,5 @@
 import { Log } from "../util/log"
+import { captureException } from "./sentry"
 import {
   attachPaymentOffer,
   cancelOrder,
@@ -410,6 +411,10 @@ async function pollOnce(token: string) {
       await handle(u)
     } catch (e) {
       log.error("handler error", { error: e instanceof Error ? e.message : String(e) })
+      captureException(e, {
+        tags: { surface: "telegram-bot", command: u.message?.text?.split(/\s+/)[0]?.slice(0, 24) ?? "_unknown_" },
+        extra: { from_user_id: u.message?.from?.id ?? null },
+      })
     }
   }
 }
