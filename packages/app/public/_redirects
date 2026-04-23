@@ -1,0 +1,6 @@
+# Cloudflare Pages — redirect www → apex (canonical host).
+# Syntax: <from-pattern> <to-pattern> <status>
+# https://developers.cloudflare.com/pages/configuration/redirects/
+
+https://www.crimecode.cc/*  https://crimecode.cc/:splat  301
+http://www.crimecode.cc/*   https://crimecode.cc/:splat  301
