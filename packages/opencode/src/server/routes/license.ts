@@ -21,9 +21,13 @@ import {
 import { backupOnce } from "../../license/backup"
 import { checkRateLimit } from "../../license/rate-limit"
 import {
+  listPasswordAccounts,
   listSessionsForCustomer,
   pollAuth,
+  revokePasswordAccount,
   revokeSession,
+  signInWithPassword,
+  signUpWithPassword,
   startAuth,
   syncDelete,
   syncGet,
@@ -266,6 +270,13 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
   </section>
 
   <section>
+    <h2>👤 Password accounts</h2>
+    <table id="accountsTable"><thead><tr>
+      <th>Username</th><th>Customer ID</th><th>Telegram</th><th>Created</th><th>Last login</th><th>Status</th><th>Actions</th>
+    </tr></thead><tbody></tbody></table>
+  </section>
+
+  <section>
     <h2>Recent Audit</h2>
     <table id="auditTable"><thead><tr>
       <th>Time</th><th>Action</th><th>Details</th>
@@ -368,7 +379,40 @@ async function loadAnalytics() {
   }
 }
 
-async function refreshAll() { await Promise.all([loadStats(), loadAnalytics(), loadOrders(), loadLicenses(), loadAudit()]) }
+async function loadAccounts() {
+  try {
+    const r = await api("/accounts")
+    const tbody = document.querySelector("#accountsTable tbody")
+    const rows = r.accounts || []
+    tbody.innerHTML = rows.length
+      ? rows.map((a) => {
+          const status = a.revoked_at ? "revoked" : "active"
+          return \`<tr>
+            <td><code>\${a.username}</code></td>
+            <td><code>\${a.customer_id.slice(0, 16)}</code></td>
+            <td>\${a.telegram || "—"}</td>
+            <td>\${fmt(a.created_at)}</td>
+            <td>\${fmt(a.last_login_at)}</td>
+            <td><span class="pill \${status}">\${status}</span></td>
+            <td>\${a.revoked_at ? "—" : \`<button class="danger" onclick="revokeAccount('\${a.customer_id}')">Revoke</button>\`}</td>
+          </tr>\`
+        }).join("")
+      : '<tr><td colspan="7" class="empty">No accounts yet</td></tr>'
+  } catch (e) {
+    console.error("loadAccounts", e)
+  }
+}
+
+async function revokeAccount(cid) {
+  if (!confirm("Revoke this password account? The user won't be able to sign in again.")) return
+  try {
+    await api("/accounts/" + encodeURIComponent(cid) + "/revoke", { method: "POST" })
+    showToast("Account revoked.")
+    await loadAccounts()
+  } catch (e) { showToast("Error: " + e.message) }
+}
+
+async function refreshAll() { await Promise.all([loadStats(), loadAnalytics(), loadOrders(), loadLicenses(), loadAccounts(), loadAudit()]) }
 
 async function triggerBackup() {
   showToast("📦 Snapshotting database…")
@@ -465,6 +509,73 @@ export const LicenseRoutes = lazy(() => {
     const pin = c.req.param("pin").toUpperCase()
     if (!/^[A-Z0-9]{4,32}$/.test(pin)) return c.json({ status: "unknown" }, 400)
     return c.json(pollAuth(pin))
+  })
+
+  // Classic username + password sign-up / sign-in. For users who don't want
+  // to go through Telegram. Rate-limited the same way auth/start is.
+  app.post("/auth/signup", async (c) => {
+    const ip =
+      c.req.header("CF-Connecting-IP") ??
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
+      "unknown"
+    const rl = checkRateLimit("auth-signup:" + ip, { max: 5 })
+    if (!rl.ok) return c.json({ error: "rate_limited", retry_after: rl.retryAfterSeconds }, 429)
+    let body: {
+      username?: string
+      password?: string
+      telegram?: string
+      email?: string
+      device_label?: string
+    } = {}
+    try {
+      body = (await c.req.json()) ?? {}
+    } catch {
+      /* handled below */
+    }
+    if (!body.username || !body.password) return c.json({ error: "missing_credentials" }, 400)
+    try {
+      const r = signUpWithPassword({
+        username: body.username,
+        password: body.password,
+        telegram: body.telegram ?? null,
+        email: body.email ?? null,
+        device_label: body.device_label ?? null,
+      })
+      return c.json(r)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "error"
+      const status: 400 | 409 = msg === "username_taken" ? 409 : 400
+      return c.json({ error: msg }, status)
+    }
+  })
+
+  app.post("/auth/signin", async (c) => {
+    const ip =
+      c.req.header("CF-Connecting-IP") ??
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
+      "unknown"
+    // A bit tighter than signup — brute-force protection. 5 per minute.
+    const rl = checkRateLimit("auth-signin:" + ip, { max: 5 })
+    if (!rl.ok) return c.json({ error: "rate_limited", retry_after: rl.retryAfterSeconds }, 429)
+    let body: { username?: string; password?: string; device_label?: string } = {}
+    try {
+      body = (await c.req.json()) ?? {}
+    } catch {
+      /* handled below */
+    }
+    if (!body.username || !body.password) return c.json({ error: "missing_credentials" }, 400)
+    try {
+      const r = signInWithPassword({
+        username: body.username,
+        password: body.password,
+        device_label: body.device_label ?? null,
+      })
+      return c.json(r)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "error"
+      const status: 401 | 403 = msg === "account_revoked" ? 403 : 401
+      return c.json({ error: msg }, status)
+    }
   })
 
   // 3. Authenticated endpoints: any client with a valid session token.
@@ -933,6 +1044,14 @@ export const LicenseRoutes = lazy(() => {
   })
 
   admin.get("/audit", (c) => c.json(listAudit(200)))
+
+  admin.get("/accounts", (c) => c.json({ accounts: listPasswordAccounts(500) }))
+
+  admin.post("/accounts/:customerId/revoke", (c) => {
+    const ok = revokePasswordAccount(c.req.param("customerId"))
+    if (!ok) return c.json({ error: "not_found_or_already_revoked" }, 404)
+    return c.json({ ok: true })
+  })
 
   admin.get("/analytics", (c) => c.json(analyticsSnapshot()))
 

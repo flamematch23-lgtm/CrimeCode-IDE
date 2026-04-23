@@ -1,6 +1,11 @@
 import { createSignal, Show, Switch, Match, onMount } from "solid-js"
 import type { JSX } from "solid-js"
-import { readWebSession, writeWebSession } from "../utils/teams-client"
+import {
+  readWebSession,
+  signInWithAccount,
+  signUpWithAccount,
+  writeWebSession,
+} from "../utils/teams-client"
 
 /**
  * AuthGate — wraps the AppInterface. Two sign-in paths:
@@ -23,7 +28,6 @@ const STORAGE_KEYS = {
 } as const
 
 const DEFAULT_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.crimecode.cc"
-const DEFAULT_USERNAME = "opencode"
 
 export type Credentials = {
   url: string
@@ -115,16 +119,17 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
   const [creds, setCreds] = createSignal<Credentials | null>(null)
   const [checking, setChecking] = createSignal(true)
   const [error, setError] = createSignal<string | null>(null)
-  const [mode, setMode] = createSignal<"telegram" | "basic">("telegram")
+  const [mode, setMode] = createSignal<"telegram" | "account">("telegram")
+  const [accountMode, setAccountMode] = createSignal<"signin" | "signup">("signin")
 
   // Telegram flow state
   const [pinState, setPinState] = createSignal<PinState | null>(null)
   const [polling, setPolling] = createSignal(false)
 
-  // Basic flow state
-  const [url, setUrl] = createSignal(DEFAULT_URL)
-  const [username, setUsername] = createSignal(DEFAULT_USERNAME)
-  const [password, setPassword] = createSignal("")
+  // Account form state
+  const [accUsername, setAccUsername] = createSignal("")
+  const [accPassword, setAccPassword] = createSignal("")
+  const [accTelegram, setAccTelegram] = createSignal("")
   const [submitting, setSubmitting] = createSignal(false)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -147,11 +152,11 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
       setCreds(stored)
     } else {
       setError(result.message ?? "Stored credentials are no longer valid.")
-      if (stored.kind === "basic") {
-        setMode("basic")
-        setUrl(stored.url)
-        setUsername(stored.username)
-      }
+      // If it was a Bearer session that expired, kick the user to the
+      // Account tab where they can sign in again with their username.
+      if (stored.kind === "bearer") setMode("account")
+      // Clear the stored session so we don't re-use it next reload.
+      clearCredentials()
     }
     setChecking(false)
   })
@@ -196,24 +201,53 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
     }
   }
 
-  async function submitBasic(e: Event) {
+  function friendlyAuthError(code: string): string {
+    const map: Record<string, string> = {
+      invalid_username: "Username must be 3–32 chars (letters, digits, underscore, dash, dot).",
+      invalid_password: "Password must be at least 8 characters.",
+      username_taken: "That username is already in use. Try signing in instead.",
+      invalid_credentials: "Wrong username or password.",
+      account_revoked: "This account has been disabled. Contact @OpCrime1312.",
+      missing_credentials: "Enter both a username and a password.",
+      rate_limited: "Too many attempts. Try again in a minute.",
+    }
+    return map[code] ?? code
+  }
+
+  async function submitAccount(e: Event) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
-    const next: Credentials = {
-      url: url().replace(/\/+$/, ""),
-      username: username(),
-      password: password(),
-      kind: "basic",
+    try {
+      const fn = accountMode() === "signup" ? signUpWithAccount : signInWithAccount
+      const session = await fn({
+        username: accUsername().trim(),
+        password: accPassword(),
+        ...(accountMode() === "signup" && accTelegram().trim()
+          ? { telegram: accTelegram().trim() }
+          : {}),
+        device_label: `web (${navigator.userAgent.slice(0, 60)})`,
+      })
+      writeWebSession({
+        token: session.token,
+        customer_id: session.customer_id,
+        telegram_user_id: null,
+        expires_at: session.exp,
+      })
+      const next: Credentials = {
+        url: DEFAULT_URL,
+        username: "bearer",
+        password: session.token,
+        kind: "bearer",
+      }
+      writeCredentials(next)
+      setCreds(next)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(friendlyAuthError(msg))
+    } finally {
+      setSubmitting(false)
     }
-    const result = await verifyCredentials(next)
-    setSubmitting(false)
-    if (!result.ok) {
-      setError(result.message ?? "Unable to verify credentials.")
-      return
-    }
-    writeCredentials(next)
-    setCreds(next)
   }
 
   return (
@@ -247,11 +281,11 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                 </button>
                 <button
                   type="button"
-                  data-active={mode() === "basic"}
-                  onClick={() => setMode("basic")}
-                  style={tabStyle(mode() === "basic")}
+                  data-active={mode() === "account"}
+                  onClick={() => setMode("account")}
+                  style={tabStyle(mode() === "account")}
                 >
-                  🖥 Self-hosted
+                  👤 Account
                 </button>
               </div>
 
@@ -299,28 +333,21 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                     }}
                   </Show>
                 </Match>
-                <Match when={mode() === "basic"}>
-                  <form onSubmit={submitBasic}>
-                    <label style={labelStyle}>
-                      <span>Server URL</span>
-                      <input
-                        type="url"
-                        required
-                        value={url()}
-                        onInput={(e) => setUrl(e.currentTarget.value)}
-                        placeholder="https://your-server.fly.dev"
-                        style={inputStyle}
-                      />
-                    </label>
+                <Match when={mode() === "account"}>
+                  <form onSubmit={submitAccount} aria-label={accountMode() === "signup" ? "Sign up" : "Sign in"}>
                     <label style={labelStyle}>
                       <span>Username</span>
                       <input
                         type="text"
                         required
-                        value={username()}
-                        onInput={(e) => setUsername(e.currentTarget.value)}
+                        minlength="3"
+                        maxlength="32"
+                        pattern="[a-zA-Z0-9_.\\-]+"
+                        value={accUsername()}
+                        onInput={(e) => setAccUsername(e.currentTarget.value)}
                         autocomplete="username"
                         style={inputStyle}
+                        placeholder="your_handle"
                       />
                     </label>
                     <label style={labelStyle}>
@@ -328,15 +355,49 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                       <input
                         type="password"
                         required
-                        value={password()}
-                        onInput={(e) => setPassword(e.currentTarget.value)}
-                        autocomplete="current-password"
+                        minlength="8"
+                        value={accPassword()}
+                        onInput={(e) => setAccPassword(e.currentTarget.value)}
+                        autocomplete={accountMode() === "signup" ? "new-password" : "current-password"}
                         style={inputStyle}
+                        placeholder={accountMode() === "signup" ? "Pick something ≥ 8 chars" : "Your password"}
                       />
                     </label>
+                    <Show when={accountMode() === "signup"}>
+                      <label style={labelStyle}>
+                        <span>Telegram handle (optional, for team invites)</span>
+                        <input
+                          type="text"
+                          value={accTelegram()}
+                          onInput={(e) => setAccTelegram(e.currentTarget.value)}
+                          style={inputStyle}
+                          placeholder="@yourhandle"
+                        />
+                      </label>
+                    </Show>
                     <button type="submit" disabled={submitting()} style={primaryButtonStyle}>
-                      {submitting() ? "Signing in…" : "Sign in"}
+                      {submitting()
+                        ? accountMode() === "signup"
+                          ? "Creating account…"
+                          : "Signing in…"
+                        : accountMode() === "signup"
+                        ? "Create account"
+                        : "Sign in"}
                     </button>
+                    <p style={toggleModeStyle}>
+                      {accountMode() === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+                      <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          setAccountMode(accountMode() === "signup" ? "signin" : "signup")
+                          setError(null)
+                        }}
+                        style={linkStyle}
+                      >
+                        {accountMode() === "signup" ? "Sign in" : "Sign up"}
+                      </a>
+                    </p>
                   </form>
                 </Match>
               </Switch>
@@ -532,6 +593,12 @@ const footerLinkStyle: JSX.CSSProperties = {
 }
 const dotStyle: JSX.CSSProperties = {
   color: "rgba(255,255,255,0.25)",
+}
+const toggleModeStyle: JSX.CSSProperties = {
+  "text-align": "center",
+  margin: "14px 0 0 0",
+  "font-size": "13px",
+  color: "rgba(255,255,255,0.6)",
 }
 const newHereStyle: JSX.CSSProperties = {
   display: "block",

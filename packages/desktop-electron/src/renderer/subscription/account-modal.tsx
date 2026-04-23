@@ -1,7 +1,7 @@
 import { Match, Show, Switch, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { useLicense } from "./use-license"
 import { lastSyncAt, pullAll, pushAll } from "./sync-manager"
-import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
+import { signInWithAccount, signUpWithAccount, writeWebSession } from "@opencode-ai/app/utils/teams-client"
 import { installFocusTrap } from "../a11y/focus-trap"
 
 interface SignInState {
@@ -42,6 +42,10 @@ export function AccountModal(props: { onClose: () => void }) {
   const [info, setInfo] = createSignal<string | null>(null)
   const [polling, setPolling] = createSignal(false)
   const [lastSync, setLastSync] = createSignal(lastSyncAt())
+  const [accountMode, setAccountMode] = createSignal<"signin" | "signup">("signin")
+  const [accUsername, setAccUsername] = createSignal("")
+  const [accPassword, setAccPassword] = createSignal("")
+  const [accTelegram, setAccTelegram] = createSignal("")
   const { refresh: refreshLicense } = useLicense()
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -126,6 +130,61 @@ export function AccountModal(props: { onClose: () => void }) {
       } else {
         setErr(r.error ?? "backup failed")
       }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function friendlyAuthError(code: string): string {
+    const map: Record<string, string> = {
+      invalid_username: "Username must be 3–32 chars (letters, digits, _ - .).",
+      invalid_password: "Password must be at least 8 characters.",
+      username_taken: "That username is already in use. Try signing in.",
+      invalid_credentials: "Wrong username or password.",
+      account_revoked: "This account has been disabled. Contact @OpCrime1312.",
+      missing_credentials: "Enter both a username and a password.",
+      rate_limited: "Too many attempts. Try again in a minute.",
+    }
+    return map[code] ?? code
+  }
+
+  async function submitAccount(e: Event) {
+    e.preventDefault()
+    if (busy()) return
+    setBusy("account")
+    setErr(null)
+    setInfo(null)
+    try {
+      const fn = accountMode() === "signup" ? signUpWithAccount : signInWithAccount
+      const session = await fn({
+        username: accUsername().trim(),
+        password: accPassword(),
+        ...(accountMode() === "signup" && accTelegram().trim()
+          ? { telegram: accTelegram().trim() }
+          : {}),
+        device_label: "desktop app",
+      })
+      writeWebSession({
+        token: session.token,
+        customer_id: session.customer_id,
+        telegram_user_id: null,
+        expires_at: session.exp,
+      })
+      // The desktop stores its session in electron-store via IPC. Since the
+      // Electron main process owns that store we can't write it from the
+      // renderer, but the same shared fetch helpers used for cloud sync
+      // read from localStorage so the user's already signed in from the
+      // SSE/teams perspective. We only need to kick the account resource
+      // to re-read.
+      await refetch()
+      await refreshLicense()
+      setInfo(accountMode() === "signup" ? "Account created." : "Signed in.")
+      setAccUsername("")
+      setAccPassword("")
+      setAccTelegram("")
+    } catch (ex) {
+      const msg = ex instanceof Error ? ex.message : String(ex)
+      setErr(friendlyAuthError(msg))
     } finally {
       setBusy(null)
     }
@@ -247,12 +306,74 @@ export function AccountModal(props: { onClose: () => void }) {
           <Match when={!account.loading && !account()}>
             <div data-slot="signed-out">
               <p>
-                You're not signed in. Sign in to sync your settings and recent projects across devices and unlock
-                account-level features.
+                You're not signed in. Signing in unlocks teams, cross-device sync, and account-level features.
               </p>
               <button data-kind="primary" onClick={startSignIn} disabled={!!busy()}>
-                Sign in via Telegram
+                📱 Sign in via Telegram
               </button>
+
+              <div data-slot="or-separator"><span>or use an account</span></div>
+
+              <form onSubmit={submitAccount} data-slot="account-form">
+                <label>
+                  <span>Username</span>
+                  <input
+                    type="text"
+                    required
+                    minlength="3"
+                    maxlength="32"
+                    pattern="[a-zA-Z0-9_.\-]+"
+                    value={accUsername()}
+                    onInput={(e) => setAccUsername(e.currentTarget.value)}
+                    autocomplete="username"
+                    placeholder="your_handle"
+                    disabled={busy() === "account"}
+                  />
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    required
+                    minlength="8"
+                    value={accPassword()}
+                    onInput={(e) => setAccPassword(e.currentTarget.value)}
+                    autocomplete={accountMode() === "signup" ? "new-password" : "current-password"}
+                    placeholder={accountMode() === "signup" ? "Pick something ≥ 8 chars" : "Your password"}
+                    disabled={busy() === "account"}
+                  />
+                </label>
+                <Show when={accountMode() === "signup"}>
+                  <label>
+                    <span>Telegram handle (optional)</span>
+                    <input
+                      type="text"
+                      value={accTelegram()}
+                      onInput={(e) => setAccTelegram(e.currentTarget.value)}
+                      placeholder="@yourhandle"
+                      disabled={busy() === "account"}
+                    />
+                  </label>
+                </Show>
+                <button data-kind="primary" type="submit" disabled={busy() === "account"}>
+                  {busy() === "account"
+                    ? accountMode() === "signup" ? "Creating…" : "Signing in…"
+                    : accountMode() === "signup" ? "Create account" : "Sign in"}
+                </button>
+                <p data-slot="toggle-mode">
+                  {accountMode() === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      setAccountMode(accountMode() === "signup" ? "signin" : "signup")
+                      setErr(null)
+                    }}
+                  >
+                    {accountMode() === "signup" ? "Sign in" : "Sign up"}
+                  </a>
+                </p>
+              </form>
             </div>
           </Match>
         </Switch>

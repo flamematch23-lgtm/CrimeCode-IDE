@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto"
 import { Log } from "../util/log"
 import { getDb } from "./db"
 import { claimPendingInvitesForCustomer } from "./teams"
@@ -294,4 +294,242 @@ export function syncDelete(customerId: string, key: string): boolean {
 
 export function hashFingerprint(input: string): string {
   return createHash("sha256").update(input).digest("hex").slice(0, 24)
+}
+
+/* ─────────────────────────  Username + password auth  ──────────────────────── */
+
+const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/
+const PASSWORD_MIN = 8
+const PASSWORD_MAX = 256
+/** scrypt params — OWASP 2023: N=2^14 keeps hash time <250 ms on a Fly shared-cpu. */
+const SCRYPT_N = 16_384
+const SCRYPT_R = 8
+const SCRYPT_P = 1
+const SCRYPT_KEYLEN = 64
+
+function hashPassword(password: string): { hash: string; salt: string } {
+  const salt = randomBytes(16).toString("hex")
+  const hash = scryptSync(password, salt, SCRYPT_KEYLEN, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+  }).toString("hex")
+  return { hash, salt }
+}
+
+function verifyPassword(password: string, storedHash: string, storedSalt: string): boolean {
+  try {
+    const candidate = scryptSync(password, storedSalt, SCRYPT_KEYLEN, {
+      N: SCRYPT_N,
+      r: SCRYPT_R,
+      p: SCRYPT_P,
+    })
+    const expected = Buffer.from(storedHash, "hex")
+    if (expected.length !== candidate.length) return false
+    return timingSafeEqual(expected, candidate)
+  } catch {
+    return false
+  }
+}
+
+export interface SignUpInput {
+  username: string
+  password: string
+  /** Optional Telegram handle (with or without leading @). Normalised lowercase. */
+  telegram?: string | null
+  /** Optional email. */
+  email?: string | null
+  /** Device description shown in the sessions list. */
+  device_label?: string | null
+}
+
+export interface AuthenticatedSession {
+  token: string
+  exp: number
+  customer_id: string
+}
+
+function newCustomerId(): string {
+  return "cus_" + b64urlEncode(randomBytes(9))
+}
+
+export function signUpWithPassword(input: SignUpInput): AuthenticatedSession {
+  if (!USERNAME_RE.test(input.username)) {
+    throw new Error("invalid_username")
+  }
+  if (
+    typeof input.password !== "string" ||
+    input.password.length < PASSWORD_MIN ||
+    input.password.length > PASSWORD_MAX
+  ) {
+    throw new Error("invalid_password")
+  }
+  const db = getDb()
+
+  // Is this username already in use by an active account?
+  const existing = db
+    .prepare<{ customer_id: string }, [string]>(
+      "SELECT customer_id FROM password_accounts WHERE username = ? COLLATE NOCASE AND revoked_at IS NULL LIMIT 1",
+    )
+    .get(input.username)
+  if (existing) throw new Error("username_taken")
+
+  const tg = input.telegram ? normalizeTelegram(input.telegram) : null
+  const email = input.email ? input.email.trim().toLowerCase() : null
+
+  // If a telegram handle is provided and a customer already has it, reuse
+  // that customer row — so signing up later with the same handle you used
+  // in the bot links the two identities instead of creating a ghost.
+  let customerId: string | null = null
+  if (tg) {
+    const match = db
+      .prepare<{ id: string }, [string]>("SELECT id FROM customers WHERE LOWER(telegram) = ? LIMIT 1")
+      .get(tg)
+    if (match) customerId = match.id
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  const { hash, salt } = hashPassword(input.password)
+
+  db.transaction(() => {
+    if (!customerId) {
+      customerId = newCustomerId()
+      db.prepare(
+        "INSERT INTO customers (id, email, telegram, telegram_user_id, note, created_at) VALUES (?, ?, ?, NULL, ?, ?)",
+      ).run(customerId, email, tg, "signup via web/desktop", now)
+    } else {
+      // Optionally enrich the existing row with the email we were just given.
+      if (email) {
+        db.prepare("UPDATE customers SET email = COALESCE(email, ?) WHERE id = ?").run(email, customerId)
+      }
+    }
+    db.prepare(
+      "INSERT INTO password_accounts (customer_id, username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(customerId, input.username, hash, salt, now)
+  })()
+
+  // Issue the session + claim pending invites (if signup brought in a
+  // telegram handle that had invites waiting for it).
+  const sid = newSessionId()
+  db.prepare(
+    "INSERT INTO auth_sessions (id, customer_id, created_at, last_seen_at, device_label) VALUES (?, ?, ?, ?, ?)",
+  ).run(sid, customerId!, now, now, input.device_label ?? "web/desktop (signup)")
+
+  try {
+    claimPendingInvitesForCustomer(customerId!)
+  } catch (err) {
+    log.warn("failed to claim invites on signup", {
+      customer: customerId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+
+  const { token, exp } = makeSessionToken({
+    sub: customerId!,
+    tg: null,
+    sid,
+  })
+  return { token, exp, customer_id: customerId! }
+}
+
+export interface SignInInput {
+  username: string
+  password: string
+  device_label?: string | null
+}
+
+export function signInWithPassword(input: SignInInput): AuthenticatedSession {
+  if (!input.username || !input.password) throw new Error("missing_credentials")
+  const db = getDb()
+  const row = db
+    .prepare<
+      { customer_id: string; password_hash: string; password_salt: string; revoked_at: number | null },
+      [string]
+    >(
+      "SELECT customer_id, password_hash, password_salt, revoked_at FROM password_accounts WHERE username = ? COLLATE NOCASE LIMIT 1",
+    )
+    .get(input.username)
+  // Always burn some CPU so wrong-username and wrong-password take similar time.
+  if (!row) {
+    scryptSync(input.password, "dummy-salt-1234567890abcdef", SCRYPT_KEYLEN, {
+      N: SCRYPT_N,
+      r: SCRYPT_R,
+      p: SCRYPT_P,
+    })
+    throw new Error("invalid_credentials")
+  }
+  if (row.revoked_at) throw new Error("account_revoked")
+  if (!verifyPassword(input.password, row.password_hash, row.password_salt)) {
+    throw new Error("invalid_credentials")
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  db.prepare("UPDATE password_accounts SET last_login_at = ? WHERE customer_id = ?").run(now, row.customer_id)
+
+  const customer = db
+    .prepare<{ telegram_user_id: number | null }, [string]>("SELECT telegram_user_id FROM customers WHERE id = ?")
+    .get(row.customer_id)
+
+  const sid = newSessionId()
+  db.prepare(
+    "INSERT INTO auth_sessions (id, customer_id, created_at, last_seen_at, device_label) VALUES (?, ?, ?, ?, ?)",
+  ).run(sid, row.customer_id, now, now, input.device_label ?? "web/desktop (signin)")
+
+  try {
+    claimPendingInvitesForCustomer(row.customer_id)
+  } catch {
+    /* ignore */
+  }
+
+  const { token, exp } = makeSessionToken({
+    sub: row.customer_id,
+    tg: customer?.telegram_user_id ?? null,
+    sid,
+  })
+
+  if (customer?.telegram_user_id) {
+    void notifyNewDeviceSignIn({
+      telegram_user_id: customer.telegram_user_id,
+      device_label: input.device_label ?? null,
+      when: now,
+    }).catch(() => undefined)
+  }
+
+  return { token, exp, customer_id: row.customer_id }
+}
+
+export interface AccountRow {
+  customer_id: string
+  username: string
+  created_at: number
+  last_login_at: number | null
+  revoked_at: number | null
+  telegram: string | null
+  email: string | null
+}
+
+export function listPasswordAccounts(limit = 200): AccountRow[] {
+  return getDb()
+    .prepare<AccountRow, [number]>(
+      `SELECT pa.customer_id, pa.username, pa.created_at, pa.last_login_at, pa.revoked_at,
+              c.telegram, c.email
+         FROM password_accounts pa
+         LEFT JOIN customers c ON c.id = pa.customer_id
+        ORDER BY pa.created_at DESC
+        LIMIT ?`,
+    )
+    .all(limit)
+}
+
+export function revokePasswordAccount(customerId: string): boolean {
+  const r = getDb()
+    .prepare("UPDATE password_accounts SET revoked_at = ? WHERE customer_id = ? AND revoked_at IS NULL")
+    .run(Math.floor(Date.now() / 1000), customerId)
+  return r.changes > 0
+}
+
+function normalizeTelegram(raw: string): string {
+  const trimmed = raw.trim()
+  const withAt = trimmed.startsWith("@") ? trimmed : "@" + trimmed
+  return withAt.toLowerCase()
 }

@@ -108,6 +108,23 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 CREATE INDEX IF NOT EXISTS auth_sessions_customer_idx ON auth_sessions(customer_id);
 
+-- Classic username + password accounts, for users who don't want to sign
+-- in via Telegram. One row per customer; the customer row continues to
+-- hold optional telegram handle, email, etc.
+CREATE TABLE IF NOT EXISTS password_accounts (
+  customer_id    TEXT PRIMARY KEY,
+  username       TEXT NOT NULL COLLATE NOCASE,
+  password_hash  TEXT NOT NULL,
+  password_salt  TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  last_login_at  INTEGER,
+  revoked_at     INTEGER,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS password_accounts_username_unique
+  ON password_accounts(username COLLATE NOCASE)
+  WHERE revoked_at IS NULL;
+
 -- Cross-device sync of small JSON blobs (preferences, recent projects, ...).
 -- The client owns the schema of "value"; the server is just a key-value store
 -- with a per-customer namespace.

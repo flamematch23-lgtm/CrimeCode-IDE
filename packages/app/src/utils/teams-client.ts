@@ -83,6 +83,60 @@ export interface TeamEvent {
   label?: string | null
 }
 
+export interface AccountSession {
+  token: string
+  exp: number
+  customer_id: string
+}
+
+export interface SignUpInput {
+  username: string
+  password: string
+  telegram?: string
+  email?: string
+  device_label?: string
+}
+
+export interface SignInInput {
+  username: string
+  password: string
+  device_label?: string
+}
+
+/**
+ * Classic password sign-up / sign-in. Returns the same JWT + customer_id
+ * that the Telegram PIN flow returns, so the caller can persist it through
+ * `writeWebSession` just like before. Throws with the server-reported error
+ * code on failure ("username_taken", "invalid_credentials", "rate_limited").
+ */
+export async function signUpWithAccount(input: SignUpInput): Promise<AccountSession> {
+  return accountJson("/license/auth/signup", input)
+}
+
+export async function signInWithAccount(input: SignInInput): Promise<AccountSession> {
+  return accountJson("/license/auth/signin", input)
+}
+
+async function accountJson(path: string, body: unknown): Promise<AccountSession> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  let parsed: unknown
+  try {
+    parsed = text ? JSON.parse(text) : null
+  } catch {
+    parsed = text
+  }
+  if (!res.ok) {
+    const msg = typeof parsed === "object" && parsed && "error" in parsed ? (parsed as { error: string }).error : String(res.status)
+    throw new Error(msg)
+  }
+  return parsed as AccountSession
+}
+
 export interface TeamsClient {
   list(): Promise<{ teams: TeamSummary[] }>
   create(name: string): Promise<{ team: TeamSummary }>
