@@ -58,21 +58,35 @@ jobs:
 
       - name: Determine channel
         id: channel
+        shell: bash
         run: |
-          $channel = if (github.event.inputs.channel) { github.event.inputs.channel } elseif ($env:OPENCODE_CHANNEL) { $env:OPENCODE_CHANNEL } else { "dev" }
-          echo "channel=$channel" >> $env:GITHUB_OUTPUT
-        shell: pwsh
+          if [ -n "${{ github.event.inputs.channel }}" ]; then
+            echo "channel=${{ github.event.inputs.channel }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "$OPENCODE_CHANNEL" ]; then
+            echo "channel=$OPENCODE_CHANNEL" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=dev" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build desktop app
-        run: |
-          cd packages/desktop-electron
-          bun run build:win
+      - name: Install deps
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Build CLI (sidecar)
+        shell: bash
         env:
           OPENCODE_CHANNEL: ${{ steps.channel.outputs.channel }}
-
-      - name: Build CLI
         run: |
-          ./packages/opencode/script/build.ts
+          bun run --cwd packages/opencode script/build.ts -- --single --skip-embed-web-ui
+
+      - name: Build desktop app
+        shell: bash
+        env:
+          OPENCODE_CHANNEL: ${{ steps.channel.outputs.channel }}
+        run: |
+          cd packages/desktop-electron
+          bun run build
+          bun run package:${{ matrix.platform }}
 
       - name: Upload Windows installer
         if: matrix.platform == 'win'
