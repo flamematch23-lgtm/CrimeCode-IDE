@@ -10,7 +10,6 @@ import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 import { AuthGate, buildAuthHeader, readCredentials } from "./pages/auth-gate"
 import { LiveCursors } from "./components/teams/live-cursors"
-import { WorkspaceSwitcher } from "./components/teams/workspace-switcher"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 
@@ -168,15 +167,12 @@ if (root instanceof HTMLElement) {
                   disableHealthCheck
                 />
                 <LiveCursors />
-                {/* Workspace dock only renders for Bearer-backed sessions
-                    (Telegram sign-in). Legacy Self-hosted users still see
-                    the IDE but without the teams UI, which has no meaning
-                    in a self-hosted context anyway. */}
-                {creds.kind === "bearer" ? (
-                  <div data-component="workspace-dock">
-                    <WorkspaceSwitcher />
-                  </div>
-                ) : null}
+                {/* WorkspaceSwitcher is now mounted directly inside the
+                    titlebar (see components/titlebar.tsx) so it lives in
+                    the chrome instead of a position:fixed overlay that
+                    used to collide with the session-header buttons.
+                    Self-hosted users still get the switcher — it'll just
+                    show "Sign in to create or join teams" in the popover. */}
               </AppBaseProviders>
             </PlatformProvider>
           )

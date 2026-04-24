@@ -4,7 +4,7 @@ import { AdminPanel } from "./admin-panel"
 import { AccountModal } from "./account-modal"
 import { TrialBanner } from "./trial-banner"
 import { recordProjectOpen, schedulePush } from "./sync-manager"
-import { LiveCursors, TeamPresenceBadge, WorkspaceSwitcher } from "../teams"
+import { LiveCursors, TeamPresenceBadge } from "../teams"
 import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
 
 export function SubscriptionOverlay() {
@@ -50,9 +50,11 @@ export function SubscriptionOverlay() {
       <Show when={showAccount()}>
         <AccountModal onClose={() => setShowAccount(false)} />
       </Show>
+      {/* WorkspaceSwitcher is now mounted directly inside the titlebar
+          (see packages/app/src/components/titlebar.tsx) so the dock here
+          only carries the smaller team-presence pill. */}
       <div data-component="workspace-dock">
         <TeamPresenceBadge />
-        <WorkspaceSwitcher />
       </div>
       <LiveCursors />
     </>

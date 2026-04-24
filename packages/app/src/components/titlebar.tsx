@@ -12,6 +12,7 @@ import { usePlatform } from "@/context/platform"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
+import { WorkspaceSwitcher } from "./teams/workspace-switcher"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -328,6 +329,13 @@ export function Titlebar() {
         onMouseDown={drag}
       >
         <div id="opencode-titlebar-right" class="flex items-center gap-1 shrink-0 justify-end" />
+        {/* Workspace switcher integrated into the titlebar instead of a
+            position:fixed corner overlay — used to collide with the
+            session-header buttons that Portal-mount into
+            #opencode-titlebar-right (Copy path, Files, Modifications). */}
+        <div data-titlebar-slot="workspace" class="flex items-center shrink-0 ml-2 pointer-events-auto">
+          <WorkspaceSwitcher />
+        </div>
         <Show when={update.ready}>
           <Tooltip
             placement="bottom"
