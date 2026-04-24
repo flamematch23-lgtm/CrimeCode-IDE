@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createResource, createSignal, onCleanup } from "solid-js"
+import { Portal } from "solid-js/web"
 import { getTeamsClient, readWebSession, type TeamSummary } from "../../utils/teams-client"
 import { CreateTeamDialog } from "./create-team-dialog"
 import { ManageTeamDialog } from "./manage-team-dialog"
@@ -44,9 +45,29 @@ export function WorkspaceSwitcher() {
   })
   const [showCreate, setShowCreate] = createSignal(false)
   const [manageId, setManageId] = createSignal<string | null>(null)
+  // Popover lives in a Portal so it can never be clipped by a parent's
+  // overflow or trapped behind another stacking context. Position is
+  // measured from the trigger the moment we open.
+  const [popoverPos, setPopoverPos] = createSignal<{ top: number; right: number } | null>(null)
+  let triggerRef: HTMLButtonElement | undefined
 
   function close() {
     setOpen(false)
+    setPopoverPos(null)
+  }
+
+  function toggleOpen() {
+    if (open()) {
+      close()
+      return
+    }
+    if (!triggerRef) return
+    const rect = triggerRef.getBoundingClientRect()
+    setPopoverPos({
+      top: rect.bottom + 6,
+      right: Math.max(12, window.innerWidth - rect.right),
+    })
+    setOpen(true)
   }
 
   function onPickPersonal() {
@@ -63,11 +84,16 @@ export function WorkspaceSwitcher() {
     close()
   }
 
-  // Close on outside click.
+  // Close on outside click. The popover is portalled to document.body so
+  // we need to accept clicks inside either the trigger OR the portaled
+  // popover (marked with data-component="workspace-switcher-popover").
   function onDocClick(e: MouseEvent) {
     if (!open()) return
     const t = e.target as HTMLElement | null
-    if (!t || !t.closest('[data-component="workspace-switcher"]')) setOpen(false)
+    if (!t) return
+    if (t.closest('[data-component="workspace-switcher"]')) return
+    if (t.closest('[data-component="workspace-switcher-popover"]')) return
+    close()
   }
 
   createEffect(() => {
@@ -88,8 +114,10 @@ export function WorkspaceSwitcher() {
     <>
       <div data-component="workspace-switcher">
         <button
+          ref={(el) => (triggerRef = el)}
+          type="button"
           data-slot="trigger"
-          onClick={() => setOpen(!open())}
+          onClick={toggleOpen}
           aria-haspopup="menu"
           aria-expanded={open()}
           aria-label={`Current workspace: ${activeLabel().title}. Click to change.`}
@@ -101,9 +129,22 @@ export function WorkspaceSwitcher() {
           </span>
           <span data-slot="chevron" aria-hidden="true">{open() ? "▲" : "▼"}</span>
         </button>
+      </div>
 
-        <Show when={open()}>
-          <div data-slot="popover" role="menu">
+      <Show when={open() && popoverPos()}>
+        {(pos) => (
+          <Portal>
+            <div
+              data-component="workspace-switcher-popover"
+              data-slot="popover"
+              role="menu"
+              style={{
+                position: "fixed",
+                top: `${pos().top}px`,
+                right: `${pos().right}px`,
+                "z-index": 10000,
+              }}
+            >
             <Show when={account()} fallback={<div data-slot="empty">Sign in to create or join teams.</div>}>
               <div data-slot="section-label">PERSONAL</div>
               <button
@@ -178,9 +219,10 @@ export function WorkspaceSwitcher() {
                 ⊕ Create Team
               </button>
             </Show>
-          </div>
-        </Show>
-      </div>
+            </div>
+          </Portal>
+        )}
+      </Show>
 
       <Show when={showCreate()}>
         <CreateTeamDialog
