@@ -84,10 +84,21 @@ export interface TeamEvent {
 }
 
 export interface AccountSession {
+  status: "approved"
   token: string
   exp: number
   customer_id: string
 }
+
+/** Server says the signup/signin was valid but the account hasn't been
+ * approved by the admin yet — no token is issued. The client has to poll
+ * /auth/status/<cid> until the admin decides. */
+export interface AccountPending {
+  status: "pending"
+  customer_id: string
+}
+
+export type AccountResult = AccountSession | AccountPending
 
 export interface SignUpInput {
   username: string
@@ -104,20 +115,40 @@ export interface SignInInput {
 }
 
 /**
- * Classic password sign-up / sign-in. Returns the same JWT + customer_id
- * that the Telegram PIN flow returns, so the caller can persist it through
- * `writeWebSession` just like before. Throws with the server-reported error
- * code on failure ("username_taken", "invalid_credentials", "rate_limited").
+ * Classic password sign-up / sign-in. Returns either a full session or
+ * a "pending" marker telling the caller to show the approval-wait UI.
+ * Throws with the server-reported error code on failure
+ * ("username_taken", "invalid_credentials", "rate_limited",
+ *  "account_rejected").
  */
-export async function signUpWithAccount(input: SignUpInput): Promise<AccountSession> {
+export async function signUpWithAccount(input: SignUpInput): Promise<AccountResult> {
   return accountJson("/license/auth/signup", input)
 }
 
-export async function signInWithAccount(input: SignInInput): Promise<AccountSession> {
+export async function signInWithAccount(input: SignInInput): Promise<AccountResult> {
   return accountJson("/license/auth/signin", input)
 }
 
-async function accountJson(path: string, body: unknown): Promise<AccountSession> {
+export async function fetchApprovalStatus(
+  customerId: string,
+): Promise<{ status: "pending" | "approved" | "rejected"; rejected_reason?: string | null }> {
+  const res = await fetch(`${API_BASE}/license/auth/status/${encodeURIComponent(customerId)}`)
+  const text = await res.text()
+  let parsed: unknown
+  try {
+    parsed = text ? JSON.parse(text) : null
+  } catch {
+    parsed = text
+  }
+  if (!res.ok) {
+    const msg =
+      typeof parsed === "object" && parsed && "error" in parsed ? (parsed as { error: string }).error : String(res.status)
+    throw new Error(msg)
+  }
+  return parsed as { status: "pending" | "approved" | "rejected"; rejected_reason?: string | null }
+}
+
+async function accountJson(path: string, body: unknown): Promise<AccountResult> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -130,11 +161,15 @@ async function accountJson(path: string, body: unknown): Promise<AccountSession>
   } catch {
     parsed = text
   }
+  // 202 Accepted = pending approval, body has { status: 'pending', customer_id }
+  if (res.status === 202 && parsed && typeof parsed === "object" && "customer_id" in parsed) {
+    return parsed as AccountPending
+  }
   if (!res.ok) {
     const msg = typeof parsed === "object" && parsed && "error" in parsed ? (parsed as { error: string }).error : String(res.status)
     throw new Error(msg)
   }
-  return parsed as AccountSession
+  return parsed as AccountResult
 }
 
 export interface TeamsClient {

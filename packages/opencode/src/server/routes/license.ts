@@ -21,9 +21,13 @@ import {
 import { backupOnce } from "../../license/backup"
 import { checkRateLimit } from "../../license/rate-limit"
 import {
+  approveCustomer,
+  getApprovalStatus,
   listPasswordAccounts,
+  listPendingCustomers,
   listSessionsForCustomer,
   pollAuth,
+  rejectCustomer,
   revokePasswordAccount,
   revokeSession,
   signInWithPassword,
@@ -37,6 +41,11 @@ import {
   verifySessionToken,
   type SessionPayload,
 } from "../../license/auth"
+import {
+  notifyAdminNewPendingUser,
+  notifyUserApproved,
+  notifyUserRejected,
+} from "../../license/telegram-notify"
 import {
   addMemberByIdentifier,
   cancelInvite,
@@ -270,6 +279,13 @@ const ADMIN_DASHBOARD_HTML = `<!doctype html>
   </section>
 
   <section>
+    <h2>⏳ Pending approvals</h2>
+    <table id="pendingTable"><thead><tr>
+      <th>Customer ID</th><th>Username</th><th>Telegram</th><th>Email</th><th>Registered</th><th>Approve</th><th>Reject</th>
+    </tr></thead><tbody></tbody></table>
+  </section>
+
+  <section>
     <h2>👤 Password accounts</h2>
     <table id="accountsTable"><thead><tr>
       <th>Username</th><th>Customer ID</th><th>Telegram</th><th>Created</th><th>Last login</th><th>Status</th><th>Actions</th>
@@ -412,7 +428,54 @@ async function revokeAccount(cid) {
   } catch (e) { showToast("Error: " + e.message) }
 }
 
-async function refreshAll() { await Promise.all([loadStats(), loadAnalytics(), loadOrders(), loadLicenses(), loadAccounts(), loadAudit()]) }
+async function loadPending() {
+  try {
+    const r = await api("/accounts/pending")
+    const tbody = document.querySelector("#pendingTable tbody")
+    const rows = r.accounts || []
+    tbody.innerHTML = rows.length
+      ? rows.map((a) => {
+          const cidSafe = encodeURIComponent(a.id)
+          return \`<tr>
+            <td><code>\${a.id.slice(0, 18)}</code></td>
+            <td>\${a.username ? \`<code>\${a.username}</code>\` : "—"}</td>
+            <td>\${a.telegram ? "@" + String(a.telegram).replace(/^@/, "") : "—"}</td>
+            <td>\${a.email || "—"}</td>
+            <td>\${fmt(a.created_at)}</td>
+            <td>
+              <button onclick="approvePending('\${cidSafe}', 2)" title="Approve with 2-day trial">2d</button>
+              <button onclick="approvePending('\${cidSafe}', 7)" title="Approve with 7-day trial">7d</button>
+            </td>
+            <td><button class="danger" onclick="rejectPending('\${cidSafe}')">Reject</button></td>
+          </tr>\`
+        }).join("")
+      : '<tr><td colspan="7" class="empty">No pending accounts — everything is approved.</td></tr>'
+  } catch (e) {
+    console.error("loadPending", e)
+  }
+}
+
+async function approvePending(cidEncoded, days) {
+  try {
+    const r = await api("/accounts/" + cidEncoded + "/approve?days=" + days, { method: "POST" })
+    showToast("Approved with " + days + "d trial" + (r.was_already_approved ? " (was already approved)" : "") + ".")
+    await Promise.all([loadPending(), loadAccounts()])
+  } catch (e) { showToast("Error: " + e.message) }
+}
+
+async function rejectPending(cidEncoded) {
+  const reason = prompt("Optional reason (shown to the user on Telegram):") || ""
+  try {
+    await api("/accounts/" + cidEncoded + "/reject", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    })
+    showToast("Rejected.")
+    await loadPending()
+  } catch (e) { showToast("Error: " + e.message) }
+}
+
+async function refreshAll() { await Promise.all([loadStats(), loadAnalytics(), loadOrders(), loadLicenses(), loadPending(), loadAccounts(), loadAudit()]) }
 
 async function triggerBackup() {
   showToast("📦 Snapshotting database…")
@@ -541,6 +604,21 @@ export const LicenseRoutes = lazy(() => {
         email: body.email ?? null,
         device_label: body.device_label ?? null,
       })
+      // Kick an admin notification when this produced a fresh pending
+      // customer — so the admin sees the signup and can approve right
+      // from Telegram. Fire-and-forget, never block the response.
+      if (r.status === "pending") {
+        void notifyAdminNewPendingUser({
+          customer_id: r.customer_id,
+          username: body.username,
+          telegram: body.telegram ?? null,
+          telegram_user_id: null,
+          email: body.email ?? null,
+          method: "password",
+          created_at: Math.floor(Date.now() / 1000),
+        }).catch(() => undefined)
+        return c.json(r, 202)
+      }
       return c.json(r)
     } catch (err) {
       const msg = err instanceof Error ? err.message : "error"
@@ -570,12 +648,32 @@ export const LicenseRoutes = lazy(() => {
         password: body.password,
         device_label: body.device_label ?? null,
       })
+      if (r.status === "pending") {
+        // Someone signed in with correct credentials but the admin
+        // hasn't approved them yet. Handy HTTP status 202 = Accepted.
+        return c.json(r, 202)
+      }
       return c.json(r)
     } catch (err) {
       const msg = err instanceof Error ? err.message : "error"
-      const status: 401 | 403 = msg === "account_revoked" ? 403 : 401
+      const status: 401 | 403 =
+        msg === "account_revoked" || msg === "account_rejected" ? 403 : 401
       return c.json({ error: msg }, status)
     }
+  })
+
+  /**
+   * Polling endpoint the client hits from the "In attesa di approvazione"
+   * screen. Returns the current approval state so it can transition to
+   * "approved" (fire a sign-in) or "rejected" (show the error) without
+   * needing new credentials each time.
+   */
+  app.get("/auth/status/:cid", (c) => {
+    const cid = c.req.param("cid")
+    if (!/^cus_[A-Za-z0-9_-]{4,32}$/.test(cid)) return c.json({ error: "invalid_customer_id" }, 400)
+    const s = getApprovalStatus(cid)
+    if (!s) return c.json({ error: "unknown_customer" }, 404)
+    return c.json(s)
   })
 
   // 3. Authenticated endpoints: any client with a valid session token.
@@ -1051,6 +1149,55 @@ export const LicenseRoutes = lazy(() => {
     const ok = revokePasswordAccount(c.req.param("customerId"))
     if (!ok) return c.json({ error: "not_found_or_already_revoked" }, 404)
     return c.json({ ok: true })
+  })
+
+  // ─────────────────────── Approval queue ────────────────────────────
+  // Customers that signed up or arrived via Telegram but haven't been
+  // greenlit yet. Shown in the admin panel; clicked on from the bot
+  // via callback_query for a one-tap approve/reject.
+
+  admin.get("/accounts/pending", (c) => {
+    return c.json({ accounts: listPendingCustomers(200) })
+  })
+
+  admin.post("/accounts/:customerId/approve", async (c) => {
+    const customerId = c.req.param("customerId")
+    const url = new URL(c.req.url)
+    const daysParam = url.searchParams.get("days") ?? "2"
+    const days = Number.parseInt(daysParam, 10)
+    if (!Number.isFinite(days) || days <= 0 || days > 365) {
+      return c.json({ error: "bad_days" }, 400)
+    }
+    const before = getApprovalStatus(customerId)
+    if (!before) return c.json({ error: "not_found" }, 404)
+    const r = approveCustomer(customerId, { trialDays: days, approvedBy: "admin-panel" })
+    if (!r) return c.json({ error: "not_found" }, 404)
+    // Fire-and-forget DM to the user; if they don't have a tg id it
+    // just no-ops. The trial itself is driven client-side today (see
+    // desktop-electron state.applyStartTrial), so here we just flip
+    // the approval state — the client picks up the change via
+    // /auth/status polling and either lets the user in or, on the
+    // desktop, wires up the trial locally.
+    void notifyUserApproved({
+      telegram_user_id: r.telegram_user_id,
+      trial_days: days,
+    }).catch(() => undefined)
+    return c.json({ ok: true, customer_id: customerId, trial_days: days, was_already_approved: r.was_already_approved })
+  })
+
+  admin.post("/accounts/:customerId/reject", async (c) => {
+    const customerId = c.req.param("customerId")
+    const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
+    const r = rejectCustomer(customerId, {
+      reason: body.reason?.slice(0, 200) ?? null,
+      rejectedBy: "admin-panel",
+    })
+    if (!r) return c.json({ error: "not_found" }, 404)
+    void notifyUserRejected({
+      telegram_user_id: r.telegram_user_id,
+      reason: body.reason ?? null,
+    }).catch(() => undefined)
+    return c.json({ ok: true, customer_id: customerId })
   })
 
   admin.get("/analytics", (c) => c.json(analyticsSnapshot()))

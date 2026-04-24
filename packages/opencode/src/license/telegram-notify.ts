@@ -4,7 +4,24 @@ import { newDeviceMessage, paymentConfirmedMessage, recallLang } from "./telegra
 
 const log = Log.create({ service: "telegram-notify" })
 
-export async function sendTelegramMessage(chatId: number, text: string, parseMode: "Markdown" = "Markdown"): Promise<void> {
+function escapeMdv2(s: string): string {
+  return s.replaceAll(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1")
+}
+
+interface TelegramKeyboardButton {
+  text: string
+  callback_data?: string
+  url?: string
+}
+
+type InlineKeyboard = TelegramKeyboardButton[][]
+
+export async function sendTelegramMessage(
+  chatId: number,
+  text: string,
+  parseMode: "Markdown" | "MarkdownV2" = "Markdown",
+  replyMarkup?: { inline_keyboard: InlineKeyboard },
+): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) return
   try {
@@ -16,11 +33,109 @@ export async function sendTelegramMessage(chatId: number, text: string, parseMod
         text,
         parse_mode: parseMode,
         disable_web_page_preview: true,
+        reply_markup: replyMarkup,
       }),
     })
   } catch (err) {
     log.warn("sendMessage failed", { error: err instanceof Error ? err.message : String(err) })
   }
+}
+
+/** Resolve the admin chat_id the approval notifications go to. */
+function adminChatId(): number | null {
+  const raw = process.env.OPENCODE_ADMIN_CHAT_ID
+  if (!raw) return null
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Ping the admin's Telegram with a brand new pending user card. The
+ * inline keyboard lets the admin approve with a 2-day or 7-day trial,
+ * or reject. The callbacks are parsed by the bot's callback_query
+ * handler (see telegram.ts) which calls approveCustomer/rejectCustomer
+ * server-side and edits this message to show the outcome.
+ */
+export async function notifyAdminNewPendingUser(opts: {
+  customer_id: string
+  username: string | null
+  telegram: string | null
+  telegram_user_id: number | null
+  email: string | null
+  method: "password" | "telegram"
+  created_at: number
+}): Promise<void> {
+  const chatId = adminChatId()
+  if (!chatId) {
+    log.warn("admin chat id not configured — cannot notify new pending user", { customer: opts.customer_id })
+    return
+  }
+
+  const when = new Date(opts.created_at * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC"
+  const parts: string[] = [
+    "\uD83C\uDD95 *Nuovo utente in attesa di approvazione*",
+    "",
+    "*Customer:* `" + opts.customer_id + "`",
+    "*Metodo:* " + (opts.method === "telegram" ? "Telegram sign-in" : "Username + password"),
+  ]
+  if (opts.username) parts.push("*Username:* `" + opts.username + "`")
+  if (opts.telegram) parts.push("*Telegram:* @" + opts.telegram.replace(/^@/, ""))
+  if (opts.telegram_user_id) parts.push("*TG user id:* `" + opts.telegram_user_id + "`")
+  if (opts.email) parts.push("*Email:* `" + opts.email + "`")
+  parts.push("*Registrato:* " + when)
+  parts.push("")
+  parts.push("_Scegli l'azione qui sotto. La prova inizia al momento dell'approvazione._")
+
+  const cid = opts.customer_id
+  const keyboard: InlineKeyboard = [
+    [
+      { text: "\u2705 Approva (2gg)", callback_data: `approve:${cid}:2` },
+      { text: "\uD83C\uDF81 Approva (7gg)", callback_data: `approve:${cid}:7` },
+    ],
+    [{ text: "\u274C Rifiuta", callback_data: `reject:${cid}` }],
+  ]
+
+  await sendTelegramMessage(chatId, parts.join("\n"), "Markdown", { inline_keyboard: keyboard })
+}
+
+/** DM the customer when the admin approves them (if we have their tg id). */
+export async function notifyUserApproved(opts: {
+  telegram_user_id: number | null
+  trial_days: number
+}): Promise<void> {
+  if (!opts.telegram_user_id) return
+  const lang = recallLang(opts.telegram_user_id)
+  const body =
+    lang === "it"
+      ? [
+          "\u2705 *Account approvato!*",
+          "",
+          `Hai *${opts.trial_days} giorni* di prova gratuita per esplorare CrimeCode.`,
+          "",
+          "Torna all'app e accedi — la tua prova è gi\u00e0 attiva.",
+        ].join("\n")
+      : [
+          "\u2705 *Account approved!*",
+          "",
+          `You have *${opts.trial_days} days* of free trial to explore CrimeCode.`,
+          "",
+          "Head back to the app and sign in — your trial is already active.",
+        ].join("\n")
+  await sendTelegramMessage(opts.telegram_user_id, body)
+}
+
+export async function notifyUserRejected(opts: {
+  telegram_user_id: number | null
+  reason: string | null
+}): Promise<void> {
+  if (!opts.telegram_user_id) return
+  const lang = recallLang(opts.telegram_user_id)
+  const reasonLine = opts.reason ? "\n\n_" + escapeMdv2(opts.reason) + "_" : ""
+  const body =
+    lang === "it"
+      ? "\u274C *Richiesta di accesso rifiutata*\n\nContatta @OpCrime1312 per chiarimenti." + reasonLine
+      : "\u274C *Access request rejected*\n\nContact @OpCrime1312 for details." + reasonLine
+  await sendTelegramMessage(opts.telegram_user_id, body)
 }
 
 export async function notifyNewDeviceSignIn(opts: {

@@ -12,15 +12,25 @@ let _db: Database | null = null
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS customers (
-  id              TEXT PRIMARY KEY,
-  email           TEXT,
-  telegram        TEXT,
-  telegram_user_id INTEGER,
-  note            TEXT,
-  created_at      INTEGER NOT NULL
+  id                   TEXT PRIMARY KEY,
+  email                TEXT,
+  telegram             TEXT,
+  telegram_user_id     INTEGER,
+  note                 TEXT,
+  created_at           INTEGER NOT NULL,
+  -- Approval gate: new signups land here as 'pending' until the admin
+  -- clicks Approve in the bot or the admin panel. Only then does the
+  -- trial start and a session token get issued. Existing rows default
+  -- to 'approved' via the migration so current users keep working.
+  approval_status      TEXT NOT NULL DEFAULT 'approved',
+  approved_at          INTEGER,
+  approved_by          TEXT,           -- 'admin-panel' | 'bot:<chat_id>' | 'auto'
+  approved_trial_days  INTEGER,        -- trial length chosen at approval time (e.g. 2 or 7)
+  rejected_reason      TEXT
 );
 CREATE INDEX IF NOT EXISTS customers_telegram_idx ON customers(telegram);
 CREATE INDEX IF NOT EXISTS customers_telegram_user_id_idx ON customers(telegram_user_id);
+CREATE INDEX IF NOT EXISTS customers_approval_idx ON customers(approval_status, created_at);
 
 CREATE TABLE IF NOT EXISTS orders (
   id                TEXT PRIMARY KEY,
@@ -204,6 +214,20 @@ function resolvePath(): string {
 function runMigrations(db: Database): void {
   const ops: Array<[string, string]> = [
     ["v1.licenses.expiry_warning_sent_at", "ALTER TABLE licenses ADD COLUMN expiry_warning_sent_at INTEGER"],
+    // v2.21.0: admin-approval gate for new accounts. Existing customers
+    // default to 'approved' so current users are not locked out.
+    [
+      "v2.customers.approval_status",
+      "ALTER TABLE customers ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'",
+    ],
+    ["v2.customers.approved_at", "ALTER TABLE customers ADD COLUMN approved_at INTEGER"],
+    ["v2.customers.approved_by", "ALTER TABLE customers ADD COLUMN approved_by TEXT"],
+    ["v2.customers.approved_trial_days", "ALTER TABLE customers ADD COLUMN approved_trial_days INTEGER"],
+    ["v2.customers.rejected_reason", "ALTER TABLE customers ADD COLUMN rejected_reason TEXT"],
+    [
+      "v2.customers.approval_idx",
+      "CREATE INDEX IF NOT EXISTS customers_approval_idx ON customers(approval_status, created_at)",
+    ],
   ]
   for (const [name, sql] of ops) {
     try {

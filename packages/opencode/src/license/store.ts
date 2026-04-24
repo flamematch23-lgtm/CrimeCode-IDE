@@ -9,6 +9,11 @@ export interface CustomerRow {
   telegram_user_id: number | null
   note: string | null
   created_at: number
+  approval_status: "pending" | "approved" | "rejected"
+  approved_at: number | null
+  approved_by: string | null
+  approved_trial_days: number | null
+  rejected_reason: string | null
 }
 
 export interface OrderRow {
@@ -68,10 +73,14 @@ export function findOrCreateCustomerByTelegram(opts: {
     if (existing) return existing
   }
   const id = newId("cus")
+  // New customers coming in from the bot (or anywhere else that calls
+  // this helper) land as 'pending'. The admin approves from the
+  // Telegram notification or the admin panel before the trial starts
+  // and a session token is issued. Existing customers are untouched.
   db.prepare(
-    "INSERT INTO customers (id, email, telegram, telegram_user_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO customers (id, email, telegram, telegram_user_id, note, created_at, approval_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
   ).run(id, opts.email ?? null, opts.telegram ?? null, opts.telegram_user_id ?? null, opts.note ?? null, now())
-  audit("customer.create", { id, telegram: opts.telegram, telegram_user_id: opts.telegram_user_id })
+  audit("customer.create", { id, telegram: opts.telegram, telegram_user_id: opts.telegram_user_id, approval_status: "pending" })
   return db.prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE id = ?").get(id)!
 }
 

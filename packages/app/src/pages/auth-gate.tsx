@@ -1,6 +1,7 @@
 import { createSignal, Show, Switch, Match, onCleanup, onMount } from "solid-js"
 import type { JSX } from "solid-js"
 import {
+  fetchApprovalStatus,
   readWebSession,
   signInWithAccount,
   signUpWithAccount,
@@ -109,6 +110,8 @@ async function pollTgAuth(pin: string): Promise<
   | { status: "expired" }
   | { status: "ok"; token: string; exp: number; customer_id: string }
   | { status: "unknown" }
+  | { status: "awaiting_approval"; customer_id: string }
+  | { status: "rejected"; customer_id: string; rejected_reason?: string | null }
 > {
   const res = await fetch(`${DEFAULT_URL}/license/auth/poll/${encodeURIComponent(pin)}`)
   if (!res.ok) throw new Error(`auth/poll ${res.status}`)
@@ -131,6 +134,32 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
   const [accPassword, setAccPassword] = createSignal("")
   const [accTelegram, setAccTelegram] = createSignal("")
   const [submitting, setSubmitting] = createSignal(false)
+
+  /**
+   * Set when the server says "you're authenticated but the admin hasn't
+   * approved you yet". The client parks on the pending screen and polls
+   * /auth/status until the admin decides — then auto-completes the
+   * sign-in with the stashed credentials so the user doesn't have to
+   * re-type anything.
+   */
+  interface PendingState {
+    customer_id: string
+    username: string
+    password: string
+    started_at: number
+    /** set to true when admin rejects, so we can render the final state. */
+    rejected?: boolean
+    rejected_reason?: string | null
+  }
+  const [pendingApproval, setPendingApproval] = createSignal<PendingState | null>(null)
+  let approvalTimer: ReturnType<typeof setInterval> | null = null
+  function stopApprovalPolling() {
+    if (approvalTimer) {
+      clearInterval(approvalTimer)
+      approvalTimer = null
+    }
+  }
+  onCleanup(stopApprovalPolling)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
   function stopPoll() {
@@ -186,6 +215,34 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             setCreds(next)
             setPinState(null)
           }
+          if (r.status === "awaiting_approval") {
+            // The user clicked the bot link, the customer row exists,
+            // but the admin hasn't approved them yet. Switch to the
+            // pending screen — keep polling /auth/status so the moment
+            // approval lands we can re-poll the PIN one last time and
+            // pick up the freshly-issued token.
+            stopPoll()
+            setPinState(null)
+            setPendingApproval({
+              customer_id: r.customer_id,
+              username: "",
+              password: "",
+              started_at: Math.floor(Date.now() / 1000),
+            })
+            startApprovalPollingForTelegram(r.customer_id, s.pin)
+          }
+          if (r.status === "rejected") {
+            stopPoll()
+            setPinState(null)
+            setPendingApproval({
+              customer_id: r.customer_id,
+              username: "",
+              password: "",
+              started_at: Math.floor(Date.now() / 1000),
+              rejected: true,
+              rejected_reason: r.rejected_reason ?? null,
+            })
+          }
           if (r.status === "expired" || r.status === "unknown") {
             stopPoll()
             setPinState(null)
@@ -209,6 +266,8 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
       username_taken: "That username is already in use. Try signing in instead.",
       invalid_credentials: "Wrong username or password.",
       account_revoked: "This account has been disabled. Contact @OpCrime1312.",
+      account_rejected: "Your access request has been rejected. Contact @OpCrime1312.",
+      account_pending_approval: "Your account is waiting for admin approval.",
       missing_credentials: "Enter both a username and a password.",
       rate_limited: "Too many attempts. Try again in a minute.",
     }
@@ -233,7 +292,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
     setSubmitting(true)
     try {
       const fn = accountMode() === "signup" ? signUpWithAccount : signInWithAccount
-      const session = await fn({
+      const result = await fn({
         username: trimmedUser,
         password: accPassword(),
         ...(accountMode() === "signup" && accTelegram().trim()
@@ -241,16 +300,28 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
           : {}),
         device_label: `web (${navigator.userAgent.slice(0, 60)})`,
       })
+      if (result.status === "pending") {
+        // Admin hasn't approved yet — park on the pending screen and
+        // poll /auth/status until the decision lands.
+        setPendingApproval({
+          customer_id: result.customer_id,
+          username: trimmedUser,
+          password: accPassword(),
+          started_at: Math.floor(Date.now() / 1000),
+        })
+        startApprovalPolling(result.customer_id)
+        return
+      }
       writeWebSession({
-        token: session.token,
-        customer_id: session.customer_id,
+        token: result.token,
+        customer_id: result.customer_id,
         telegram_user_id: null,
-        expires_at: session.exp,
+        expires_at: result.exp,
       })
       const next: Credentials = {
         url: DEFAULT_URL,
         username: "bearer",
-        password: session.token,
+        password: result.token,
         kind: "bearer",
       }
       writeCredentials(next)
@@ -261,6 +332,122 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
     } finally {
       setSubmitting(false)
     }
+  }
+
+  /**
+   * Poll /auth/status every 5s. On `approved`, silently re-submit
+   * /auth/signin with the stashed credentials so we get a real session
+   * token and drop the user straight into the app. On `rejected`, show
+   * the outcome and clear stashed credentials.
+   */
+  function startApprovalPolling(customerId: string) {
+    stopApprovalPolling()
+    approvalTimer = setInterval(async () => {
+      try {
+        const s = await fetchApprovalStatus(customerId)
+        if (s.status === "approved") {
+          stopApprovalPolling()
+          const pending = pendingApproval()
+          if (!pending) return
+          try {
+            const result = await signInWithAccount({
+              username: pending.username,
+              password: pending.password,
+              device_label: `web (${navigator.userAgent.slice(0, 60)})`,
+            })
+            // Clear stashed credentials no matter what happens next.
+            setPendingApproval(null)
+            if (result.status === "pending") {
+              // Race with the server — keep polling just in case.
+              setPendingApproval({ ...pending })
+              startApprovalPolling(customerId)
+              return
+            }
+            writeWebSession({
+              token: result.token,
+              customer_id: result.customer_id,
+              telegram_user_id: null,
+              expires_at: result.exp,
+            })
+            const next: Credentials = {
+              url: DEFAULT_URL,
+              username: "bearer",
+              password: result.token,
+              kind: "bearer",
+            }
+            writeCredentials(next)
+            setCreds(next)
+          } catch (err) {
+            setError(friendlyAuthError(err instanceof Error ? err.message : String(err)))
+          }
+        } else if (s.status === "rejected") {
+          stopApprovalPolling()
+          setPendingApproval((p) => (p ? { ...p, rejected: true, rejected_reason: s.rejected_reason ?? null } : p))
+        }
+        // pending → keep polling
+      } catch {
+        // Transient network error — keep polling.
+      }
+    }, 5000)
+  }
+
+  function cancelApprovalWait() {
+    stopApprovalPolling()
+    setPendingApproval(null)
+    setError(null)
+  }
+
+  /**
+   * Variant of startApprovalPolling for the Telegram flow — instead of
+   * re-submitting credentials we re-poll the original PIN. Once the
+   * server flips the customer to "approved" the next /auth/poll/<pin>
+   * will return status:"ok" with a real session token.
+   */
+  function startApprovalPollingForTelegram(customerId: string, pin: string) {
+    stopApprovalPolling()
+    approvalTimer = setInterval(async () => {
+      try {
+        const s = await fetchApprovalStatus(customerId)
+        if (s.status === "approved") {
+          stopApprovalPolling()
+          // One last PIN poll to claim the freshly-issued token.
+          try {
+            const r = await pollTgAuth(pin)
+            if (r.status === "ok") {
+              setPendingApproval(null)
+              writeWebSession({
+                token: r.token,
+                customer_id: r.customer_id,
+                telegram_user_id: null,
+                expires_at: r.exp,
+              })
+              const next: Credentials = {
+                url: DEFAULT_URL,
+                username: "bearer",
+                password: r.token,
+                kind: "bearer",
+              }
+              writeCredentials(next)
+              setCreds(next)
+            } else {
+              // Pin already consumed or expired — point the user back
+              // to the Telegram tab so they grab a fresh PIN.
+              setPendingApproval(null)
+              setError("Approvazione ricevuta. Avvia di nuovo il sign-in con Telegram per ottenere il token.")
+            }
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err))
+          }
+        } else if (s.status === "rejected") {
+          stopApprovalPolling()
+          setPendingApproval((p) =>
+            p ? { ...p, rejected: true, rejected_reason: s.rejected_reason ?? null } : p,
+          )
+        }
+      } catch {
+        // transient — keep polling
+      }
+    }, 5000)
   }
 
   return (
@@ -275,6 +462,59 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             </div>
           }
         >
+          <Show when={pendingApproval()}>
+            {(p) => (
+              <div data-auth-gate="pending" style={formStyle}>
+                <div style={cardStyle}>
+                  <Show
+                    when={p().rejected}
+                    fallback={
+                      <>
+                        <div style={pendingHeroStyle} aria-hidden="true">⏳</div>
+                        <h1 style={titleStyle}>Account in attesa di approvazione</h1>
+                        <p style={subtitleStyle}>
+                          La tua registrazione è stata ricevuta. L'amministratore deve confermare il
+                          tuo accesso prima che la prova gratuita parta.
+                        </p>
+                        <ul style={pendingListStyle}>
+                          <li>✅ Notifica inviata all'admin su Telegram</li>
+                          <li>⏱️ Di solito l'approvazione arriva in pochi minuti</li>
+                          <li>💬 Per accelerare contatta <b>@OpCrime1312</b></li>
+                        </ul>
+                        <p style={pendingMutedStyle}>
+                          Customer ID: <code style={{ "font-size": "12px" }}>{p().customer_id}</code>
+                        </p>
+                        <div style={{ display: "flex", "justify-content": "center", "margin-top": "16px" }}>
+                          <span style={pendingDotStyle} />
+                          <span style={pendingDotStyle} />
+                          <span style={pendingDotStyle} />
+                        </div>
+                        <button type="button" style={pendingCancelStyle} onClick={cancelApprovalWait}>
+                          ← Torna indietro
+                        </button>
+                      </>
+                    }
+                  >
+                    <div style={{ ...pendingHeroStyle, color: "#ff6b6b" }} aria-hidden="true">⛔</div>
+                    <h1 style={titleStyle}>Accesso rifiutato</h1>
+                    <p style={subtitleStyle}>
+                      L'amministratore non ha approvato la tua richiesta di accesso.
+                    </p>
+                    <Show when={p().rejected_reason}>
+                      <p style={pendingReasonStyle}>"{p().rejected_reason}"</p>
+                    </Show>
+                    <p style={pendingMutedStyle}>
+                      Per chiarimenti scrivi a <b>@OpCrime1312</b>.
+                    </p>
+                    <button type="button" style={pendingCancelStyle} onClick={cancelApprovalWait}>
+                      ← Torna al sign-in
+                    </button>
+                  </Show>
+                </div>
+              </div>
+            )}
+          </Show>
+          <Show when={!pendingApproval()}>
           <div data-auth-gate="form" style={formStyle}>
             <div style={cardStyle}>
               <a href="/home" style={newHereStyle}>
@@ -439,6 +679,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
               </p>
             </div>
           </div>
+          </Show>
         </Show>
       }
     >
@@ -455,6 +696,63 @@ export function logout(): void {
 // ───────────────────────────────────────────────────────────────────────
 // Inline styles (no theme deps so the gate renders standalone).
 // ───────────────────────────────────────────────────────────────────────
+
+const pendingHeroStyle: JSX.CSSProperties = {
+  "font-size": "56px",
+  "text-align": "center",
+  "margin-bottom": "12px",
+  filter: "drop-shadow(0 0 16px rgba(255, 87, 34, 0.4))",
+}
+
+const pendingListStyle: JSX.CSSProperties = {
+  "list-style": "none",
+  padding: "16px 18px",
+  margin: "16px 0",
+  background: "rgba(255, 87, 34, 0.06)",
+  border: "1px solid rgba(255, 87, 34, 0.18)",
+  "border-radius": "10px",
+  "font-size": "13px",
+  "line-height": "2",
+  color: "#ddd",
+}
+
+const pendingMutedStyle: JSX.CSSProperties = {
+  "font-size": "11px",
+  color: "rgba(255, 255, 255, 0.45)",
+  "text-align": "center",
+  "margin-top": "8px",
+}
+
+const pendingReasonStyle: JSX.CSSProperties = {
+  "font-style": "italic",
+  color: "#ff8a8a",
+  background: "rgba(255, 0, 0, 0.06)",
+  border: "1px solid rgba(255, 0, 0, 0.18)",
+  "border-radius": "8px",
+  padding: "10px 14px",
+  margin: "12px 0",
+  "text-align": "center",
+}
+
+const pendingDotStyle: JSX.CSSProperties = {
+  width: "8px",
+  height: "8px",
+  background: "#ff5722",
+  "border-radius": "50%",
+  margin: "0 4px",
+  animation: "pulse-dot 1.4s ease-in-out infinite",
+}
+
+const pendingCancelStyle: JSX.CSSProperties = {
+  display: "block",
+  margin: "20px auto 0",
+  background: "transparent",
+  border: "none",
+  color: "rgba(255, 255, 255, 0.55)",
+  "font-size": "12px",
+  cursor: "pointer",
+  "text-decoration": "underline",
+}
 
 const loadingStyle: JSX.CSSProperties = {
   display: "flex",
