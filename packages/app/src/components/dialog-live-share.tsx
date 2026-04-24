@@ -13,6 +13,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { useLanguage } from "@/context/language"
 import { createLiveShareSocket, type Handle as SocketHandle } from "@/utils/live-share-socket"
 import { createScreenShare, type Handle as ScreenHandle } from "@/utils/screen-share"
+import { withAuthHeaders } from "@/utils/auth-fetch"
 import { ScreenSourcePicker } from "./screen-source-picker"
 import { ScreenViewer } from "./screen-viewer"
 import qrcode from "qrcode-generator"
@@ -52,11 +53,11 @@ interface HubStatus {
   participants?: Participant[]
 }
 
-async function apiGet(base: string, path: string) {
-  const r = await fetch(`${base}${path}`)
-  if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
-  return r.json()
-}
+// apiGet/apiPost used to be top-level helpers that called `fetch` directly,
+// which meant every /liveshare/* request went out without an Authorization
+// header and got a 401 back from the backend (see v2.16.0 diagnostic
+// report). They're now closures built inside DialogLiveShare below so they
+// can read the active server's credentials through useServer().
 
 // Stable per-id avatar color and initials.
 const AVATAR_COLORS = [
@@ -113,19 +114,27 @@ function qrSvg(text: string, size = 168) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="white"/><g>${rects}</g></svg>`
 }
 
-async function apiPost(base: string, path: string, body?: unknown) {
-  const r = await fetch(`${base}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  return r.json()
-}
-
 export function DialogLiveShare() {
   const dialog = useDialog()
   const language = useLanguage()
   const server = useServer()
+  const apiGet = async (base: string, path: string) => {
+    const r = await fetch(`${base}${path}`, withAuthHeaders(server.current?.http))
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+    return r.json()
+  }
+  const apiPost = async (base: string, path: string, body?: unknown) => {
+    const r = await fetch(
+      `${base}${path}`,
+      withAuthHeaders(server.current?.http, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    )
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+    return r.json().catch(() => ({}))
+  }
   const sync = useSync()
   const globalSync = useGlobalSync()
   const liveshare = useLiveShareState()
