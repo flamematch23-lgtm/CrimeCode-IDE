@@ -218,11 +218,23 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
   async function submitAccount(e: Event) {
     e.preventDefault()
     setError(null)
+    // Re-validate client-side before hitting the server. The HTML5 minlength
+    // attribute is bypassable when JS submits the form, and we'd rather show
+    // an inline error than burn a rate-limit slot on the backend.
+    const trimmedUser = accUsername().trim()
+    if (trimmedUser.length < 3 || trimmedUser.length > 32 || !/^[a-zA-Z0-9_.\-]+$/.test(trimmedUser)) {
+      setError(friendlyAuthError("invalid_username"))
+      return
+    }
+    if (accPassword().length < 8) {
+      setError(friendlyAuthError("invalid_password"))
+      return
+    }
     setSubmitting(true)
     try {
       const fn = accountMode() === "signup" ? signUpWithAccount : signInWithAccount
       const session = await fn({
-        username: accUsername().trim(),
+        username: trimmedUser,
         password: accPassword(),
         ...(accountMode() === "signup" && accTelegram().trim()
           ? { telegram: accTelegram().trim() }

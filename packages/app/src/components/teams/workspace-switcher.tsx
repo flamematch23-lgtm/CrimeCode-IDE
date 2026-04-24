@@ -127,21 +127,30 @@ export function WorkspaceSwitcher() {
                 <div data-slot="section-label">TEAMS</div>
                 <For each={teams() ?? []}>
                   {(team) => (
-                    <button
-                      data-slot="item"
+                    <div
+                      data-slot="item-row"
                       data-active={active().kind === "team" && active().id === team.id}
-                      onClick={() => onPickTeam(team)}
                     >
-                      <span data-slot="item-icon" aria-hidden="true">👥</span>
-                      <span data-slot="item-labels">
-                        <span data-slot="item-title">
-                          {team.name}
-                          {team.role === "owner" && <span data-slot="badge-owner">👑 Owner</span>}
+                      <button
+                        type="button"
+                        data-slot="item"
+                        data-active={active().kind === "team" && active().id === team.id}
+                        onClick={() => onPickTeam(team)}
+                      >
+                        <span data-slot="item-icon" aria-hidden="true">👥</span>
+                        <span data-slot="item-labels">
+                          <span data-slot="item-title">
+                            {team.name}
+                            {team.role === "owner" && <span data-slot="badge-owner">👑 Owner</span>}
+                          </span>
+                          <span data-slot="item-subtitle">
+                            {team.member_count ?? 1} {team.member_count === 1 ? "member" : "members"}
+                          </span>
                         </span>
-                        <span data-slot="item-subtitle">
-                          {team.member_count ?? 1} {team.member_count === 1 ? "member" : "members"}
-                        </span>
-                      </span>
+                        <Show when={active().kind === "team" && active().id === team.id}>
+                          <span data-slot="check" aria-label="Currently active">✓</span>
+                        </Show>
+                      </button>
                       <button
                         type="button"
                         data-slot="gear"
@@ -154,7 +163,7 @@ export function WorkspaceSwitcher() {
                       >
                         <span aria-hidden="true">⚙</span>
                       </button>
-                    </button>
+                    </div>
                   )}
                 </For>
               </Show>

@@ -375,7 +375,9 @@ export const SortableWorkspace = (props: {
 
   return (
     <div
-      // @ts-ignore
+      // @ts-ignore: Solid `use:` directive binding loses type inference
+      // when applied via JSX. The `sortable` directive is registered in
+      // packages/app/src/utils/sortable.ts and runtime-safe.
       use:sortable
       classList={{
         "opacity-30": sortable.isActiveDraggable,

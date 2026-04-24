@@ -154,6 +154,7 @@ function ServerForm(props: ServerFormProps) {
             placeholder={language.t("dialog.server.add.usernamePlaceholder")}
             value={props.username}
             disabled={props.busy}
+            autocomplete="username"
             onChange={props.onUsernameChange}
             onKeyDown={keyDown}
           />
@@ -163,6 +164,7 @@ function ServerForm(props: ServerFormProps) {
             placeholder={language.t("dialog.server.add.passwordPlaceholder")}
             value={props.password}
             disabled={props.busy}
+            autocomplete="current-password"
             onChange={props.onPasswordChange}
             onKeyDown={keyDown}
           />
