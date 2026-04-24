@@ -1,6 +1,7 @@
-import { createMemo, For, Match, Switch } from "solid-js"
+import { createMemo, createSignal, For, Match, Switch } from "solid-js"
 import { Button } from "@opencode-ai/ui/button"
 import { Logo } from "@opencode-ai/ui/logo"
+import { showToast } from "@opencode-ai/ui/toast"
 import { useLayout } from "@/context/layout"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
@@ -13,6 +14,7 @@ import { DialogSelectServer } from "@/components/dialog-select-server"
 import { useServer } from "@/context/server"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { withAuthHeaders } from "@/utils/auth-fetch"
 
 export default function Home() {
   const sync = useGlobalSync()
@@ -37,10 +39,57 @@ export default function Home() {
     return "bg-border-weak-base"
   })
 
+  const [creating, setCreating] = createSignal(false)
+
   function openProject(directory: string) {
     layout.projects.open(directory)
     server.projects.touch(directory)
     navigate(`/${base64Encode(directory)}`)
+  }
+
+  /**
+   * Ask the connected opencode server to create a fresh project folder and
+   * navigate straight into it. Works on web (server creates folder on the
+   * sandbox it controls) and on desktop against a local sidecar.
+   */
+  async function createNewProject() {
+    if (creating()) return
+    const raw = window.prompt(
+      language.t("home.newProject.promptName") ?? "Nome del nuovo progetto (opzionale)",
+      "",
+    )
+    // prompt returns null when cancelled; empty string means "default name"
+    if (raw === null) return
+    setCreating(true)
+    try {
+      const http = server.current?.http
+      const base = http?.url ?? ""
+      const r = await fetch(
+        `${base}/project/create`,
+        withAuthHeaders(http, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: raw.trim() || undefined }),
+        }),
+      )
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+      }
+      const data = (await r.json()) as { directory?: string; error?: string }
+      if (data.error || !data.directory) {
+        throw new Error(data.error ?? "no directory returned")
+      }
+      openProject(data.directory)
+    } catch (err) {
+      showToast({
+        variant: "error",
+        icon: "circle-x",
+        title: language.t("home.newProject.failed.title") ?? "Impossibile creare il progetto",
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setCreating(false)
+    }
   }
 
   async function chooseProject() {
@@ -90,9 +139,22 @@ export default function Home() {
           <div class="mt-20 w-full flex flex-col gap-4">
             <div class="flex gap-2 items-center justify-between pl-3">
               <div class="text-14-medium text-text-strong">{language.t("home.recentProjects")}</div>
-              <Button icon="folder-add-left" size="normal" class="pl-2 pr-3" onClick={chooseProject}>
-                {language.t("command.project.open")}
-              </Button>
+              <div class="flex gap-2">
+                <Button
+                  icon="plus-small"
+                  size="normal"
+                  class="pl-2 pr-3"
+                  onClick={createNewProject}
+                  disabled={creating()}
+                >
+                  {creating()
+                    ? language.t("home.newProject.creating") ?? "Creazione…"
+                    : language.t("home.newProject") ?? "Nuovo progetto"}
+                </Button>
+                <Button icon="folder-add-left" size="normal" variant="ghost" class="pl-2 pr-3" onClick={chooseProject}>
+                  {language.t("command.project.open")}
+                </Button>
+              </div>
             </div>
             <ul class="flex flex-col gap-2">
               <For each={recent()}>
@@ -116,9 +178,16 @@ export default function Home() {
         <Match when={!sync.ready}>
           <div class="mt-30 mx-auto flex flex-col items-center gap-3">
             <div class="text-12-regular text-text-weak">{language.t("common.loading")}</div>
-            <Button class="px-3" onClick={chooseProject}>
-              {language.t("command.project.open")}
-            </Button>
+            <div class="flex gap-2">
+              <Button class="px-3" onClick={createNewProject} disabled={creating()}>
+                {creating()
+                  ? language.t("home.newProject.creating") ?? "Creazione…"
+                  : language.t("home.newProject") ?? "Nuovo progetto"}
+              </Button>
+              <Button variant="ghost" class="px-3" onClick={chooseProject}>
+                {language.t("command.project.open")}
+              </Button>
+            </div>
           </div>
         </Match>
         <Match when={true}>
@@ -128,9 +197,16 @@ export default function Home() {
               <div class="text-14-medium text-text-strong">{language.t("home.empty.title")}</div>
               <div class="text-12-regular text-text-weak">{language.t("home.empty.description")}</div>
             </div>
-            <Button class="px-3 mt-1" onClick={chooseProject}>
-              {language.t("command.project.open")}
-            </Button>
+            <div class="flex gap-2 mt-1">
+              <Button class="px-3" onClick={createNewProject} disabled={creating()}>
+                {creating()
+                  ? language.t("home.newProject.creating") ?? "Creazione…"
+                  : language.t("home.newProject") ?? "Nuovo progetto"}
+              </Button>
+              <Button variant="ghost" class="px-3" onClick={chooseProject}>
+                {language.t("command.project.open")}
+              </Button>
+            </div>
           </div>
         </Match>
       </Switch>

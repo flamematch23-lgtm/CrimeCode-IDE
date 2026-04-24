@@ -8,6 +8,34 @@ import { ProjectID } from "../../project/schema"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { InstanceBootstrap } from "../../project/bootstrap"
+import { mkdir } from "node:fs/promises"
+import { homedir } from "node:os"
+import path from "node:path"
+
+/**
+ * Base directory where auto-created projects are placed.
+ * Override with OPENCODE_PROJECTS_ROOT (useful in hosted / sandboxed setups).
+ */
+function projectsRoot(): string {
+  return process.env["OPENCODE_PROJECTS_ROOT"] ?? path.join(homedir(), "opencode-projects")
+}
+
+function slugify(input: string): string {
+  const cleaned = input
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+  return cleaned || "untitled"
+}
+
+function stampSlug(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+}
 
 export const ProjectRoutes = lazy(() =>
   new Hono()
@@ -86,6 +114,50 @@ export const ProjectRoutes = lazy(() =>
           init: InstanceBootstrap,
         })
         return c.json(next)
+      },
+    )
+    .post(
+      "/create",
+      describeRoute({
+        summary: "Create new project folder",
+        description:
+          "Create an empty project workspace on disk under OPENCODE_PROJECTS_ROOT (default ~/opencode-projects). " +
+          "Folder name is `{YYYYMMDDHHMMSS}-{slug(name)}` so repeated creates never collide. Returns the absolute " +
+          "directory so the client can navigate straight into it.",
+        operationId: "project.createFolder",
+        responses: {
+          200: {
+            description: "Directory created",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ directory: z.string() })),
+              },
+            },
+          },
+          ...errors(400, 500),
+        },
+      }),
+      validator(
+        "json",
+        z
+          .object({
+            name: z.string().trim().max(64).optional(),
+          })
+          .optional(),
+      ),
+      async (c) => {
+        const body = c.req.valid("json") ?? {}
+        const slug = slugify(body.name ?? "untitled")
+        const dir = path.join(projectsRoot(), `${stampSlug()}-${slug}`)
+        try {
+          await mkdir(dir, { recursive: true })
+        } catch (err) {
+          return c.json(
+            { error: `Could not create directory: ${err instanceof Error ? err.message : String(err)}` },
+            500,
+          )
+        }
+        return c.json({ directory: dir })
       },
     )
     .patch(
