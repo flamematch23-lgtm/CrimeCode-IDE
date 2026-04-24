@@ -145,79 +145,113 @@ export function WorkspaceSwitcher() {
                 "z-index": 10000,
               }}
             >
-            <Show when={account()} fallback={<div data-slot="empty">Sign in to create or join teams.</div>}>
-              <div data-slot="section-label">PERSONAL</div>
-              <button
-                data-slot="item"
-                data-active={active().kind === "personal"}
-                onClick={onPickPersonal}
-              >
-                <span data-slot="item-icon" aria-hidden="true">👤</span>
-                <span data-slot="item-labels">
-                  <span data-slot="item-title">
-                    {(account() as { customer_id?: string } | null)?.customer_id?.slice(0, 16)}
+            <Show
+              when={account()}
+              fallback={
+                <div data-slot="empty">
+                  <div data-slot="empty-title">Accedi per creare o unirti a un Team</div>
+                  <div data-slot="empty-sub">I Team Workspace ti permettono di condividere progetti e collaborare in tempo reale.</div>
+                </div>
+              }
+            >
+              <div data-slot="section">
+                <div data-slot="section-label">Personale</div>
+                <button
+                  type="button"
+                  data-slot="item"
+                  data-active={active().kind === "personal"}
+                  onClick={onPickPersonal}
+                >
+                  <span data-slot="item-icon" aria-hidden="true">👤</span>
+                  <span data-slot="item-labels">
+                    <span data-slot="item-title">Workspace personale</span>
+                    <span data-slot="item-subtitle">Solo tu — file e progetti privati</span>
                   </span>
-                  <span data-slot="item-subtitle">Your private workspace</span>
-                </span>
-                <Show when={active().kind === "personal"}>
-                  <span data-slot="check" aria-label="Currently active">✓</span>
-                </Show>
-              </button>
+                  <Show when={active().kind === "personal"}>
+                    <span data-slot="check" aria-label="Workspace attivo">✓</span>
+                  </Show>
+                </button>
+                <div data-slot="account-id" title={(account() as { customer_id?: string } | null)?.customer_id ?? ""}>
+                  <span data-slot="account-id-label">ID</span>
+                  <code>{(account() as { customer_id?: string } | null)?.customer_id?.slice(0, 18)}</code>
+                </div>
+              </div>
 
-              <Show when={(teams() ?? []).length > 0}>
-                <div data-slot="section-label">TEAMS</div>
-                <For each={teams() ?? []}>
-                  {(team) => (
-                    <div
-                      data-slot="item-row"
-                      data-active={active().kind === "team" && active().id === team.id}
-                    >
-                      <button
-                        type="button"
-                        data-slot="item"
-                        data-active={active().kind === "team" && active().id === team.id}
-                        onClick={() => onPickTeam(team)}
-                      >
-                        <span data-slot="item-icon" aria-hidden="true">👥</span>
-                        <span data-slot="item-labels">
-                          <span data-slot="item-title">
-                            {team.name}
-                            {team.role === "owner" && <span data-slot="badge-owner">👑 Owner</span>}
-                          </span>
-                          <span data-slot="item-subtitle">
-                            {team.member_count ?? 1} {team.member_count === 1 ? "member" : "members"}
-                          </span>
-                        </span>
-                        <Show when={active().kind === "team" && active().id === team.id}>
-                          <span data-slot="check" aria-label="Currently active">✓</span>
-                        </Show>
-                      </button>
-                      <button
-                        type="button"
-                        data-slot="gear"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setManageId(team.id)
-                          close()
-                        }}
-                        aria-label={`Manage team ${team.name}`}
-                      >
-                        <span aria-hidden="true">⚙</span>
-                      </button>
+              <div data-slot="section">
+                <div data-slot="section-label">
+                  <span>Team Workspace</span>
+                  <span data-slot="section-hint">Condivisi · in tempo reale</span>
+                </div>
+
+                <Show
+                  when={(teams() ?? []).length > 0}
+                  fallback={
+                    <div data-slot="teams-empty">
+                      <div data-slot="teams-empty-icon" aria-hidden="true">👥</div>
+                      <div data-slot="teams-empty-title">Non sei ancora in un Team</div>
+                      <div data-slot="teams-empty-sub">Crea un Team Workspace per condividere progetti, vedere i cursori dei colleghi in tempo reale e lavorare insieme.</div>
                     </div>
-                  )}
-                </For>
-              </Show>
+                  }
+                >
+                  <For each={teams() ?? []}>
+                    {(team) => (
+                      <div
+                        data-slot="item-row"
+                        data-active={active().kind === "team" && active().id === team.id}
+                      >
+                        <button
+                          type="button"
+                          data-slot="item"
+                          data-active={active().kind === "team" && active().id === team.id}
+                          onClick={() => onPickTeam(team)}
+                        >
+                          <span data-slot="item-icon" aria-hidden="true">👥</span>
+                          <span data-slot="item-labels">
+                            <span data-slot="item-title">
+                              {team.name}
+                              {team.role === "owner" && <span data-slot="badge-owner">👑 Owner</span>}
+                            </span>
+                            <span data-slot="item-subtitle">
+                              {team.member_count ?? 1} {team.member_count === 1 ? "membro" : "membri"} · Workspace condiviso
+                            </span>
+                          </span>
+                          <Show when={active().kind === "team" && active().id === team.id}>
+                            <span data-slot="check" aria-label="Workspace attivo">✓</span>
+                          </Show>
+                        </button>
+                        <button
+                          type="button"
+                          data-slot="gear"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setManageId(team.id)
+                            close()
+                          }}
+                          aria-label={`Gestisci ${team.name}`}
+                          title="Gestisci membri e impostazioni"
+                        >
+                          <span aria-hidden="true">⚙</span>
+                        </button>
+                      </div>
+                    )}
+                  </For>
+                </Show>
 
-              <button
-                data-slot="create"
-                onClick={() => {
-                  setShowCreate(true)
-                  close()
-                }}
-              >
-                ⊕ Create Team
-              </button>
+                <button
+                  type="button"
+                  data-slot="create"
+                  onClick={() => {
+                    setShowCreate(true)
+                    close()
+                  }}
+                >
+                  <span data-slot="create-icon" aria-hidden="true">+</span>
+                  <span data-slot="create-labels">
+                    <span data-slot="create-title">Crea Team Workspace</span>
+                    <span data-slot="create-sub">Condividi progetti con il tuo team</span>
+                  </span>
+                </button>
+              </div>
             </Show>
             </div>
           </Portal>

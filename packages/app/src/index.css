@@ -583,3 +583,264 @@
   color: #fbbf24;
   border-color: #fbbf24;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Workspace Switcher — POPOVER (portalled to document.body)
+   ────────────────────────────────────────────────────────────────────────────
+   The popover is mounted via <Portal> so it lives outside
+   [data-component="workspace-switcher"]. The selectors below target the new
+   stand-alone wrapper [data-component="workspace-switcher-popover"] and its
+   internal slots. Without these rules the popover renders unstyled (browser
+   default flex/inline layout, all controls collapsing onto a single line).
+   ════════════════════════════════════════════════════════════════════════════ */
+
+[data-component="workspace-switcher-popover"] {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #f5f5f5;
+  width: 320px;
+  background: #15151a;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  animation: panel-in 0.15s ease-out both;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10000;
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="section"] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 4px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="section"] + [data-slot="section"] {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="section-label"] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #888;
+  padding: 4px 10px 6px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="section-hint"] {
+  font-size: 9.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="item"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #f5f5f5;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: background 0.1s;
+  min-height: 48px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="item"]:hover {
+  background: rgba(255, 87, 34, 0.10);
+}
+[data-component="workspace-switcher-popover"] [data-slot="item"][data-active="true"] {
+  background: rgba(255, 87, 34, 0.14);
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="item-icon"] {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: linear-gradient(135deg, #ff5722, #f4511e);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; color: #07070a;
+  flex-shrink: 0;
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-labels"] {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 1; min-width: 0; line-height: 1.25;
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-title"] {
+  font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-subtitle"] {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-component="workspace-switcher-popover"] [data-slot="badge-owner"] {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 9px; font-weight: 700;
+  color: #fbbf24; background: rgba(251, 191, 36, 0.15);
+  padding: 1px 6px; border-radius: 4px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="check"] {
+  color: #4ade80; font-weight: 800; font-size: 14px; flex-shrink: 0;
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="account-id"] {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 14px 6px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+[data-component="workspace-switcher-popover"] [data-slot="account-id-label"] {
+  font-weight: 700; letter-spacing: 0.1em;
+}
+[data-component="workspace-switcher-popover"] [data-slot="account-id"] code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="item-row"] {
+  display: flex; align-items: center; gap: 4px;
+  border-radius: 8px;
+  transition: background 0.1s;
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-row"]:hover {
+  background: rgba(255, 87, 34, 0.08);
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-row"][data-active="true"] {
+  background: rgba(255, 87, 34, 0.12);
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-row"] [data-slot="item"] {
+  flex: 1;
+}
+[data-component="workspace-switcher-popover"] [data-slot="item-row"] [data-slot="item"]:hover {
+  background: transparent;
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="gear"] {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  width: 36px; height: 36px;
+  min-height: 36px;
+  padding: 4px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="gear"]:hover {
+  color: #ff5722;
+  background: rgba(255, 87, 34, 0.12);
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="teams-empty"] {
+  margin: 4px 6px 8px;
+  padding: 16px 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px dashed rgba(255, 255, 255, 0.10);
+  border-radius: 10px;
+  text-align: center;
+}
+[data-component="workspace-switcher-popover"] [data-slot="teams-empty-icon"] {
+  font-size: 26px;
+  margin-bottom: 6px;
+  opacity: 0.7;
+}
+[data-component="workspace-switcher-popover"] [data-slot="teams-empty-title"] {
+  font-size: 12.5px; font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 4px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="teams-empty-sub"] {
+  font-size: 11px; line-height: 1.45;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="empty"] {
+  padding: 18px 14px;
+  text-align: center;
+}
+[data-component="workspace-switcher-popover"] [data-slot="empty-title"] {
+  font-size: 13px; font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 6px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="empty-sub"] {
+  font-size: 11px; line-height: 1.45;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+[data-component="workspace-switcher-popover"] [data-slot="create"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(255, 87, 34, 0.18), rgba(244, 81, 30, 0.10));
+  border: 1px solid rgba(255, 87, 34, 0.45);
+  color: #ff7a4c;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: all 0.15s;
+}
+[data-component="workspace-switcher-popover"] [data-slot="create"]:hover {
+  background: linear-gradient(135deg, rgba(255, 87, 34, 0.28), rgba(244, 81, 30, 0.18));
+  border-color: #ff5722;
+  color: #ff8a5c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(255, 87, 34, 0.3);
+}
+[data-component="workspace-switcher-popover"] [data-slot="create-icon"] {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 87, 34, 0.25);
+  border: 1px solid rgba(255, 87, 34, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700;
+  color: #ff8a5c;
+  flex-shrink: 0;
+}
+[data-component="workspace-switcher-popover"] [data-slot="create-labels"] {
+  display: flex; flex-direction: column; gap: 1px;
+  line-height: 1.25;
+}
+[data-component="workspace-switcher-popover"] [data-slot="create-title"] {
+  font-size: 13px; font-weight: 700;
+  color: #ff8a5c;
+}
+[data-component="workspace-switcher-popover"] [data-slot="create-sub"] {
+  font-size: 11px; font-weight: 500;
+  color: rgba(255, 138, 92, 0.7);
+}
+
+[data-component="workspace-switcher-popover"] :focus-visible {
+  outline: 2px solid #ff5722;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="workspace-switcher-popover"],
+  [data-component="workspace-switcher-popover"] * {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
