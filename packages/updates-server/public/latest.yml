@@ -1,8 +1,8 @@
-version: 2.21.8
+version: 2.22.2
 files:
   - url: opencode-electron-win-x64.exe
-    sha512: //BIj8/uaO49BqFVF2aC9bg8s0eewaURKxfOPVhGeBIuzcmjLKtJfAxbgBjkpS7/VlfX9WmW4sSv+Whcyw0aUw==
-    size: 177560324
+    sha512: esLJoGju/iUUpDCcpVRhQfO1e36s7Luklzr9DE+/c9RcsOw8KHW3GL+zYIdsJHYyNfbBZgo5/RyLXrZ9zyLEOQ==
+    size: 177561377
 path: opencode-electron-win-x64.exe
-sha512: //BIj8/uaO49BqFVF2aC9bg8s0eewaURKxfOPVhGeBIuzcmjLKtJfAxbgBjkpS7/VlfX9WmW4sSv+Whcyw0aUw==
-releaseDate: '2026-04-25T08:36:58.369Z'
+sha512: esLJoGju/iUUpDCcpVRhQfO1e36s7Luklzr9DE+/c9RcsOw8KHW3GL+zYIdsJHYyNfbBZgo5/RyLXrZ9zyLEOQ==
+releaseDate: '2026-04-25T14:26:13.949Z'
