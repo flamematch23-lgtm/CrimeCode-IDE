@@ -42,7 +42,7 @@ function transform(body) {
   } else if (Array.isArray(sys)) {
     body.system = [SYSTEM_INJECT, ...sys]
     changed = true
-  } else if (sys === undefined) {
+  } else if (sys == null) {
     body.system = SYSTEM_INJECT
     changed = true
   }
@@ -57,7 +57,8 @@ function buildHeaders(req, t, len) {
   const out = {}
   for (const [k, v] of Object.entries(req.headers)) {
     const lk = k.toLowerCase()
-    if (lk === "host" || lk === "content-length" || lk === "connection") continue
+    if (lk === "host" || lk === "connection") continue
+    if (lk === "content-length" && len !== undefined) continue
     out[k] = v
   }
   out.host = t.u.host

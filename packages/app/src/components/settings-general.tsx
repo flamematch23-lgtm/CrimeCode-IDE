@@ -573,9 +573,8 @@ export const SettingsGeneral: Component = () => {
                   onChange={(checked) => {
                     settings.proxy.setEnabled(checked)
                     const s = server.current
-                    const target = s?.http.url
-                    const auth = s?.http.password
-                    ;(window as any).api?.toggleProxy?.(checked, target, auth)
+                    if (checked && !s) return
+                    ;(window as any).api?.toggleProxy?.(checked, s?.http.url, s?.http.password)
                   }}
                 />
               </div>

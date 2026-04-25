@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import readline from "node:readline"
 import { fileURLToPath } from "node:url"
-import { app } from "electron"
+import { app, utilityProcess } from "electron"
 import treeKill from "tree-kill"
 
 import { WSL_ENABLED_KEY } from "./constants"
@@ -282,7 +282,7 @@ function compareVersions(a: number[], b: number[]) {
   return 0
 }
 
-let proxyProcess: ReturnType<typeof spawn> | null = null
+let proxyProcess: Electron.UtilityProcess | null = null
 
 export function toggleProxy(enabled: boolean, target?: string, auth?: string) {
   if (proxyProcess) {
@@ -293,11 +293,12 @@ export function toggleProxy(enabled: boolean, target?: string, auth?: string) {
   const path = app.isPackaged
     ? join(process.resourcesPath, "proxy", "index.cjs")
     : join(root, "../../proxy", "dist", "index.cjs")
-  proxyProcess = spawn(process.execPath, [path], {
+  const base = Object.fromEntries(
+    Object.entries(process.env).filter((e): e is [string, string] => typeof e[1] === "string"),
+  )
+  proxyProcess = utilityProcess.fork(path, [], {
     stdio: "pipe",
-    env: { ...process.env, PORT: "3001", TARGET_URL: target || "", TARGET_AUTH: auth || "" },
-    detached: true,
+    env: { ...base, PORT: "3001", TARGET_URL: target || "", TARGET_AUTH: auth || "" },
   })
-  proxyProcess.unref()
-  logger.log("proxy spawned", { pid: proxyProcess.pid, target })
+  logger.log("proxy forked", { pid: proxyProcess.pid, target })
 }
