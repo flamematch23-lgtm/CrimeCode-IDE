@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
-import { chmodSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { constants as osConstants, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import readline from "node:readline"
@@ -293,6 +293,18 @@ export function toggleProxy(enabled: boolean, target?: string, auth?: string, pr
   const path = app.isPackaged
     ? join(process.resourcesPath, "proxy", "index.cjs")
     : join(root, "../../proxy", "dist", "index.cjs")
+
+  logger.log("toggleProxy: checking proxy path", {
+    isPackaged: app.isPackaged,
+    path,
+    exists: existsSync(path),
+  })
+
+  if (!existsSync(path)) {
+    logger.error("toggleProxy: proxy file not found", { path })
+    return
+  }
+
   const base = Object.fromEntries(
     Object.entries(process.env).filter((e): e is [string, string] => typeof e[1] === "string"),
   )
@@ -307,5 +319,19 @@ export function toggleProxy(enabled: boolean, target?: string, auth?: string, pr
     stdio: "pipe",
     env: { ...base, PORT: port, TARGET_URL: target || "", TARGET_AUTH: auth || "" },
   })
+
+  proxyProcess.stdout?.on("data", (data) => {
+    logger.log("proxy stdout:", data.toString().trim())
+  })
+
+  proxyProcess.stderr?.on("data", (data) => {
+    logger.error("proxy stderr:", data.toString().trim())
+  })
+
+  proxyProcess.on("exit", (code) => {
+    logger.log("proxy process exited", { code })
+    proxyProcess = null
+  })
+
   logger.log("proxy forked", { pid: proxyProcess.pid, target, port })
 }

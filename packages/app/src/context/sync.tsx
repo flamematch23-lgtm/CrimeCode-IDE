@@ -365,6 +365,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             })
           })
         })
+        .catch((err) => {
+          console.error("[sync.loadMessages] failed to fetch messages", {
+            sessionID: input.sessionID,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
         .finally(() => {
           setMeta(
             produce((draft) => {
