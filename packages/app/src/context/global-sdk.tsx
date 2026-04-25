@@ -41,17 +41,19 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
 
     const http = createMemo(() => currentServer.http)
 
-    const shouldUseProxy = (path: string) => {
+    const shouldUseProxy = (method: string, path: string) => {
       if (!useProxy()) return false
+      if (method !== "POST") return false
       return /^\/session\/[^/]+\/(message|prompt_async)$/.test(path)
     }
 
     const proxyFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = input instanceof URL ? input.href : typeof input === "string" ? input : input.url
       const path = new URL(url).pathname
-      const useProxyForThisRequest = shouldUseProxy(path)
+      const method = init?.method || "GET"
+      const useProxyForThisRequest = shouldUseProxy(method, path)
       if (useProxyForThisRequest) {
-        console.log("[proxy] routing AI request to proxy:", path)
+        console.log("[proxy] routing AI request to proxy:", method, path)
       }
       if (!useProxyForThisRequest) {
         return globalThis.fetch(input, init)
