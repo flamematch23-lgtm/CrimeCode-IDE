@@ -1,12 +1,9 @@
-import { createResource, createSignal, For, Show } from "solid-js"
+import { createSignal, For, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { useGlobalSDK } from "@/context/global-sdk"
-import { useServer } from "@/context/server"
-import { usePlatform } from "@/context/platform"
 
 type Node = {
   name: string
@@ -536,89 +533,10 @@ function Tree(props: TreeProps) {
 
 export default function Security() {
   const navigate = useNavigate()
-  const gsdk = useGlobalSDK()
-  const platform = usePlatform()
-  const rawFetcher = platform.fetch ?? fetch
-
-  /**
-   * Fetcher that auto-injects HTTP Basic Auth when the connected server has
-   * credentials attached. Required because /security/* endpoints don't flow
-   * through the SDK client and the raw `fetch` would drop the auth header.
-   */
-  const server = useServer()
-  const fetcher = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const current = server.current
-    const http = current && current.type === "http" ? current.http : null
-    if (!http?.password) return rawFetcher(input, init)
-    const headers = new Headers(init?.headers ?? {})
-    if (!headers.has("Authorization")) {
-      if (http.username === "bearer") {
-        headers.set("Authorization", `Bearer ${http.password}`)
-      } else {
-        headers.set("Authorization", "Basic " + btoa(`${http.username ?? "opencode"}:${http.password}`))
-      }
-    }
-    return rawFetcher(input, { ...init, headers })
-  }) as typeof fetch
 
   const [cat, setCat] = createSignal<Category>("all")
   const [copied, setCopied] = createSignal<string | null>(null)
-  const [open, setOpen] = createSignal<Set<string>>(new Set())
   const [preview, setPreview] = createSignal<{ path: string; content: string } | null>(null)
-  const [previewLoading, setPreviewLoading] = createSignal(false)
-
-  const [engagements, { refetch }] = createResource<Engagement[]>(async () => {
-    const r = await fetcher(`${gsdk.url}/security/findings`)
-    if (!r.ok) return []
-    return r.json()
-  })
-
-  const [stats, { refetch: refetchStats }] = createResource<any[]>(async () => {
-    const r = await fetcher(`${gsdk.url}/security/dashboard`)
-    if (!r.ok) return []
-    return r.json()
-  })
-
-  const [pocs] = createResource<any[]>(async () => {
-    const r = await fetcher(`${gsdk.url}/security/poc-templates`)
-    if (!r.ok) return []
-    return r.json()
-  })
-
-  async function importFindings(engagement: string, format: "nuclei" | "nmap", source: string) {
-    const r = await fetcher(`${gsdk.url}/security/import`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ engagement, format, source }),
-    })
-    const j = await r.json().catch(() => ({}))
-    await refetch()
-    await refetchStats()
-    return j
-  }
-
-  function toggle(p: string) {
-    const s = new Set(open())
-    if (s.has(p)) s.delete(p)
-    else s.add(p)
-    setOpen(s)
-  }
-
-  async function openFile(p: string) {
-    setPreviewLoading(true)
-    setPreview({ path: p, content: "" })
-    const r = await fetcher(`${gsdk.url}/security/findings/file?path=${encodeURIComponent(p)}`)
-    const j = await r.json().catch(() => ({ content: "[lettura fallita]" }))
-    setPreview({ path: p, content: j.content ?? j.error ?? "" })
-    setPreviewLoading(false)
-  }
-
-  function fmtSize(n?: number) {
-    if (n === undefined) return ""
-    if (n < 1024) return `${n}B`
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}K`
-    return `${(n / 1024 / 1024).toFixed(1)}M`
-  }
 
   const cats: { id: Category; label: string }[] = [
     { id: "all", label: "Tutti" },
@@ -890,142 +808,6 @@ export default function Security() {
             </div>
           </div>
         </section>
-        {/* Findings Browser */}
-        <section class="mb-8">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-14-semibold text-text-strong">Esploratore Risultati</h2>
-            <button
-              onClick={() => {
-                void refetch()
-                void refetchStats()
-              }}
-              class="text-11-regular text-text-weak hover:text-text-strong px-2 py-1 rounded hover:bg-surface-raised-base-hover"
-            >
-              {engagements.loading ? "Caricamento…" : "Aggiorna"}
-            </button>
-          </div>
-
-          {/* Engagement Dashboard */}
-          <Show when={(stats()?.length ?? 0) > 0}>
-            <div class="mb-4 rounded border border-surface-weak bg-surface-base p-3">
-              <div class="text-12-semibold text-text-strong mb-2">Dashboard Engagement</div>
-              <div class="flex flex-col gap-1">
-                <For each={stats()}>
-                  {(s) => (
-                    <div class="flex items-center justify-between gap-2 text-11-regular">
-                      <span class="font-mono text-text-weak truncate">
-                        {s.project} / {s.engagement}
-                      </span>
-                      <div class="flex items-center gap-1">
-                        <span class="text-text-weak">{s.total} totali</span>
-                        <Show when={s.counts.critical > 0}>
-                          <span class="px-1.5 rounded bg-fill-critical text-text-on-accent">
-                            {s.counts.critical} critici
-                          </span>
-                        </Show>
-                        <Show when={s.counts.high > 0}>
-                          <span class="px-1.5 rounded bg-fill-warning text-text-on-accent">{s.counts.high} alti</span>
-                        </Show>
-                        <Show when={s.counts.medium > 0}>
-                          <span class="px-1.5 rounded bg-fill-accent text-text-on-accent">{s.counts.medium} medi</span>
-                        </Show>
-                        <Show when={s.counts.low > 0}>
-                          <span class="px-1.5 rounded bg-fill-subtle text-text-weak">{s.counts.low} bassi</span>
-                        </Show>
-                      </div>
-                    </div>
-                  )}
-                </For>
-              </div>
-              <div class="mt-2 flex gap-2">
-                <button
-                  class="text-11-regular px-2 py-1 rounded bg-fill-accent text-text-on-accent"
-                  onClick={async () => {
-                    const eng = prompt("Nome engagement:")
-                    if (!eng) return
-                    const src = prompt("Percorso file nuclei.jsonl o testo:")
-                    if (!src) return
-                    const r = await importFindings(eng, "nuclei", src)
-                    alert(`Importati ${r.added ?? 0} risultati`)
-                  }}
-                >
-                  Importa Nuclei
-                </button>
-                <button
-                  class="text-11-regular px-2 py-1 rounded bg-fill-accent text-text-on-accent"
-                  onClick={async () => {
-                    const eng = prompt("Nome engagement:")
-                    if (!eng) return
-                    const src = prompt("Percorso file nmap.xml o XML:")
-                    if (!src) return
-                    const r = await importFindings(eng, "nmap", src)
-                    alert(`Importati ${r.added ?? 0} risultati`)
-                  }}
-                >
-                  Importa Nmap
-                </button>
-              </div>
-            </div>
-          </Show>
-
-          {/* PoC Templates */}
-          <Show when={(pocs()?.length ?? 0) > 0}>
-            <details class="mb-4 rounded border border-surface-weak bg-surface-base p-3">
-              <summary class="text-12-semibold text-text-strong cursor-pointer">
-                Modelli PoC ({pocs()?.length ?? 0})
-              </summary>
-              <div class="mt-2 flex flex-col gap-2">
-                <For each={pocs()}>
-                  {(p) => (
-                    <div class="rounded border border-surface-weak p-2">
-                      <div class="flex items-center gap-2 mb-1">
-                        <span class="text-11-semibold text-text-strong">{p.title}</span>
-                        <span class="text-10-regular px-1 rounded bg-fill-subtle text-text-weak">{p.severity}</span>
-                        <span class="text-10-regular text-text-weak font-mono">{p.cwe}</span>
-                      </div>
-                      <pre class="text-10-regular bg-surface-base-pressed text-text-strong rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                        {p.payload}
-                      </pre>
-                      <div class="text-10-regular text-text-weak mt-1">{p.notes}</div>
-                    </div>
-                  )}
-                </For>
-              </div>
-            </details>
-          </Show>
-          <Show
-            when={!engagements.loading && (engagements()?.length ?? 0) > 0}
-            fallback={
-              <div class="rounded border border-surface-weak bg-surface-base p-4 text-12-regular text-text-weak">
-                <Show when={engagements.loading} fallback="Nessuna cartella pentest-output/ trovata nei progetti.">
-                  Scansione progetti…
-                </Show>
-              </div>
-            }
-          >
-            <div class="rounded border border-surface-weak bg-surface-base divide-y divide-surface-weak">
-              <For each={engagements()}>
-                {(eng) => (
-                  <div class="p-3">
-                    <div class="flex items-center gap-2 mb-2">
-                      <Icon name="folder-add-left" class="text-icon-secondary" />
-                      <div class="text-13-semibold text-text-strong">{eng.project}</div>
-                      <code class="text-10-mono text-text-subtle truncate">{eng.root}</code>
-                    </div>
-                    <Tree
-                      nodes={eng.tree}
-                      depth={0}
-                      open={open()}
-                      toggle={toggle}
-                      onFile={openFile}
-                      fmtSize={fmtSize}
-                    />
-                  </div>
-                )}
-              </For>
-            </div>
-          </Show>
-        </section>
         {/* File Preview Modal */}
         <Show when={preview()}>
           {(p) => (
@@ -1047,10 +829,7 @@ export default function Security() {
                   />
                 </div>
                 <div class="flex-1 overflow-auto p-4">
-                  <Show
-                    when={!previewLoading()}
-                    fallback={<div class="text-12-regular text-text-weak">Caricamento…</div>}
-                  >
+                  <Show when={true} fallback={<div class="text-12-regular text-text-weak">Caricamento…</div>}>
                     <pre class="text-11-mono text-text-strong whitespace-pre-wrap break-words">{p().content}</pre>
                   </Show>
                 </div>
@@ -1063,10 +842,6 @@ export default function Security() {
           Metodologia: PTES · OWASP WSTG · MITRE ATT&amp;CK · Vedi la skill pentester in{" "}
           <code>~/.agents/skills/pentester</code>
         </div>
-        <Show when={false}>
-          {/* keep imports referenced */}
-          <div />
-        </Show>
       </div>
     </div>
   )
