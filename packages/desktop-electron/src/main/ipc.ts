@@ -83,8 +83,14 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("install-cli", () => deps.installCli())
   ipcMain.handle(
     "toggle-proxy",
-    (_event: IpcMainInvokeEvent, enabled: boolean, target?: string, auth?: string, proxyUrl?: string) =>
-      toggleProxy(enabled, target, auth, proxyUrl),
+    (
+      _event: IpcMainInvokeEvent,
+      enabled: boolean,
+      target?: string,
+      auth?: string,
+      proxyUrl?: string,
+      username?: string,
+    ) => toggleProxy(enabled, target, auth, proxyUrl, username),
   )
   ipcMain.handle("await-initialization", (event: IpcMainInvokeEvent) => {
     const send = (step: InitStep) => event.sender.send("init-step", step)

@@ -6,6 +6,7 @@ const { Transform } = require("stream")
 const PORT = parseInt(process.env.PORT || "3001", 10)
 const TARGET_URL = process.env.TARGET_URL || ""
 const TARGET_AUTH = process.env.TARGET_AUTH || ""
+const TARGET_USERNAME = process.env.TARGET_USERNAME || ""
 
 // ---------------------------------------------------------------------------
 // Per-family jailbreak prompts
@@ -235,7 +236,14 @@ function buildHeaders(req, t, len, images) {
     out[k] = v
   }
   out.host = t.u.host
-  if (TARGET_AUTH && !out.authorization) out.authorization = "Bearer " + TARGET_AUTH
+  if (TARGET_AUTH) {
+    if (TARGET_USERNAME) {
+      const basic = Buffer.from(`${TARGET_USERNAME}:${TARGET_AUTH}`).toString("base64")
+      out.authorization = "Basic " + basic
+    } else if (!out.authorization) {
+      out.authorization = "Bearer " + TARGET_AUTH
+    }
+  }
   if (len !== undefined) out["content-length"] = String(len)
   out["x-initiator"] = "agent"
   out["openai-intent"] = "conversation-edits"

@@ -574,7 +574,13 @@ export const SettingsGeneral: Component = () => {
                     settings.proxy.setEnabled(checked)
                     const s = server.current
                     if (checked && !s) return
-                    ;(window as any).api?.toggleProxy?.(checked, s?.http.url, s?.http.password, settings.proxy.url())
+                    ;(window as any).api?.toggleProxy?.(
+                      checked,
+                      s?.http.url,
+                      s?.http.password,
+                      settings.proxy.url(),
+                      s?.http.username,
+                    )
                   }}
                 />
               </div>

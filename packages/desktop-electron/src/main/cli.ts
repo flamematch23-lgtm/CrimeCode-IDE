@@ -284,7 +284,7 @@ function compareVersions(a: number[], b: number[]) {
 
 let proxyProcess: Electron.UtilityProcess | null = null
 
-export function toggleProxy(enabled: boolean, target?: string, auth?: string, proxyUrl?: string) {
+export function toggleProxy(enabled: boolean, target?: string, auth?: string, proxyUrl?: string, username?: string) {
   if (proxyProcess) {
     proxyProcess.kill()
     proxyProcess = null
@@ -317,7 +317,7 @@ export function toggleProxy(enabled: boolean, target?: string, auth?: string, pr
   }
   proxyProcess = utilityProcess.fork(path, [], {
     stdio: "pipe",
-    env: { ...base, PORT: port, TARGET_URL: target || "", TARGET_AUTH: auth || "" },
+    env: { ...base, PORT: port, TARGET_URL: target || "", TARGET_AUTH: auth || "", TARGET_USERNAME: username || "" },
   })
 
   proxyProcess.stdout?.on("data", (data) => {
