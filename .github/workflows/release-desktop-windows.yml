@@ -66,10 +66,6 @@ jobs:
           ls packages/opencode/dist/ || ls packages/opencode/dist-*/
           find packages/opencode -name "*.exe" -type f 2>/dev/null | head -10
 
-      - name: Build Proxy
-        shell: bash
-        run: bun run --cwd packages/proxy build
-
       - name: Stage sidecar into desktop-electron
         shell: bash
         run: |
