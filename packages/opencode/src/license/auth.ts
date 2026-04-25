@@ -145,10 +145,11 @@ export function startAuth(opts: { device_label?: string | null }): StartedAuth {
 }
 
 export interface PollResult {
-  status: "pending" | "ok" | "expired" | "unknown"
+  status: "pending" | "ok" | "expired" | "unknown" | "awaiting_approval" | "rejected"
   token?: string
   exp?: number
   customer_id?: string
+  rejected_reason?: string | null
 }
 
 export function pollAuth(pin: string): PollResult {
@@ -163,11 +164,23 @@ export function pollAuth(pin: string): PollResult {
 
   // Claimed — load the customer + create a session, return the JWT.
   const customer = db
-    .prepare<{ id: string; telegram_user_id: number | null }, [string]>(
-      "SELECT id, telegram_user_id FROM customers WHERE id = ?",
-    )
+    .prepare<
+      { id: string; telegram_user_id: number | null; approval_status: string; rejected_reason: string | null },
+      [string]
+    >("SELECT id, telegram_user_id, approval_status, rejected_reason FROM customers WHERE id = ?")
     .get(row.customer_id)
   if (!customer) return { status: "unknown" }
+
+  // Approval gate: if the admin hasn't approved this customer yet, we
+  // keep the pin around (so the status stays sticky across polls), and
+  // return awaiting_approval / rejected without issuing a token.
+  if (customer.approval_status === "pending") {
+    return { status: "awaiting_approval", customer_id: customer.id }
+  }
+  if (customer.approval_status === "rejected") {
+    db.prepare("DELETE FROM auth_pins WHERE pin = ?").run(pin)
+    return { status: "rejected", customer_id: customer.id, rejected_reason: customer.rejected_reason ?? null }
+  }
 
   const sid = newSessionId()
   db.prepare(
@@ -344,16 +357,133 @@ export interface SignUpInput {
 }
 
 export interface AuthenticatedSession {
+  status: "approved"
   token: string
   exp: number
   customer_id: string
 }
 
+/**
+ * Returned by signUp / Telegram poll when the customer exists but is still
+ * waiting for the admin to approve them. No session token is emitted — the
+ * client must poll /auth/status until the approval decision lands.
+ */
+export interface PendingApproval {
+  status: "pending"
+  customer_id: string
+  /** When the admin has already rejected this account. */
+  rejected?: boolean
+  rejected_reason?: string | null
+}
+
+export type SignUpResult = AuthenticatedSession | PendingApproval
+
 function newCustomerId(): string {
   return "cus_" + b64urlEncode(randomBytes(9))
 }
 
-export function signUpWithPassword(input: SignUpInput): AuthenticatedSession {
+/**
+ * Look up the current approval state of a customer. Used both by the
+ * /auth/status polling endpoint and by the sign-in gates.
+ */
+export function getApprovalStatus(customerId: string): {
+  status: "pending" | "approved" | "rejected"
+  rejected_reason?: string | null
+} | null {
+  const db = getDb()
+  const row = db
+    .prepare<{ approval_status: string; rejected_reason: string | null }, [string]>(
+      "SELECT approval_status, rejected_reason FROM customers WHERE id = ?",
+    )
+    .get(customerId)
+  if (!row) return null
+  const s = row.approval_status as "pending" | "approved" | "rejected"
+  return { status: s, rejected_reason: row.rejected_reason ?? null }
+}
+
+export interface PendingCustomer {
+  id: string
+  email: string | null
+  telegram: string | null
+  telegram_user_id: number | null
+  note: string | null
+  created_at: number
+  username: string | null
+}
+
+/**
+ * List customers still waiting for admin approval, newest first. Joined
+ * with password_accounts so the admin panel can show the username that
+ * was picked at signup (if any — Telegram-only users won't have one).
+ */
+export function listPendingCustomers(limit = 100): PendingCustomer[] {
+  const db = getDb()
+  return db
+    .prepare<PendingCustomer, [number]>(
+      `SELECT c.id, c.email, c.telegram, c.telegram_user_id, c.note, c.created_at,
+              pa.username
+         FROM customers c
+         LEFT JOIN password_accounts pa
+                ON pa.customer_id = c.id AND pa.revoked_at IS NULL
+        WHERE c.approval_status = 'pending'
+        ORDER BY c.created_at DESC
+        LIMIT ?`,
+    )
+    .all(limit)
+}
+
+/**
+ * Mark a customer as approved, record who approved them and the trial
+ * length chosen at approval time. Returns the row values the caller
+ * needs to kick off a trial + notify the user.
+ */
+export function approveCustomer(
+  customerId: string,
+  opts: { trialDays: number; approvedBy: string },
+): {
+  id: string
+  telegram_user_id: number | null
+  telegram: string | null
+  was_already_approved: boolean
+} | null {
+  const db = getDb()
+  const before = db
+    .prepare<{ approval_status: string; telegram_user_id: number | null; telegram: string | null }, [string]>(
+      "SELECT approval_status, telegram_user_id, telegram FROM customers WHERE id = ?",
+    )
+    .get(customerId)
+  if (!before) return null
+  const now = Math.floor(Date.now() / 1000)
+  db.prepare(
+    "UPDATE customers SET approval_status = 'approved', approved_at = ?, approved_by = ?, approved_trial_days = ?, rejected_reason = NULL WHERE id = ?",
+  ).run(now, opts.approvedBy, opts.trialDays, customerId)
+  return {
+    id: customerId,
+    telegram_user_id: before.telegram_user_id,
+    telegram: before.telegram,
+    was_already_approved: before.approval_status === "approved",
+  }
+}
+
+export function rejectCustomer(
+  customerId: string,
+  opts: { reason?: string | null; rejectedBy: string },
+): { id: string; telegram_user_id: number | null } | null {
+  const db = getDb()
+  const before = db
+    .prepare<{ telegram_user_id: number | null }, [string]>(
+      "SELECT telegram_user_id FROM customers WHERE id = ?",
+    )
+    .get(customerId)
+  if (!before) return null
+  const now = Math.floor(Date.now() / 1000)
+  db.prepare(
+    "UPDATE customers SET approval_status = 'rejected', approved_at = ?, approved_by = ?, rejected_reason = ? WHERE id = ?",
+  ).run(now, opts.rejectedBy, opts.reason ?? null, customerId)
+  return { id: customerId, telegram_user_id: before.telegram_user_id }
+}
+
+export function signUpWithPassword(input: SignUpInput): SignUpResult {
   if (!USERNAME_RE.test(input.username)) {
     throw new Error("invalid_username")
   }
@@ -394,8 +524,10 @@ export function signUpWithPassword(input: SignUpInput): AuthenticatedSession {
   db.transaction(() => {
     if (!customerId) {
       customerId = newCustomerId()
+      // Brand new customer — land as 'pending' so the admin must
+      // approve before the trial starts and a session gets issued.
       db.prepare(
-        "INSERT INTO customers (id, email, telegram, telegram_user_id, note, created_at) VALUES (?, ?, ?, NULL, ?, ?)",
+        "INSERT INTO customers (id, email, telegram, telegram_user_id, note, created_at, approval_status) VALUES (?, ?, ?, NULL, ?, ?, 'pending')",
       ).run(customerId, email, tg, "signup via web/desktop", now)
     } else {
       // Optionally enrich the existing row with the email we were just given.
@@ -408,8 +540,18 @@ export function signUpWithPassword(input: SignUpInput): AuthenticatedSession {
     ).run(customerId, input.username, hash, salt, now)
   })()
 
-  // Issue the session + claim pending invites (if signup brought in a
-  // telegram handle that had invites waiting for it).
+  // Read back the approval state — an existing customer row (matched via
+  // telegram handle) may already be approved, in which case we skip
+  // straight to session issuance. New customers are always 'pending' per
+  // the INSERT above.
+  const approval = getApprovalStatus(customerId!)
+  if (!approval || approval.status !== "approved") {
+    // No token, no trial — just tell the client to wait for admin.
+    return { status: "pending", customer_id: customerId! }
+  }
+
+  // Existing approved customer linking a new password — issue session as
+  // before so they can sign in on this device.
   const sid = newSessionId()
   db.prepare(
     "INSERT INTO auth_sessions (id, customer_id, created_at, last_seen_at, device_label) VALUES (?, ?, ?, ?, ?)",
@@ -429,7 +571,7 @@ export function signUpWithPassword(input: SignUpInput): AuthenticatedSession {
     tg: null,
     sid,
   })
-  return { token, exp, customer_id: customerId! }
+  return { status: "approved", token, exp, customer_id: customerId! }
 }
 
 export interface SignInInput {
@@ -438,7 +580,7 @@ export interface SignInInput {
   device_label?: string | null
 }
 
-export function signInWithPassword(input: SignInInput): AuthenticatedSession {
+export function signInWithPassword(input: SignInInput): SignUpResult {
   if (!input.username || !input.password) throw new Error("missing_credentials")
   const db = getDb()
   const row = db
@@ -461,6 +603,20 @@ export function signInWithPassword(input: SignInInput): AuthenticatedSession {
   if (row.revoked_at) throw new Error("account_revoked")
   if (!verifyPassword(input.password, row.password_hash, row.password_salt)) {
     throw new Error("invalid_credentials")
+  }
+
+  // Approval gate — an authenticated-but-unapproved user doesn't get a
+  // session. They'll land on the "in attesa di approvazione" UI until
+  // the admin approves (or rejects) them.
+  const approval = getApprovalStatus(row.customer_id)
+  if (!approval) throw new Error("invalid_credentials")
+  if (approval.status === "rejected") {
+    const err = new Error("account_rejected") as Error & { reason?: string | null }
+    err.reason = approval.rejected_reason
+    throw err
+  }
+  if (approval.status === "pending") {
+    return { status: "pending", customer_id: row.customer_id }
   }
 
   const now = Math.floor(Date.now() / 1000)
@@ -495,7 +651,7 @@ export function signInWithPassword(input: SignInInput): AuthenticatedSession {
     }).catch(() => undefined)
   }
 
-  return { token, exp, customer_id: row.customer_id }
+  return { status: "approved", token, exp, customer_id: row.customer_id }
 }
 
 export interface AccountRow {

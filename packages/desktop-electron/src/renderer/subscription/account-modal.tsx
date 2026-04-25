@@ -156,7 +156,7 @@ export function AccountModal(props: { onClose: () => void }) {
     setInfo(null)
     try {
       const fn = accountMode() === "signup" ? signUpWithAccount : signInWithAccount
-      const session = await fn({
+      const result = await fn({
         username: accUsername().trim(),
         password: accPassword(),
         ...(accountMode() === "signup" && accTelegram().trim()
@@ -164,11 +164,22 @@ export function AccountModal(props: { onClose: () => void }) {
           : {}),
         device_label: "desktop app",
       })
+      // Approval gate (v2.21.0): when the admin hasn't OK'd this account yet
+      // we get a pending marker instead of a session. Surface it as info
+      // text so the user knows to wait — no token, no trial, no app access.
+      if (result.status === "pending") {
+        setInfo(
+          "Account in attesa di approvazione. L'admin riceverà la notifica su Telegram. " +
+            "Riprova ad accedere quando ti arriva la conferma. Customer ID: " +
+            result.customer_id,
+        )
+        return
+      }
       writeWebSession({
-        token: session.token,
-        customer_id: session.customer_id,
+        token: result.token,
+        customer_id: result.customer_id,
         telegram_user_id: null,
-        expires_at: session.exp,
+        expires_at: result.exp,
       })
       // The desktop stores its session in electron-store via IPC. Since the
       // Electron main process owns that store we can't write it from the

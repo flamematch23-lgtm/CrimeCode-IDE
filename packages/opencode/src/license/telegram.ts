@@ -1,6 +1,7 @@
 import { Log } from "../util/log"
 import { captureException } from "./sentry"
-import { claimPinForCustomer } from "./auth"
+import { approveCustomer, claimPinForCustomer, rejectCustomer } from "./auth"
+import { notifyUserApproved, notifyUserRejected } from "./telegram-notify"
 import { listTeamsForCustomer } from "./teams"
 import { helpUser, orderCreatedMessage, pickLang, rememberLang, type Lang } from "./telegram-i18n"
 import {
@@ -35,6 +36,16 @@ interface TgUpdate {
     from?: { id: number; username?: string; first_name?: string; language_code?: string }
     chat: { id: number }
     text?: string
+  }
+  callback_query?: {
+    id: string
+    from: { id: number; username?: string; first_name?: string }
+    message?: {
+      message_id: number
+      chat: { id: number }
+      text?: string
+    }
+    data?: string
   }
 }
 
@@ -220,7 +231,82 @@ function escapeMd(s: string): string {
   return s.replaceAll(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1")
 }
 
+async function handleCallbackQuery(update: TgUpdate): Promise<void> {
+  const cb = update.callback_query
+  if (!cb || !cb.data) return
+  const token = getToken()
+  const fromId = cb.from.id
+
+  // Only the admin(s) can approve/reject users.
+  const isAdmin = getAdminUserIds().has(fromId)
+  if (!isAdmin) {
+    if (token) {
+      await tgFetch<unknown>(token, "answerCallbackQuery", {
+        callback_query_id: cb.id,
+        text: "Non autorizzato",
+        show_alert: true,
+      })
+    }
+    return
+  }
+
+  // approve:<cid>:<days>   reject:<cid>
+  const approveMatch = cb.data.match(/^approve:(cus_[A-Za-z0-9_-]{4,32}):(\d{1,3})$/)
+  const rejectMatch = cb.data.match(/^reject:(cus_[A-Za-z0-9_-]{4,32})$/)
+
+  let outcomeText: string | null = null
+  if (approveMatch) {
+    const [, cid, daysStr] = approveMatch
+    const days = Number.parseInt(daysStr, 10)
+    const r = approveCustomer(cid, { trialDays: days, approvedBy: `bot:${fromId}` })
+    if (!r) {
+      outcomeText = "Customer non trovato"
+    } else {
+      outcomeText = `✅ Approvato con ${days}gg di prova` + (r.was_already_approved ? " (era già approvato)" : "")
+      void notifyUserApproved({ telegram_user_id: r.telegram_user_id, trial_days: days }).catch(() => undefined)
+    }
+  } else if (rejectMatch) {
+    const [, cid] = rejectMatch
+    const r = rejectCustomer(cid, { rejectedBy: `bot:${fromId}`, reason: null })
+    if (!r) {
+      outcomeText = "Customer non trovato"
+    } else {
+      outcomeText = "❌ Rifiutato"
+      void notifyUserRejected({ telegram_user_id: r.telegram_user_id, reason: null }).catch(() => undefined)
+    }
+  } else {
+    outcomeText = "Azione sconosciuta"
+  }
+
+  if (!token) return
+
+  // 1. Acknowledge the button press with a toast notification.
+  await tgFetch<unknown>(token, "answerCallbackQuery", {
+    callback_query_id: cb.id,
+    text: outcomeText,
+  })
+
+  // 2. Edit the original message so the chat history shows the final
+  //    outcome instead of the now-consumed buttons.
+  if (cb.message) {
+    const original = cb.message.text ?? ""
+    const stamp = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC"
+    const adminHandle = cb.from.username ? "@" + cb.from.username : String(fromId)
+    const newText = `${original}\n\n— ${outcomeText} (${adminHandle}, ${stamp})`
+    await tgFetch<unknown>(token, "editMessageText", {
+      chat_id: cb.message.chat.id,
+      message_id: cb.message.message_id,
+      text: newText,
+      parse_mode: "Markdown",
+    })
+  }
+}
+
 async function handle(update: TgUpdate) {
+  if (update.callback_query) {
+    await handleCallbackQuery(update)
+    return
+  }
   const msg = update.message
   if (!msg || !msg.text || !msg.from) return
   const chatId = msg.chat.id
@@ -442,7 +528,7 @@ async function pollOnce(token: string) {
   const r = await tgFetch<TgUpdate[]>(token, "getUpdates", {
     offset: lastUpdateId + 1,
     timeout: POLL_TIMEOUT_S,
-    allowed_updates: ["message"],
+    allowed_updates: ["message", "callback_query"],
   })
   if (!r.ok) {
     log.warn("getUpdates failed", { description: r.description })

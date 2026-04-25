@@ -6,6 +6,7 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLiveShareState } from "@/context/liveshare-state"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createLiveShareSocket, type Handle as SocketHandle } from "@/utils/live-share-socket"
+import { withAuthHeaders } from "@/utils/auth-fetch"
 
 // ── types (mirror live.ts) ───────────────────────────────────────────────────
 
@@ -67,24 +68,32 @@ function avatar(id: string, name: string) {
   return { color, initials }
 }
 
-async function apiGet(base: string, path: string) {
-  const r = await fetch(`${base}${path}`)
-  return r.json()
-}
-
-async function apiPost(base: string, path: string, body?: unknown) {
-  const r = await fetch(`${base}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  return r.json()
-}
+// apiGet/apiPost were top-level helpers that called `fetch` directly,
+// which meant every /liveshare/* request went out without an
+// Authorization header and came back 401. They're now closures built
+// inside LiveSharePanel so they can pull credentials from useServer().
 
 // ── component ────────────────────────────────────────────────────────────────
 
 export function LiveSharePanel() {
   const server = useServer()
+  const apiGet = async (base: string, path: string) => {
+    const r = await fetch(`${base}${path}`, withAuthHeaders(server.current?.http))
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+    return r.json()
+  }
+  const apiPost = async (base: string, path: string, body?: unknown) => {
+    const r = await fetch(
+      `${base}${path}`,
+      withAuthHeaders(server.current?.http, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    )
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+    return r.json().catch(() => ({}))
+  }
   const sync = useSync()
   const globalSync = useGlobalSync()
   const liveshare = useLiveShareState()
