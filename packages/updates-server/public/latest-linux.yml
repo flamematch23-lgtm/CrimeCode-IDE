@@ -1,15 +1,15 @@
-version: 2.21.7
+version: 2.21.8
 files:
   - url: opencode-electron-linux-x86_64.AppImage
-    sha512: cSyGtOPHr5m1Z5DVuVAqhrf0Xa0Xh3qNgFDIntuk3PT8tVBjeOfoRxXQ2XETIHodEVP16bACRISK/hG5kzoaBQ==
-    size: 225110494
-    blockMapSize: 236018
+    sha512: l43nhGR+IONg7aKCR5UttmE2AexH3HLL4cMXGfmMyY7R2kgqfngM+iXiVy/njcicTQvnDdhNFOv2XKvnZUwhTQ==
+    size: 225097497
+    blockMapSize: 235309
   - url: opencode-electron-linux-amd64.deb
-    sha512: QPrnFXGK9ghLqeNd6/9pmZM+cAaJQ/IIv6Lu98YWp3z98OrhSsjHO2/S5qguv3mdMceto6SeMijw8UFMxYOH3Q==
-    size: 175854120
+    sha512: glUT92j2xLyk0ua6J/uwUchBEs5cY5I8wW2UHCmHb/cxkSCmRr3//lRODski7ytt/vyT0Ez+COTAz7ltKXy7KA==
+    size: 175849656
   - url: opencode-electron-linux-x86_64.rpm
-    sha512: dAhi2yPgr8Ki4kwU0WIC3DhWJRMEX2fx9VdVUBdJkn6uH4MW7Kx8fY84CoJ7TWfK44sLmTcqLZUowjAdMn6Vcw==
-    size: 143270605
+    sha512: gHce73kDQqWytGiKvtUU8rX2hUTKNWizmutNqvlRFtlNBVjlEGl1AEEpS4pjWI6W8T9LXRTG7lDTc8wtvw9T/A==
+    size: 143262521
 path: opencode-electron-linux-x86_64.AppImage
-sha512: cSyGtOPHr5m1Z5DVuVAqhrf0Xa0Xh3qNgFDIntuk3PT8tVBjeOfoRxXQ2XETIHodEVP16bACRISK/hG5kzoaBQ==
-releaseDate: '2026-04-25T06:30:30.398Z'
+sha512: l43nhGR+IONg7aKCR5UttmE2AexH3HLL4cMXGfmMyY7R2kgqfngM+iXiVy/njcicTQvnDdhNFOv2XKvnZUwhTQ==
+releaseDate: '2026-04-25T08:34:14.784Z'
