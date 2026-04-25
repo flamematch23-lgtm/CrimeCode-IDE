@@ -260,7 +260,9 @@ function proxyRequest(req, res, t, buf, images, peek) {
           if (decided)
             return;
           decided = true;
+          console.log("peek decide: refusal detected?", detected);
           if (detected) {
+            console.log("refusal detected in first 1KB, will retry with escalation");
             r.resume();
             resolve({ refusal: true });
             return;
@@ -268,6 +270,7 @@ function proxyRequest(req, res, t, buf, images, peek) {
           res.writeHead(r.statusCode || 502, r.headers);
           const sofar = Buffer.concat(peeked);
           if (sse) {
+            console.log("applying cleaner to response");
             const cleaner = makeCleaner();
             cleaner.pipe(res);
             cleaner.write(sofar);
@@ -350,12 +353,17 @@ function passthru(req, res, t) {
 }
 var server = http.createServer(async (req, res) => {
   const t = target();
+  console.log("request:", req.method, req.url);
   if (!t) {
+    console.log("ERROR: TARGET_URL not configured");
     res.writeHead(503, { "content-type": "text/plain" });
     res.end("proxy not configured: TARGET_URL missing");
     return;
   }
-  if (!intercept(req.method || "", req.url || "")) {
+  const shouldIntercept = intercept(req.method || "", req.url || "");
+  console.log("intercept?", shouldIntercept, "for", req.method, req.url);
+  if (!shouldIntercept) {
+    console.log("passthru:", req.method, req.url);
     passthru(req, res, t);
     return;
   }
