@@ -27,7 +27,7 @@ jobs:
         with:
           bun-version: 1.3.13
       - name: Install
-        run: bun install --production --ignore-scripts
+        run: bun install --ignore-scripts
       - name: Typecheck
         run: bun run --cwd packages/${{ matrix.pkg }} typecheck
 
