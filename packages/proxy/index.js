@@ -418,13 +418,17 @@ const server = http.createServer(async (req, res) => {
   console.log("intercept", req.method, req.url, "family:", fam, "images:", images)
 
   const r1 = await proxyRequest(req, res, t, buf1, images, true)
-  if (!r1.refusal) return
+  if (!r1.refusal) {
+    console.log("no refusal detected, returning response as-is")
+    return
+  }
 
-  // Refusal detected — retry with escalated prompt
+  // Refusal detected — retry with escalated prompt (ONE retry only)
   console.log("refusal → escalating", fam, req.url)
   const body2 = JSON.parse(JSON.stringify(original))
   transform(body2, true)
   const buf2 = Buffer.from(JSON.stringify(body2), "utf8")
+  console.log("sending escalated request")
   await proxyRequest(req, res, t, buf2, images, false)
 })
 

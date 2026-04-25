@@ -36,8 +36,37 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     const currentServer = server.current
     if (!currentServer) throw new Error(language.t("error.globalSDK.noServerAvailable"))
 
-    const http = createMemo(() =>
-      settings.proxy.enabled() ? { ...currentServer.http, url: settings.proxy.url() } : currentServer.http,
+    const proxyUrl = () => settings.proxy.url()
+    const useProxy = () => settings.proxy.enabled()
+
+    const http = createMemo(() => currentServer.http)
+
+    const shouldUseProxy = (path: string) => {
+      if (!useProxy()) return false
+      return /^\/session\/[^/]+\/(message|prompt_async)$/.test(path)
+    }
+
+    const proxyFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = input instanceof URL ? input.href : typeof input === "string" ? input : input.url
+      const path = new URL(url).pathname
+      const useProxyForThisRequest = shouldUseProxy(path)
+      if (useProxyForThisRequest) {
+        console.log("[proxy] routing AI request to proxy:", path)
+      }
+      if (!useProxyForThisRequest) {
+        return globalThis.fetch(input, init)
+      }
+      const targetUrl = proxyUrl() + path
+      console.log("[proxy] fetching via proxy:", targetUrl)
+      return globalThis.fetch(targetUrl, init)
+    }
+
+    const sdk = createMemo(() =>
+      createSdkForServer({
+        server: http(),
+        fetch: useProxy() ? (proxyFetch as typeof fetch) : platform.fetch,
+        throwOnError: true,
+      }),
     )
 
     const eventSdk = createSdkForServer({
@@ -214,17 +243,9 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       flush()
     })
 
-    const sdk = createMemo(() =>
-      createSdkForServer({
-        server: http(),
-        fetch: platform.fetch,
-        throwOnError: true,
-      }),
-    )
-
     return {
       get url() {
-        return http().url
+        return currentServer.http.url
       },
       get client() {
         return sdk()
@@ -234,8 +255,8 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
         const s = server.current
         if (!s) throw new Error(language.t("error.globalSDK.serverNotAvailable"))
         return createSdkForServer({
-          server: http(),
-          fetch: platform.fetch,
+          server: currentServer.http,
+          fetch: useProxy() ? (proxyFetch as typeof fetch) : platform.fetch,
           ...opts,
         })
       },
