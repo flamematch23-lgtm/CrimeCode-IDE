@@ -21,6 +21,8 @@ const stash = join(root, "..", "..", ".sidecar-stash")
 const stashed = join(stash, "opencode-cli.exe")
 const unpacked = join(root, "dist", "win-unpacked", "resources")
 const target = join(unpacked, "opencode-cli.exe")
+const proxySource = join(root, "..", "proxy", "dist")
+const proxyTarget = join(unpacked, "proxy")
 
 function size(path: string) {
   return (statSync(path).size / 1024 / 1024).toFixed(1)
@@ -57,6 +59,17 @@ async function main() {
     mkdirSync(unpacked, { recursive: true })
     copyFileSync(stashed, target)
     console.log(`[build-win] Sidecar copied (${size(target)} MB)`)
+
+    // Step 4b: copy proxy into unpacked resources/proxy
+    console.log(`[build-win] Step 4b: Copying proxy to ${proxyTarget}`)
+    const proxyFile = join(proxySource, "index.cjs")
+    if (existsSync(proxyFile)) {
+      mkdirSync(proxyTarget, { recursive: true })
+      copyFileSync(proxyFile, join(proxyTarget, "index.cjs"))
+      console.log(`[build-win] Proxy copied`)
+    } else {
+      console.log(`[build-win] Warning: proxy not found at ${proxyFile}, skipping`)
+    }
 
     // Step 5: rebuild NSIS from prepackaged
     console.log(`[build-win] Step 5: Rebuilding NSIS installer from prepackaged`)
