@@ -24,7 +24,18 @@ type Engagement = {
   tree: Node[]
 }
 
-type Category = "all" | "recon" | "scanning" | "exploitation" | "phishing" | "reporting"
+type Category =
+  | "all"
+  | "recon"
+  | "scanning"
+  | "exploitation"
+  | "phishing"
+  | "reporting"
+  | "reversing"
+  | "osint"
+  | "netrecon"
+  | "vulnresearch"
+  | "se"
 
 type Tool = {
   id: string
@@ -148,6 +159,267 @@ const TOOLS: Tool[] = [
     cat: "reporting",
     prompt: "Usa lo strumento pentest_report per compilare i risultati di questo engagement in un report cliente",
   },
+  // Reverse Engineering
+  {
+    id: "strings",
+    name: "Estrai Stringhe",
+    desc: "Stringhe printable da binario (strings-style)",
+    cat: "reversing",
+    prompt:
+      "Analizza il binario <percorso> ed estrai tutte le stringhe stampabili di lunghezza >= 4; evidenzia URL, chiavi API, path sospetti",
+  },
+  {
+    id: "pe-headers",
+    name: "Header PE",
+    desc: "Sezioni, import, export di un eseguibile PE",
+    cat: "reversing",
+    prompt:
+      "Analizza gli header PE di <binario>: sezioni (.text, .data, .rsrc), tabella import DLL, export, timestamp e checksum",
+  },
+  {
+    id: "disasm",
+    name: "Disassembler AI",
+    desc: "Analisi assembly assistita dall'AI",
+    cat: "reversing",
+    prompt:
+      "Disassembla la funzione a offset <0xADDR> nel binario <file> e spiega in italiano cosa fa, con pseudocodice C equivalente",
+  },
+  {
+    id: "entropy",
+    name: "File Entropy",
+    desc: "Rileva packing/cifratura via entropia",
+    cat: "reversing",
+    prompt:
+      "Calcola l'entropia di Shannon sezione per sezione di <binario>; segnala sezioni con entropia > 7.0 come probabilmente packed/cifrate",
+  },
+  {
+    id: "yara",
+    name: "YARA Match",
+    desc: "Pattern matching con regole YARA",
+    cat: "reversing",
+    prompt: "Scrivi e applica regole YARA per rilevare le seguenti caratteristiche nel campione <file>: <descrizione>",
+  },
+  {
+    id: "deobfuscate",
+    name: "Deobfuscation",
+    desc: "Deobfusca JS / PS1 / VBA / batch",
+    cat: "reversing",
+    prompt:
+      "Deobfusca il seguente codice <linguaggio> e spiega passo per passo cosa fa ogni blocco:\n\n<INCOLLA_CODICE>",
+  },
+  // OSINT
+  {
+    id: "shodan",
+    name: "Shodan Recon",
+    desc: "Ricerca Shodan per IP/dominio/banner",
+    cat: "osint",
+    prompt:
+      "Costruisci una query Shodan per trovare server <tecnologia> esposti appartenenti a <org>; mostra i filtri net:, org:, port:, product:, vuln: da usare",
+  },
+  {
+    id: "crtsh",
+    name: "Certificate Transparency",
+    desc: "Sottodomini via crt.sh",
+    cat: "osint",
+    prompt:
+      "Usa lo strumento dns_lookup action=subdomains su <dominio> per enumerare sottodomini via certificate transparency, poi verifica quali rispondono",
+  },
+  {
+    id: "github-recon",
+    name: "GitHub Recon",
+    desc: "GitHub dork per secret/API key leaked",
+    cat: "osint",
+    prompt:
+      "Genera dork GitHub per trovare chiavi API, password e secret leaked per l'organizzazione <org>: usa operatori repo:, org:, filename:, extension:, in:file",
+  },
+  {
+    id: "google-dorks",
+    name: "Google Dork",
+    desc: "Generatore Google dork personalizzato",
+    cat: "osint",
+    prompt:
+      "Genera 10 Google dork per <target> mirati a: login page esposte, file di configurazione, directory listing, VPN/pannelli admin, documenti interni",
+  },
+  {
+    id: "email-enum",
+    name: "Email Enumeration",
+    desc: "Enumerazione email (Hunter.io style)",
+    cat: "osint",
+    prompt:
+      "Genera pattern email probabili per <azienda> (es. nome.cognome@, n.cognome@, ecc.) e suggerisci come verificarli con SMTP VRFY o servizi OSINT pubblici",
+  },
+  {
+    id: "breach-check",
+    name: "Breach Check",
+    desc: "Verifica breach (HIBP-style)",
+    cat: "osint",
+    prompt:
+      "Elenca tutte le procedure per verificare se l'email <email> o il dominio <dominio> è presente in breach database pubblici (HIBP, DeHashed, LeakCheck) senza violare ToS",
+  },
+  {
+    id: "linkedin-osint",
+    name: "LinkedIn OSINT",
+    desc: "Profilo dipendenti e struttura aziendale",
+    cat: "osint",
+    prompt:
+      "Costruisci una guida OSINT per mappare la struttura di <azienda> tramite LinkedIn: dork Google site:linkedin.com/in, Sales Navigator filters, estrazione organigramma per spear-phishing",
+  },
+  // Network Recon
+  {
+    id: "traceroute",
+    name: "Traceroute Analysis",
+    desc: "Network path e hop analysis",
+    cat: "netrecon",
+    prompt:
+      "Interpreta questo output traceroute verso <host> e identifica: provider intermedi, salti con latenza anomala, possibili firewall/proxy trasparenti:\n\n<INCOLLA_OUTPUT>",
+  },
+  {
+    id: "banner-grab",
+    name: "Banner Grabbing",
+    desc: "Banner grabbing su servizi esposti",
+    cat: "netrecon",
+    prompt:
+      "Usa lo strumento nmap con flags='-sV --script=banner -p <porte>' su <host> per catturare banner di servizio e identifica versioni vulnerabili",
+  },
+  {
+    id: "arp-scan",
+    name: "ARP Scan LAN",
+    desc: "Scoperta host rete locale",
+    cat: "netrecon",
+    prompt:
+      "Genera il comando arp-scan / nmap -sn per scoprire tutti gli host attivi nella subnet <CIDR>, poi suggerisci come fingerprinting OS con -O",
+  },
+  {
+    id: "passive-recon",
+    name: "Recon Passivo",
+    desc: "Shodan/Censys/Fofa senza toccare il target",
+    cat: "netrecon",
+    prompt:
+      "Conduci recon passivo su <target> usando solo fonti pubbliche (Shodan, Censys, Fofa, Robtex, VirusTotal): servizi esposti, ASN, certificati, history DNS",
+  },
+  {
+    id: "asn-lookup",
+    name: "ASN / CIDR Lookup",
+    desc: "Autonomous System Number e IP range",
+    cat: "netrecon",
+    prompt:
+      "Trova l'ASN di <org>/<IP> e i relativi CIDR announciati; usa bgp.he.net e whois ARIN/RIPE per mappare l'intera superficie IP dell'organizzazione",
+  },
+  // Vulnerability Research
+  {
+    id: "cve-search",
+    name: "CVE Search",
+    desc: "Ricerca NVD/CVE database",
+    cat: "vulnresearch",
+    prompt:
+      "Usa lo strumento cve_poc per cercare vulnerabilità relative a '<tecnologia> <versione>'; riassumi CVSS, vettore di attacco e disponibilità di exploit",
+  },
+  {
+    id: "patch-diff",
+    name: "Patch Diff Analysis",
+    desc: "Analisi diff patch per vulnerabilità",
+    cat: "vulnresearch",
+    prompt:
+      "Analizza questo diff di patch e identifica la radice della vulnerabilità corretta, il tipo CWE, e come replicare il bug sulla versione non patchata:\n\n<INCOLLA_DIFF>",
+  },
+  {
+    id: "code-audit",
+    name: "Code Audit",
+    desc: "Audit sicurezza sorgente",
+    cat: "vulnresearch",
+    prompt:
+      "Esegui un audit di sicurezza completo del seguente codice <linguaggio>: cerca injection, deserializzazione insicura, SSRF, path traversal, race condition, secrets hardcoded:\n\n<INCOLLA_CODICE>",
+  },
+  {
+    id: "dep-audit",
+    name: "Dependency Audit",
+    desc: "Vulnerabilità dipendenze npm/pip/cargo",
+    cat: "vulnresearch",
+    prompt:
+      "Analizza il file <package.json/requirements.txt/Cargo.toml> e identifica dipendenze con CVE note; suggerisci versioni patched e breaking changes da considerare",
+  },
+  {
+    id: "ghsa-search",
+    name: "GHSA Search",
+    desc: "GitHub Security Advisory search",
+    cat: "vulnresearch",
+    prompt:
+      "Cerca nel GitHub Security Advisory Database advisory relativi a '<ecosistema> <pacchetto>'; elenca GHSA ID, severity, versioni affette e fix disponibili",
+  },
+  {
+    id: "exploit-search",
+    name: "Exploit Search",
+    desc: "Ricerca exploit (exploit-db/packetstorm)",
+    cat: "vulnresearch",
+    prompt:
+      "Cerca exploit pubblici per <CVE o tecnologia>: usa Exploit-DB searchsploit syntax, PacketStorm, GitHub; valuta affidabilità e se è richiesto auth/interaction",
+  },
+  // Social Engineering
+  {
+    id: "pretexting",
+    name: "Scenario Pretexting",
+    desc: "Generatore scenario pretexting",
+    cat: "se",
+    prompt:
+      "Genera uno scenario di pretexting dettagliato per un engagement contro <azienda>: ruolo assunto, motivo della chiamata/email, documenti/info necessari, possibili obiezioni e risposte",
+  },
+  {
+    id: "vishing",
+    name: "Script Vishing",
+    desc: "Script vishing con gestione obiezioni",
+    cat: "se",
+    prompt:
+      "Usa lo strumento phishing template=vishing_script brand=<azienda> per generare uno script vishing completo con: apertura, raccolta info, gestione obiezioni, chiusura",
+  },
+  {
+    id: "baiting",
+    name: "Baiting Fisico",
+    desc: "USB drop, QR code, scenario fisico",
+    cat: "se",
+    prompt:
+      "Usa lo strumento phishing template=usb_drop brand=<azienda> per generare kit USB drop completo; aggiungi anche scenario con QR code su poster in area comune",
+  },
+  {
+    id: "impersonation",
+    name: "Impersonation Script",
+    desc: "IT helpdesk, vendor, audit esterno",
+    cat: "se",
+    prompt:
+      "Genera script di impersonation per <ruolo: IT helpdesk / vendor / auditor esterno> in un engagement contro <azienda>: dialogo, pretesto, dati da raccogliere, come terminare la call",
+  },
+  {
+    id: "osint-target",
+    name: "Profilo Target SE",
+    desc: "Costruisci profilo OSINT per SE",
+    cat: "se",
+    prompt:
+      "Costruisci un profilo completo da OSINT per personalizzare un attacco SE contro <nome dipendente> di <azienda>: LinkedIn, pubblicazioni, interessi, colleghi, tecnologie usate, pattern email",
+  },
+  {
+    id: "spearphish",
+    name: "Spear-Phishing Email",
+    desc: "Email spear-phishing personalizzata",
+    cat: "se",
+    prompt:
+      "Usa lo strumento phishing template=credential_harvest brand=<azienda> e personalizza l'email per <nome target> usando questi dettagli OSINT: <dettagli>; includi pretext convincente",
+  },
+  {
+    id: "awareness",
+    name: "Training Anti-SE",
+    desc: "Materiale awareness aziendale",
+    cat: "se",
+    prompt:
+      "Genera un modulo di awareness training anti-social-engineering per dipendenti di <azienda>: riconoscere phishing, vishing, baiting; quiz a scelta multipla; policy da seguire",
+  },
+]
+
+const SE_TEMPLATES = [
+  { id: "pretexting", name: "Pretexting", desc: "Scenario completo con ruolo, motivo, obiezioni" },
+  { id: "vishing_script", name: "Script Vishing", desc: "Call script con apertura/chiusura e gestione obiezioni" },
+  { id: "usb_drop", name: "USB Drop Kit", desc: "File esca, autorun, README, guida deployment" },
+  { id: "impersonation", name: "Impersonation", desc: "IT helpdesk / vendor / auditor esterno" },
+  { id: "spearphish_custom", name: "Spear-Phishing", desc: "Email personalizzata con dati OSINT target" },
+  { id: "awareness", name: "Training Anti-SE", desc: "Modulo awareness con quiz per dipendenti" },
 ]
 
 const PHISHING_TEMPLATES = [
@@ -186,6 +458,21 @@ const QUICK_ENGAGEMENTS = [
     name: "Caccia alle CVE",
     prompt:
       "Usa nuclei contro https://target.example.com filtrato per severity=high,critical, poi per ogni risultato suggerisci un'invocazione cve_poc per validare la sfruttabilità.",
+  },
+  {
+    name: "Reverse Engineering Malware",
+    prompt:
+      "Analizza il campione <percorso>: estrai stringhe, calcola entropia sezioni, disassembla entry point e funzioni sospette, scrivi regole YARA per rilevarlo, deobfusca eventuali strati. Salva artefatti in pentest-output/re-<campione>/.",
+  },
+  {
+    name: "OSINT Full Target",
+    prompt:
+      "Conduci OSINT completo su <azienda>: WHOIS, DNS recon, certificate transparency (sottodomini), Shodan dork, Google dork per file esposti, LinkedIn per dipendenti chiave, GitHub dork per secret leaked. Compila tutto in un profilo target.",
+  },
+  {
+    name: "Campagna Social Engineering",
+    prompt:
+      "Pianifica una campagna SE completa contro <azienda>: 1) profilo OSINT dipendenti chiave, 2) script vishing per pretesto IT helpdesk, 3) email spear-phishing personalizzata per C-level, 4) scenario USB drop per reception, 5) materiale awareness per debriefing post-test. Salva in pentest-output/se-<azienda>/.",
   },
 ]
 
@@ -340,6 +627,11 @@ export default function Security() {
     { id: "exploitation", label: "Sfruttamento" },
     { id: "phishing", label: "Phishing" },
     { id: "reporting", label: "Report" },
+    { id: "reversing", label: "Reverse Eng." },
+    { id: "osint", label: "OSINT" },
+    { id: "netrecon", label: "Network Recon" },
+    { id: "vulnresearch", label: "Vuln Research" },
+    { id: "se", label: "Social Eng." },
   ]
 
   const filtered = () => (cat() === "all" ? TOOLS : TOOLS.filter((t) => t.cat === cat()))
@@ -360,13 +652,13 @@ export default function Security() {
             <div>
               <h1 class="text-18-semibold text-text-strong">Toolkit Sicurezza e Pentest</h1>
               <p class="text-12-regular text-text-weak">
-                Workflow di sicurezza offensiva · Agente Pentester · 16 strumenti · 8 template di phishing
+                Workflow di sicurezza offensiva · Agente Pentester · {TOOLS.length} strumenti · 8 template phishing · 6
+                template SE
               </p>
             </div>
           </div>
           <Button onClick={() => navigate("/")}>Apri Progetto</Button>
         </div>
-
         {/* Disclaimer */}
         <div class="mb-6 p-3 rounded border border-surface-warning bg-surface-warning/20">
           <div class="flex items-start gap-2">
@@ -378,7 +670,6 @@ export default function Security() {
             </div>
           </div>
         </div>
-
         {/* Quick Engagements */}
         <section class="mb-8">
           <h2 class="text-14-semibold text-text-strong mb-3">Engagement Rapidi</h2>
@@ -405,7 +696,6 @@ export default function Security() {
             </For>
           </div>
         </section>
-
         {/* Tool Categories */}
         <section class="mb-8">
           <div class="flex items-center justify-between mb-3">
@@ -447,7 +737,6 @@ export default function Security() {
             </For>
           </div>
         </section>
-
         {/* Phishing Templates */}
         <section class="mb-8">
           <h2 class="text-14-semibold text-text-strong mb-3">Galleria Template Phishing</h2>
@@ -471,8 +760,30 @@ export default function Security() {
             </For>
           </div>
         </section>
-
-        {/* CLI Reference */}
+        {/* SE Templates */}
+        <section class="mb-8">
+          <h2 class="text-14-semibold text-text-strong mb-3">Galleria Template Social Engineering</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+            <For each={SE_TEMPLATES}>
+              {(tpl) => {
+                const prompt = `Genera uno scenario di social engineering tipo '${tpl.id}' per engagement contro <azienda> usando questi dettagli OSINT: <dettagli>`
+                return (
+                  <button
+                    onClick={() => copy(prompt, `se-${tpl.id}`)}
+                    class="text-left p-3 rounded border border-surface-weak bg-surface-base hover:bg-surface-raised-base-hover transition-colors"
+                  >
+                    <div class="text-12-semibold text-text-strong mb-1">{tpl.name}</div>
+                    <div class="text-11-regular text-text-weak mb-2">{tpl.desc}</div>
+                    <div class="text-10-regular text-text-subtle">
+                      {copied() === `se-${tpl.id}` ? "Prompt copiato" : "Clicca per copiare il prompt"}
+                    </div>
+                  </button>
+                )
+              }}
+            </For>
+          </div>
+        </section>
+        {/* CLI Reference */}{" "}
         <section class="mb-8">
           <h2 class="text-14-semibold text-text-strong mb-3">Riferimento Rapido CLI</h2>
           <p class="text-12-regular text-text-weak mb-3">
@@ -500,6 +811,14 @@ export default function Security() {
                   cmd: "opencode sec sqlmap <url> --data 'id=1' --level 3",
                   desc: "Wrapper sqlmap (richiede sqlmap locale)",
                 },
+                { cmd: "opencode sec re <binario>", desc: "Reverse engineering: strings, entropy, disasm, YARA" },
+                { cmd: "opencode sec osint <dominio>", desc: "OSINT: crt.sh, Shodan dork, Google dork, email enum" },
+                { cmd: "opencode sec netrecon <CIDR>", desc: "Network recon passivo: ASN, banner grab, traceroute" },
+                {
+                  cmd: "opencode sec vulnresearch <cve-o-tech>",
+                  desc: "CVE search, patch diff, dep audit, exploit search",
+                },
+                { cmd: "opencode sec se <azienda>", desc: "Social engineering: pretexting, vishing, spear-phish" },
               ]}
             >
               {(row) => (
@@ -516,7 +835,6 @@ export default function Security() {
             </For>
           </div>
         </section>
-
         {/* Findings & Output */}
         <section class="mb-8">
           <h2 class="text-14-semibold text-text-strong mb-3">Risultati e Output</h2>
@@ -572,7 +890,6 @@ export default function Security() {
             </div>
           </div>
         </section>
-
         {/* Findings Browser */}
         <section class="mb-8">
           <div class="flex items-center justify-between mb-3">
@@ -709,7 +1026,6 @@ export default function Security() {
             </div>
           </Show>
         </section>
-
         {/* File Preview Modal */}
         <Show when={preview()}>
           {(p) => (
@@ -742,7 +1058,6 @@ export default function Security() {
             </div>
           )}
         </Show>
-
         {/* Footer */}
         <div class="text-11-regular text-text-subtle text-center py-4">
           Metodologia: PTES · OWASP WSTG · MITRE ATT&amp;CK · Vedi la skill pentester in{" "}
