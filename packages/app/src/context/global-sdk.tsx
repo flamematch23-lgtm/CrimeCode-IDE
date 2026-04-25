@@ -37,9 +37,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     if (!currentServer) throw new Error(language.t("error.globalSDK.noServerAvailable"))
 
     const http = createMemo(() =>
-      settings.proxy.enabled()
-        ? { url: settings.proxy.url(), password: currentServer.http.password }
-        : currentServer.http,
+      settings.proxy.enabled() ? { ...currentServer.http, url: settings.proxy.url() } : currentServer.http,
     )
 
     const eventSdk = createSdkForServer({
@@ -225,7 +223,9 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     )
 
     return {
-      url: currentServer.http.url,
+      get url() {
+        return http().url
+      },
       get client() {
         return sdk()
       },

@@ -186,7 +186,29 @@ function makeCleaner() {
       cb(null, out + "\n")
     },
     flush(cb) {
-      cb(null, buf || "")
+      if (!buf) return cb(null, "")
+      // Run the remaining buffered tail through the same cleaning logic
+      if (buf.startsWith("data:")) {
+        const payload = buf.slice(5).trim()
+        if (payload !== "[DONE]" && payload !== "") {
+          try {
+            const ev = JSON.parse(payload)
+            if (ev.text) ev.text = cleanText(ev.text)
+            if (ev.delta && ev.delta.text) ev.delta.text = cleanText(ev.delta.text)
+            if (ev.choices) {
+              ev.choices = ev.choices.map((c) => {
+                if (c.delta && c.delta.content) c.delta.content = cleanText(c.delta.content)
+                if (c.text) c.text = cleanText(c.text)
+                return c
+              })
+            }
+            return cb(null, "data: " + JSON.stringify(ev))
+          } catch {
+            return cb(null, "data: " + cleanText(payload))
+          }
+        }
+      }
+      cb(null, buf)
     },
   })
 }
@@ -222,7 +244,9 @@ function buildHeaders(req, t, len, images) {
 }
 
 function intercept(method, url) {
-  return method === "POST" && /\/session\/[^/]+\/(message|prompt_async)$/.test(url)
+  // Strip query string before matching so ?stream=true or similar don't break the regex
+  const path = url.split("?")[0]
+  return method === "POST" && /\/session\/[^/]+\/(message|prompt_async)$/.test(path)
 }
 
 function readBody(req) {
@@ -292,6 +316,8 @@ function proxyRequest(req, res, t, buf, images, peek) {
         r.on("error", (e) => {
           if (!decided) {
             decided = true
+            if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" })
+            res.end("upstream error: " + e.message)
             resolve({ refusal: false })
           }
           console.error("upstream error:", e.message)

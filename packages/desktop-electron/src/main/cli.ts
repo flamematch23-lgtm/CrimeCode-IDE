@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
 import { chmodSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { constants as osConstants, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import readline from "node:readline"
 import { fileURLToPath } from "node:url"
@@ -161,7 +161,7 @@ export function spawnCommand(args: string, extraEnv: Record<string, string>) {
   const exit = new Promise<TerminatedPayload>((resolve) => {
     child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       logger.log("process exited", { code, signal })
-      resolve({ code: code ?? null, signal: null })
+      resolve({ code: code ?? null, signal: signal ? (osConstants.signals[signal] ?? null) : null })
     })
     child.on("error", (error: Error) => {
       logger.error("process error", { error: error.message })
@@ -284,7 +284,7 @@ function compareVersions(a: number[], b: number[]) {
 
 let proxyProcess: Electron.UtilityProcess | null = null
 
-export function toggleProxy(enabled: boolean, target?: string, auth?: string) {
+export function toggleProxy(enabled: boolean, target?: string, auth?: string, proxyUrl?: string) {
   if (proxyProcess) {
     proxyProcess.kill()
     proxyProcess = null
@@ -296,9 +296,16 @@ export function toggleProxy(enabled: boolean, target?: string, auth?: string) {
   const base = Object.fromEntries(
     Object.entries(process.env).filter((e): e is [string, string] => typeof e[1] === "string"),
   )
+  // Parse port from the configured proxy URL so the process binds to the right port
+  let port = "3001"
+  if (proxyUrl) {
+    try {
+      port = new URL(proxyUrl).port || "3001"
+    } catch {}
+  }
   proxyProcess = utilityProcess.fork(path, [], {
     stdio: "pipe",
-    env: { ...base, PORT: "3001", TARGET_URL: target || "", TARGET_AUTH: auth || "" },
+    env: { ...base, PORT: port, TARGET_URL: target || "", TARGET_AUTH: auth || "" },
   })
-  logger.log("proxy forked", { pid: proxyProcess.pid, target })
+  logger.log("proxy forked", { pid: proxyProcess.pid, target, port })
 }

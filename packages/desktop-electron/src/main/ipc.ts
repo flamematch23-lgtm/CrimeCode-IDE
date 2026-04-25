@@ -81,8 +81,10 @@ function resolveDir(path: string) {
 export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("kill-sidecar", () => deps.killSidecar())
   ipcMain.handle("install-cli", () => deps.installCli())
-  ipcMain.handle("toggle-proxy", (_event: IpcMainInvokeEvent, enabled: boolean, target?: string, auth?: string) =>
-    toggleProxy(enabled, target, auth),
+  ipcMain.handle(
+    "toggle-proxy",
+    (_event: IpcMainInvokeEvent, enabled: boolean, target?: string, auth?: string, proxyUrl?: string) =>
+      toggleProxy(enabled, target, auth, proxyUrl),
   )
   ipcMain.handle("await-initialization", (event: IpcMainInvokeEvent) => {
     const send = (step: InitStep) => event.sender.send("init-step", step)
@@ -269,14 +271,23 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   // Enhancement 8: Forward update progress to renderer
+  // Track one handler per sender id to prevent listener leaks on re-subscribe
+  const progressHandlers = new Map<number, (info: { percent: number }) => void>()
   ipcMain.handle("subscribe-update-progress", (event: IpcMainInvokeEvent) => {
     const sender = event.sender
+    const { autoUpdater } = require("electron-updater") as typeof import("electron-updater")
+    // Remove any previous handler for this sender before adding a new one
+    const prev = progressHandlers.get(sender.id)
+    if (prev) autoUpdater.removeListener("download-progress", prev)
     const handler = (info: { percent: number }) => {
       if (!sender.isDestroyed()) sender.send("update-progress", info.percent)
     }
-    const { autoUpdater } = require("electron-updater") as typeof import("electron-updater")
+    progressHandlers.set(sender.id, handler)
     autoUpdater.on("download-progress", handler)
-    sender.once("destroyed", () => autoUpdater.removeListener("download-progress", handler))
+    sender.once("destroyed", () => {
+      autoUpdater.removeListener("download-progress", handler)
+      progressHandlers.delete(sender.id)
+    })
   })
 
   // Browser tool - integrated with AI Agent system

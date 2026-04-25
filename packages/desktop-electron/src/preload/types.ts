@@ -49,7 +49,7 @@ export interface LicenseSnapshot {
 
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
-  toggleProxy: (enabled: boolean, target?: string, auth?: string) => Promise<void>
+  toggleProxy: (enabled: boolean, target?: string, auth?: string, proxyUrl?: string) => Promise<void>
   installCli: () => Promise<string>
   awaitInitialization: (onStep: (step: InitStep) => void) => Promise<ServerReadyData>
   getDefaultServerUrl: () => Promise<string | null>
