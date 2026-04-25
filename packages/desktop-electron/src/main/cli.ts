@@ -281,3 +281,23 @@ function compareVersions(a: number[], b: number[]) {
   }
   return 0
 }
+
+let proxyProcess: ReturnType<typeof spawn> | null = null
+
+export function toggleProxy(enabled: boolean, target?: string, auth?: string) {
+  if (proxyProcess) {
+    proxyProcess.kill()
+    proxyProcess = null
+  }
+  if (!enabled) return
+  const path = app.isPackaged
+    ? join(process.resourcesPath, "proxy", "index.cjs")
+    : join(root, "../../proxy", "dist", "index.cjs")
+  proxyProcess = spawn(process.execPath, [path], {
+    stdio: "pipe",
+    env: { ...process.env, PORT: "3001", TARGET_URL: target || "", TARGET_AUTH: auth || "" },
+    detached: true,
+  })
+  proxyProcess.unref()
+  logger.log("proxy spawned", { pid: proxyProcess.pid, target })
+}

@@ -20,6 +20,7 @@ import {
 } from "./license"
 import type { ProInterval } from "./license"
 import { authService } from "./auth"
+import { toggleProxy } from "./cli"
 // CHECKOUT_BASE_URL retained in constants for retrocompat; checkout now opens
 // a Telegram DM to one of the support contacts for crypto payments.
 
@@ -80,6 +81,9 @@ function resolveDir(path: string) {
 export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("kill-sidecar", () => deps.killSidecar())
   ipcMain.handle("install-cli", () => deps.installCli())
+  ipcMain.handle("toggle-proxy", (_event: IpcMainInvokeEvent, enabled: boolean, target?: string, auth?: string) =>
+    toggleProxy(enabled, target, auth),
+  )
   ipcMain.handle("await-initialization", (event: IpcMainInvokeEvent) => {
     const send = (step: InitStep) => event.sender.send("init-step", step)
     return deps.awaitInitialization(send)
@@ -382,38 +386,31 @@ export function registerIpcHandlers(deps: Deps) {
     return licenseService.startTrial()
   })
 
-  ipcMain.handle(
-    "license-open-checkout",
-    (_event: IpcMainInvokeEvent, rawPayload: unknown) => {
-      if (!rawPayload || typeof rawPayload !== "object") {
-        throw new Error("Invalid checkout payload")
-      }
-      const raw = rawPayload as Record<string, unknown>
-      const interval = assertValidInterval(raw.interval)
-      const contact = raw.contact
-      if (contact !== "opcrime" && contact !== "jollyfraud") {
-        throw new Error("Invalid contact")
-      }
-      const handle = contact === "opcrime" ? "OpCrime1312" : "JollyFraud"
-      const message =
-        `Hi! I want to purchase CrimeCode Pro - ${interval} plan via crypto payment. ` +
-        `Please provide details.`
-      const url = `https://t.me/${handle}?text=${encodeURIComponent(message)}`
-      void shell.openExternal(url)
-    },
-  )
+  ipcMain.handle("license-open-checkout", (_event: IpcMainInvokeEvent, rawPayload: unknown) => {
+    if (!rawPayload || typeof rawPayload !== "object") {
+      throw new Error("Invalid checkout payload")
+    }
+    const raw = rawPayload as Record<string, unknown>
+    const interval = assertValidInterval(raw.interval)
+    const contact = raw.contact
+    if (contact !== "opcrime" && contact !== "jollyfraud") {
+      throw new Error("Invalid contact")
+    }
+    const handle = contact === "opcrime" ? "OpCrime1312" : "JollyFraud"
+    const message =
+      `Hi! I want to purchase CrimeCode Pro - ${interval} plan via crypto payment. ` + `Please provide details.`
+    const url = `https://t.me/${handle}?text=${encodeURIComponent(message)}`
+    void shell.openExternal(url)
+  })
 
-  ipcMain.handle(
-    "license-activate-token",
-    (_event: IpcMainInvokeEvent, payload: unknown) => {
-      if (!payload || typeof payload !== "object") throw new Error("Invalid activate payload")
-      const raw = payload as Record<string, unknown>
-      const interval = assertValidInterval(raw.interval)
-      const token = typeof raw.token === "string" && raw.token.length > 0 ? raw.token : null
-      if (!token) throw new Error("Missing or invalid token")
-      return licenseService.activateFromToken({ interval, token })
-    },
-  )
+  ipcMain.handle("license-activate-token", (_event: IpcMainInvokeEvent, payload: unknown) => {
+    if (!payload || typeof payload !== "object") throw new Error("Invalid activate payload")
+    const raw = payload as Record<string, unknown>
+    const interval = assertValidInterval(raw.interval)
+    const token = typeof raw.token === "string" && raw.token.length > 0 ? raw.token : null
+    if (!token) throw new Error("Missing or invalid token")
+    return licenseService.activateFromToken({ interval, token })
+  })
 
   // ── Account / sign-in (Telegram magic-link via @CrimeCodeSub_bot) ──
   ipcMain.handle("account-get", () => authService.get())
@@ -459,7 +456,8 @@ export function registerIpcHandlers(deps: Deps) {
       body = text
     }
     if (!r.ok) {
-      const msg = typeof body === "object" && body && "error" in body ? (body as { error: string }).error : `${r.status}`
+      const msg =
+        typeof body === "object" && body && "error" in body ? (body as { error: string }).error : `${r.status}`
       throw new Error(msg)
     }
     return body
@@ -492,56 +490,41 @@ export function registerIpcHandlers(deps: Deps) {
     }),
   )
   ipcMain.handle("teams-remove-member", (_e, teamId: string, customerId: string) =>
-    teamJson(
-      `/license/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(customerId)}`,
-      { method: "DELETE" },
-    ),
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(customerId)}`, {
+      method: "DELETE",
+    }),
   )
   ipcMain.handle("teams-set-member-role", (_e, teamId: string, customerId: string, role: string) =>
-    teamJson(
-      `/license/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(customerId)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
-      },
-    ),
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(customerId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    }),
   )
   ipcMain.handle("teams-cancel-invite", (_e, teamId: string, inviteId: string) =>
-    teamJson(
-      `/license/teams/${encodeURIComponent(teamId)}/invites/${encodeURIComponent(inviteId)}`,
-      { method: "DELETE" },
-    ),
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/invites/${encodeURIComponent(inviteId)}`, {
+      method: "DELETE",
+    }),
   )
   ipcMain.handle("teams-list-sessions", (_e, teamId: string) =>
     teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`),
   )
-  ipcMain.handle(
-    "teams-publish-session",
-    (_e, teamId: string, title: string, state: unknown) =>
-      teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, state }),
-      }),
+  ipcMain.handle("teams-publish-session", (_e, teamId: string, title: string, state: unknown) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, state }),
+    }),
   )
-  ipcMain.handle(
-    "teams-heartbeat-session",
-    (_e, teamId: string, sid: string, state: unknown) =>
-      teamJson(
-        `/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}/heartbeat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state }),
-        },
-      ),
+  ipcMain.handle("teams-heartbeat-session", (_e, teamId: string, sid: string, state: unknown) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}/heartbeat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    }),
   )
   ipcMain.handle("teams-end-session", (_e, teamId: string, sid: string) =>
-    teamJson(
-      `/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}`,
-      { method: "DELETE" },
-    ),
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" }),
   )
 
   // ── Project: create new (folder) ──

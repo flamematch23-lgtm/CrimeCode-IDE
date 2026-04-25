@@ -41,6 +41,10 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  proxy?: {
+    enabled: boolean
+    url: string
+  }
 }
 
 export const monoDefault = "IBM Plex Mono"
@@ -119,6 +123,10 @@ const defaultSettings: Settings = {
     permissions: "staplebops-02",
     errorsEnabled: true,
     errors: "nope-03",
+  },
+  proxy: {
+    enabled: false,
+    url: "http://localhost:3001",
   },
 }
 
@@ -262,6 +270,16 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      proxy: {
+        enabled: withFallback(() => store.proxy?.enabled, false),
+        setEnabled(value: boolean) {
+          setStore("proxy", "enabled", value)
+        },
+        url: withFallback(() => store.proxy?.url, "http://localhost:3001"),
+        setUrl(value: string) {
+          setStore("proxy", "url", value)
         },
       },
     }

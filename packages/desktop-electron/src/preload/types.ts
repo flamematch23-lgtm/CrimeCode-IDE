@@ -49,6 +49,7 @@ export interface LicenseSnapshot {
 
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
+  toggleProxy: (enabled: boolean, target?: string, auth?: string) => Promise<void>
   installCli: () => Promise<string>
   awaitInitialization: (onStep: (step: InitStep) => void) => Promise<ServerReadyData>
   getDefaultServerUrl: () => Promise<string | null>
@@ -129,16 +130,13 @@ export type ElectronAPI = {
       signed_in_at: number
     } | null>
     readonly startSignIn: () => Promise<{ pin: string; expires_at: number; bot_url: string }>
-    readonly pollSignIn: (pin: string) => Promise<
-      | {
-          token: string
-          customer_id: string
-          telegram_user_id: number | null
-          expires_at: number
-          signed_in_at: number
-        }
-      | null
-    >
+    readonly pollSignIn: (pin: string) => Promise<{
+      token: string
+      customer_id: string
+      telegram_user_id: number | null
+      expires_at: number
+      signed_in_at: number
+    } | null>
     readonly logout: () => Promise<void>
     readonly syncGet: (key: string) => Promise<{ key: string; value: string; updated_at: number } | null>
     readonly syncPut: (key: string, value: string) => Promise<{ key: string; value: string; updated_at: number }>

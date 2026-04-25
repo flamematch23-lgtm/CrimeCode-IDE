@@ -226,7 +226,7 @@
     },
     "packages/desktop-electron": {
       "name": "@opencode-ai/desktop-electron",
-      "version": "2.7.0",
+      "version": "2.17.0",
       "dependencies": {
         "@opencode-ai/app": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
@@ -446,6 +446,10 @@
         "@typescript/native-preview": "catalog:",
         "typescript": "catalog:",
       },
+    },
+    "packages/proxy": {
+      "name": "@opencode-ai/proxy",
+      "version": "1.0.0",
     },
     "packages/relay": {
       "name": "crimecode-relay",
@@ -1460,6 +1464,8 @@
     "@opencode-ai/function": ["@opencode-ai/function@workspace:packages/function"],
 
     "@opencode-ai/plugin": ["@opencode-ai/plugin@workspace:packages/plugin"],
+
+    "@opencode-ai/proxy": ["@opencode-ai/proxy@workspace:packages/proxy"],
 
     "@opencode-ai/script": ["@opencode-ai/script@workspace:packages/script"],
 

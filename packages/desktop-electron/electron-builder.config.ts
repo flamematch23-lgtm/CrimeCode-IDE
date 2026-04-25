@@ -48,6 +48,11 @@ const getBase = (): Configuration => ({
             filter: ["opencode-cli*"],
           },
         ]),
+    {
+      from: "../proxy/dist/",
+      to: "proxy/",
+      filter: ["index.cjs"],
+    },
   ],
   mac: {
     category: "public.app-category.developer-tools",

@@ -1,0 +1,9 @@
+{
+  "name": "@opencode-ai/proxy",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.cjs",
+  "scripts": {
+    "build": "bun build --target=node --format=cjs --external:node:* --outfile=dist/index.cjs index.js"
+  }
+}

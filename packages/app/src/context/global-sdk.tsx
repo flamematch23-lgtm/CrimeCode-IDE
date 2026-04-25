@@ -1,12 +1,13 @@
 import type { Event } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
-import { batch, onCleanup } from "solid-js"
+import { batch, createMemo, onCleanup } from "solid-js"
 import z from "zod"
 import { createSdkForServer } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { useServer } from "./server"
+import { useSettings } from "./settings"
 
 const abortError = z.object({
   name: z.literal("AbortError"),
@@ -18,6 +19,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     const language = useLanguage()
     const server = useServer()
     const platform = usePlatform()
+    const settings = useSettings()
     const abort = new AbortController()
 
     const eventFetch = (() => {
@@ -33,6 +35,12 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
 
     const currentServer = server.current
     if (!currentServer) throw new Error(language.t("error.globalSDK.noServerAvailable"))
+
+    const http = createMemo(() =>
+      settings.proxy.enabled()
+        ? { url: settings.proxy.url(), password: currentServer.http.password }
+        : currentServer.http,
+    )
 
     const eventSdk = createSdkForServer({
       signal: abort.signal,
@@ -208,21 +216,25 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       flush()
     })
 
-    const sdk = createSdkForServer({
-      server: server.current.http,
-      fetch: platform.fetch,
-      throwOnError: true,
-    })
+    const sdk = createMemo(() =>
+      createSdkForServer({
+        server: http(),
+        fetch: platform.fetch,
+        throwOnError: true,
+      }),
+    )
 
     return {
       url: currentServer.http.url,
-      client: sdk,
+      get client() {
+        return sdk()
+      },
       event: emitter,
       createClient(opts: Omit<Parameters<typeof createSdkForServer>[0], "server" | "fetch">) {
         const s = server.current
         if (!s) throw new Error(language.t("error.globalSDK.serverNotAvailable"))
         return createSdkForServer({
-          server: s.http,
+          server: http(),
           fetch: platform.fetch,
           ...opts,
         })

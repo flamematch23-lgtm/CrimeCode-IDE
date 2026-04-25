@@ -10,6 +10,7 @@ import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import {
   monoDefault,
   monoFontFamily,
@@ -66,6 +67,7 @@ export const SettingsGeneral: Component = () => {
   const language = useLanguage()
   const platform = usePlatform()
   const settings = useSettings()
+  const server = useServer()
 
   onMount(() => {
     void theme.loadThemes()
@@ -557,6 +559,29 @@ export const SettingsGeneral: Component = () => {
         </Show>*/}
 
         <UpdatesSection />
+
+        <div class="flex flex-col gap-1">
+          <h3 class="text-14-medium text-text-strong pb-2">Modalità Ultra Crime</h3>
+          <SettingsList>
+            <SettingsRow
+              title="Abilita Proxy No-Guardrails"
+              description="Instrada le richieste attraverso un proxy locale che rimuove le restrizioni del modello."
+            >
+              <div data-action="settings-proxy-enabled">
+                <Switch
+                  checked={settings.proxy.enabled()}
+                  onChange={(checked) => {
+                    settings.proxy.setEnabled(checked)
+                    const s = server.current
+                    const target = s?.http.url
+                    const auth = s?.http.password
+                    ;(window as any).api?.toggleProxy?.(checked, target, auth)
+                  }}
+                />
+              </div>
+            </SettingsRow>
+          </SettingsList>
+        </div>
 
         <Show when={linux()}>
           {(_) => {
