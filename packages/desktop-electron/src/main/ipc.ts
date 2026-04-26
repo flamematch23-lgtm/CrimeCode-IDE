@@ -462,6 +462,13 @@ export function registerIpcHandlers(deps: Deps) {
     return await r.json()
   })
 
+  ipcMain.handle("account-sync-list", async () => {
+    const r = await authService.fetch("/license/sync")
+    if (!r.ok) throw new Error(`sync list failed: ${r.status}`)
+    const body = await r.json()
+    return body.entries ?? []
+  })
+
   // ── Teams ──
   const teamJson = async (path: string, init?: RequestInit) => {
     const r = await authService.fetch(path, init)

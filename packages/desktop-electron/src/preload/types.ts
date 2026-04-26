@@ -140,6 +140,7 @@ export type ElectronAPI = {
     readonly logout: () => Promise<void>
     readonly syncGet: (key: string) => Promise<{ key: string; value: string; updated_at: number } | null>
     readonly syncPut: (key: string, value: string) => Promise<{ key: string; value: string; updated_at: number }>
+    readonly syncList: () => Promise<Array<{ key: string; value: string; updated_at: number }>>
   }
   project: {
     readonly create: () => Promise<{ directory: string } | null>

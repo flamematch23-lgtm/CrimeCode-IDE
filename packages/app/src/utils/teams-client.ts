@@ -142,7 +142,9 @@ export async function fetchApprovalStatus(
   }
   if (!res.ok) {
     const msg =
-      typeof parsed === "object" && parsed && "error" in parsed ? (parsed as { error: string }).error : String(res.status)
+      typeof parsed === "object" && parsed && "error" in parsed
+        ? (parsed as { error: string }).error
+        : String(res.status)
     throw new Error(msg)
   }
   return parsed as { status: "pending" | "approved" | "rejected"; rejected_reason?: string | null }
@@ -166,7 +168,10 @@ async function accountJson(path: string, body: unknown): Promise<AccountResult> 
     return parsed as AccountPending
   }
   if (!res.ok) {
-    const msg = typeof parsed === "object" && parsed && "error" in parsed ? (parsed as { error: string }).error : String(res.status)
+    const msg =
+      typeof parsed === "object" && parsed && "error" in parsed
+        ? (parsed as { error: string }).error
+        : String(res.status)
     throw new Error(msg)
   }
   return parsed as AccountResult
@@ -284,7 +289,8 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     body = text
   }
   if (!res.ok) {
-    const msg = typeof body === "object" && body && "error" in body ? (body as { error: string }).error : String(res.status)
+    const msg =
+      typeof body === "object" && body && "error" in body ? (body as { error: string }).error : String(res.status)
     throw new Error(msg)
   }
   return body as T
@@ -331,10 +337,10 @@ function webClient(): TeamsClient {
         body: JSON.stringify({ new_owner_customer_id: newOwnerCustomerId }),
       }),
     publishCursor: async (id, sid, x, y, label) => {
-      await apiFetch(
-        `/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}/cursor`,
-        { method: "POST", body: JSON.stringify({ x, y, label }) },
-      ).catch(() => undefined)
+      await apiFetch(`/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}/cursor`, {
+        method: "POST",
+        body: JSON.stringify({ x, y, label }),
+      }).catch(() => undefined)
     },
     subscribe: (id, onEvent) => {
       if (typeof EventSource === "undefined") return () => undefined
@@ -374,6 +380,43 @@ function webClient(): TeamsClient {
       }
     },
   }
+}
+
+// ─── Sync Client ───────────────────────────────────────────────────────
+
+export interface SyncClient {
+  get(key: string): Promise<{ key: string; value: string; updated_at: number } | null>
+  put(key: string, value: string): Promise<{ key: string; value: string; updated_at: number }>
+  list(): Promise<Array<{ key: string; value: string; updated_at: number }>>
+}
+
+function desktopSyncClient(): SyncClient {
+  const api = () => (window as any).api.account
+  return {
+    get: (key) => api().syncGet(key),
+    put: (key, value) => api().syncPut(key, value),
+    list: () => api().syncList(),
+  }
+}
+
+function webSyncClient(): SyncClient {
+  return {
+    get: (key) => json(`/license/sync/${encodeURIComponent(key)}`),
+    put: (key, value) =>
+      json(`/license/sync/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      }),
+    list: () => json(`/license/sync`).then((b: any) => b.entries ?? []),
+  }
+}
+
+let _syncCached: SyncClient | null = null
+
+export function getSyncClient(): SyncClient {
+  if (_syncCached) return _syncCached
+  _syncCached = hasDesktopApi() ? desktopSyncClient() : webSyncClient()
+  return _syncCached
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────

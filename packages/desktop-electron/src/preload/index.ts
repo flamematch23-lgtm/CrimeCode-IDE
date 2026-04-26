@@ -94,6 +94,7 @@ const api: ElectronAPI = {
     logout: () => ipcRenderer.invoke("account-logout"),
     syncGet: (key: string) => ipcRenderer.invoke("account-sync-get", key),
     syncPut: (key: string, value: string) => ipcRenderer.invoke("account-sync-put", key, value),
+    syncList: () => ipcRenderer.invoke("account-sync-list"),
   },
   project: {
     create: () => ipcRenderer.invoke("project-create"),
