@@ -92,6 +92,12 @@ const api: ElectronAPI = {
     startSignIn: () => ipcRenderer.invoke("account-start-signin"),
     pollSignIn: (pin: string) => ipcRenderer.invoke("account-poll-signin", pin),
     logout: () => ipcRenderer.invoke("account-logout"),
+    signUp: (input: { username: string; password: string; telegram?: string }) =>
+      ipcRenderer.invoke("account-signup", input),
+    signIn: (input: { username: string; password: string }) => ipcRenderer.invoke("account-signin", input),
+    approvalStatus: (customerId: string) => ipcRenderer.invoke("account-approval-status", customerId),
+    writeSession: (token: string, customerId: string, expiresAt: number) =>
+      ipcRenderer.invoke("account-write-session", token, customerId, expiresAt),
     syncGet: (key: string) => ipcRenderer.invoke("account-sync-get", key),
     syncPut: (key: string, value: string) => ipcRenderer.invoke("account-sync-put", key, value),
     syncList: () => ipcRenderer.invoke("account-sync-list"),

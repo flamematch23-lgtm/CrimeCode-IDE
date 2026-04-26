@@ -469,6 +469,22 @@ export function registerIpcHandlers(deps: Deps) {
     return body.entries ?? []
   })
 
+  ipcMain.handle("account-signup", async (_e, input: { username: string; password: string; telegram?: string }) => {
+    return authService.signUp(input)
+  })
+
+  ipcMain.handle("account-signin", async (_e, input: { username: string; password: string }) => {
+    return authService.signIn(input)
+  })
+
+  ipcMain.handle("account-approval-status", async (_e, customerId: string) => {
+    return authService.approvalStatus(customerId)
+  })
+
+  ipcMain.handle("account-write-session", async (_e, token: string, customerId: string, expiresAt: number) => {
+    return authService.writeSessionFromAuth(token, customerId, expiresAt)
+  })
+
   // ── Teams ──
   const teamJson = async (path: string, init?: RequestInit) => {
     const r = await authService.fetch(path, init)

@@ -6,6 +6,7 @@ import {
   signInWithAccount,
   signUpWithAccount,
   writeWebSession,
+  logout as logoutSession,
 } from "../utils/teams-client"
 
 /**
@@ -96,6 +97,11 @@ interface PinState {
 }
 
 async function startTgAuth(): Promise<PinState> {
+  const isDesktop = typeof (window as any).api?.account?.startSignIn === "function"
+  if (isDesktop) {
+    const res = await (window as any).api.account.startSignIn()
+    return res
+  }
   const res = await fetch(`${DEFAULT_URL}/license/auth/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -105,7 +111,9 @@ async function startTgAuth(): Promise<PinState> {
   return (await res.json()) as PinState
 }
 
-async function pollTgAuth(pin: string): Promise<
+async function pollTgAuth(
+  pin: string,
+): Promise<
   | { status: "pending" }
   | { status: "expired" }
   | { status: "ok"; token: string; exp: number; customer_id: string }
@@ -113,6 +121,14 @@ async function pollTgAuth(pin: string): Promise<
   | { status: "awaiting_approval"; customer_id: string }
   | { status: "rejected"; customer_id: string; rejected_reason?: string | null }
 > {
+  const isDesktop = typeof (window as any).api?.account?.pollSignIn === "function"
+  if (isDesktop) {
+    const session = await (window as any).api.account.pollSignIn(pin)
+    if (session) {
+      return { status: "ok", token: session.token, exp: session.expires_at, customer_id: session.customer_id }
+    }
+    return { status: "pending" }
+  }
   const res = await fetch(`${DEFAULT_URL}/license/auth/poll/${encodeURIComponent(pin)}`)
   if (!res.ok) throw new Error(`auth/poll ${res.status}`)
   return (await res.json()) as never
@@ -295,9 +311,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
       const result = await fn({
         username: trimmedUser,
         password: accPassword(),
-        ...(accountMode() === "signup" && accTelegram().trim()
-          ? { telegram: accTelegram().trim() }
-          : {}),
+        ...(accountMode() === "signup" && accTelegram().trim() ? { telegram: accTelegram().trim() } : {}),
         device_label: `web (${navigator.userAgent.slice(0, 60)})`,
       })
       if (result.status === "pending") {
@@ -440,9 +454,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
           }
         } else if (s.status === "rejected") {
           stopApprovalPolling()
-          setPendingApproval((p) =>
-            p ? { ...p, rejected: true, rejected_reason: s.rejected_reason ?? null } : p,
-          )
+          setPendingApproval((p) => (p ? { ...p, rejected: true, rejected_reason: s.rejected_reason ?? null } : p))
         }
       } catch {
         // transient — keep polling
@@ -470,16 +482,20 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                     when={p().rejected}
                     fallback={
                       <>
-                        <div style={pendingHeroStyle} aria-hidden="true">⏳</div>
+                        <div style={pendingHeroStyle} aria-hidden="true">
+                          ⏳
+                        </div>
                         <h1 style={titleStyle}>Account in attesa di approvazione</h1>
                         <p style={subtitleStyle}>
-                          La tua registrazione è stata ricevuta. L'amministratore deve confermare il
-                          tuo accesso prima che la prova gratuita parta.
+                          La tua registrazione è stata ricevuta. L'amministratore deve confermare il tuo accesso prima
+                          che la prova gratuita parta.
                         </p>
                         <ul style={pendingListStyle}>
                           <li>✅ Notifica inviata all'admin su Telegram</li>
                           <li>⏱️ Di solito l'approvazione arriva in pochi minuti</li>
-                          <li>💬 Per accelerare contatta <b>@OpCrime1312</b></li>
+                          <li>
+                            💬 Per accelerare contatta <b>@OpCrime1312</b>
+                          </li>
                         </ul>
                         <p style={pendingMutedStyle}>
                           Customer ID: <code style={{ "font-size": "12px" }}>{p().customer_id}</code>
@@ -495,11 +511,11 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                       </>
                     }
                   >
-                    <div style={{ ...pendingHeroStyle, color: "#ff6b6b" }} aria-hidden="true">⛔</div>
+                    <div style={{ ...pendingHeroStyle, color: "#ff6b6b" }} aria-hidden="true">
+                      ⛔
+                    </div>
                     <h1 style={titleStyle}>Accesso rifiutato</h1>
-                    <p style={subtitleStyle}>
-                      L'amministratore non ha approvato la tua richiesta di accesso.
-                    </p>
+                    <p style={subtitleStyle}>L'amministratore non ha approvato la tua richiesta di accesso.</p>
                     <Show when={p().rejected_reason}>
                       <p style={pendingReasonStyle}>"{p().rejected_reason}"</p>
                     </Show>
@@ -515,170 +531,182 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             )}
           </Show>
           <Show when={!pendingApproval()}>
-          <div data-auth-gate="form" style={formStyle}>
-            <div style={cardStyle}>
-              <a href="/home" style={newHereStyle}>
-                🆕 New to CrimeCode? <span style={{ "text-decoration": "underline" }}>Learn what it is →</span>
-              </a>
-              <h1 style={titleStyle}>Sign in to CrimeCode</h1>
-              <p style={subtitleStyle}>Pick a sign-in method below.</p>
+            <div data-auth-gate="form" style={formStyle}>
+              <div style={cardStyle}>
+                <a href="/home" style={newHereStyle}>
+                  🆕 New to CrimeCode? <span style={{ "text-decoration": "underline" }}>Learn what it is →</span>
+                </a>
+                <h1 style={titleStyle}>Sign in to CrimeCode</h1>
+                <p style={subtitleStyle}>Pick a sign-in method below.</p>
 
-              <div style={tabsStyle}>
-                <button
-                  type="button"
-                  data-active={mode() === "telegram"}
-                  onClick={() => setMode("telegram")}
-                  style={tabStyle(mode() === "telegram")}
-                >
-                  📱 Telegram
-                </button>
-                <button
-                  type="button"
-                  data-active={mode() === "account"}
-                  onClick={() => setMode("account")}
-                  style={tabStyle(mode() === "account")}
-                >
-                  👤 Account
-                </button>
-              </div>
-
-              <Switch>
-                <Match when={mode() === "telegram"}>
-                  <Show
-                    when={pinState() && polling()}
-                    fallback={
-                      <div>
-                        <p style={descriptionStyle}>
-                          Sign in with your Telegram account via <b>@CrimeCodeSub_bot</b>. No email, no password —
-                          you'll get a one-time PIN to link this browser.
-                        </p>
-                        <button type="button" onClick={startTelegram} style={primaryButtonStyle}>
-                          Continue with Telegram
-                        </button>
-                      </div>
-                    }
+                <div style={tabsStyle}>
+                  <button
+                    type="button"
+                    data-active={mode() === "telegram"}
+                    onClick={() => setMode("telegram")}
+                    style={tabStyle(mode() === "telegram")}
                   >
-                    {(_) => {
-                      const s = pinState()!
-                      return (
+                    📱 Telegram
+                  </button>
+                  <button
+                    type="button"
+                    data-active={mode() === "account"}
+                    onClick={() => setMode("account")}
+                    style={tabStyle(mode() === "account")}
+                  >
+                    👤 Account
+                  </button>
+                </div>
+
+                <Switch>
+                  <Match when={mode() === "telegram"}>
+                    <Show
+                      when={pinState() && polling()}
+                      fallback={
                         <div>
-                          <p style={descriptionStyle}>Open Telegram and enter this one-time PIN:</p>
-                          <div style={pinStyle}>{s.pin}</div>
                           <p style={descriptionStyle}>
-                            Or open the bot directly:{" "}
-                            <a href={s.bot_url} target="_blank" rel="noopener noreferrer" style={linkStyle}>
-                              {s.bot_url}
-                            </a>
+                            Sign in with your Telegram account via <b>@CrimeCodeSub_bot</b>. No email, no password —
+                            you'll get a one-time PIN to link this browser.
                           </p>
-                          <p style={hintStyle}>Waiting for confirmation… (auto-detected)</p>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              stopPoll()
-                              setPinState(null)
-                            }}
-                            style={ghostButtonStyle}
-                          >
-                            Cancel
+                          <button type="button" onClick={startTelegram} style={primaryButtonStyle}>
+                            Continue with Telegram
                           </button>
                         </div>
-                      )
-                    }}
-                  </Show>
-                </Match>
-                <Match when={mode() === "account"}>
-                  <form onSubmit={submitAccount} aria-label={accountMode() === "signup" ? "Sign up" : "Sign in"}>
-                    <label style={labelStyle}>
-                      <span>Username</span>
-                      <input
-                        type="text"
-                        required
-                        minlength="3"
-                        maxlength="32"
-                        pattern="[a-zA-Z0-9_.\\-]+"
-                        value={accUsername()}
-                        onInput={(e) => setAccUsername(e.currentTarget.value)}
-                        autocomplete="username"
-                        style={inputStyle}
-                        placeholder="your_handle"
-                      />
-                    </label>
-                    <label style={labelStyle}>
-                      <span>Password</span>
-                      <input
-                        type="password"
-                        required
-                        minlength="8"
-                        value={accPassword()}
-                        onInput={(e) => setAccPassword(e.currentTarget.value)}
-                        autocomplete={accountMode() === "signup" ? "new-password" : "current-password"}
-                        style={inputStyle}
-                        placeholder={accountMode() === "signup" ? "Pick something ≥ 8 chars" : "Your password"}
-                      />
-                    </label>
-                    <Show when={accountMode() === "signup"}>
+                      }
+                    >
+                      {(_) => {
+                        const s = pinState()!
+                        return (
+                          <div>
+                            <p style={descriptionStyle}>Open Telegram and enter this one-time PIN:</p>
+                            <div style={pinStyle}>{s.pin}</div>
+                            <p style={descriptionStyle}>
+                              Or open the bot directly:{" "}
+                              <a href={s.bot_url} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+                                {s.bot_url}
+                              </a>
+                            </p>
+                            <p style={hintStyle}>Waiting for confirmation… (auto-detected)</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                stopPoll()
+                                setPinState(null)
+                              }}
+                              style={ghostButtonStyle}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )
+                      }}
+                    </Show>
+                  </Match>
+                  <Match when={mode() === "account"}>
+                    <form onSubmit={submitAccount} aria-label={accountMode() === "signup" ? "Sign up" : "Sign in"}>
                       <label style={labelStyle}>
-                        <span>Telegram handle (optional, for team invites)</span>
+                        <span>Username</span>
                         <input
                           type="text"
-                          value={accTelegram()}
-                          onInput={(e) => setAccTelegram(e.currentTarget.value)}
+                          required
+                          minlength="3"
+                          maxlength="32"
+                          pattern="[a-zA-Z0-9_.\\-]+"
+                          value={accUsername()}
+                          onInput={(e) => setAccUsername(e.currentTarget.value)}
+                          autocomplete="username"
                           style={inputStyle}
-                          placeholder="@yourhandle"
+                          placeholder="your_handle"
                         />
                       </label>
-                    </Show>
-                    <button type="submit" disabled={submitting()} style={primaryButtonStyle}>
-                      {submitting()
-                        ? accountMode() === "signup"
-                          ? "Creating account…"
-                          : "Signing in…"
-                        : accountMode() === "signup"
-                        ? "Create account"
-                        : "Sign in"}
-                    </button>
-                    <p style={toggleModeStyle}>
-                      {accountMode() === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
-                      <a
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          setAccountMode(accountMode() === "signup" ? "signin" : "signup")
-                          setError(null)
-                        }}
-                        style={linkStyle}
-                      >
-                        {accountMode() === "signup" ? "Sign in" : "Sign up"}
-                      </a>
+                      <label style={labelStyle}>
+                        <span>Password</span>
+                        <input
+                          type="password"
+                          required
+                          minlength="8"
+                          value={accPassword()}
+                          onInput={(e) => setAccPassword(e.currentTarget.value)}
+                          autocomplete={accountMode() === "signup" ? "new-password" : "current-password"}
+                          style={inputStyle}
+                          placeholder={accountMode() === "signup" ? "Pick something ≥ 8 chars" : "Your password"}
+                        />
+                      </label>
+                      <Show when={accountMode() === "signup"}>
+                        <label style={labelStyle}>
+                          <span>Telegram handle (optional, for team invites)</span>
+                          <input
+                            type="text"
+                            value={accTelegram()}
+                            onInput={(e) => setAccTelegram(e.currentTarget.value)}
+                            style={inputStyle}
+                            placeholder="@yourhandle"
+                          />
+                        </label>
+                      </Show>
+                      <button type="submit" disabled={submitting()} style={primaryButtonStyle}>
+                        {submitting()
+                          ? accountMode() === "signup"
+                            ? "Creating account…"
+                            : "Signing in…"
+                          : accountMode() === "signup"
+                            ? "Create account"
+                            : "Sign in"}
+                      </button>
+                      <p style={toggleModeStyle}>
+                        {accountMode() === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            setAccountMode(accountMode() === "signup" ? "signin" : "signup")
+                            setError(null)
+                          }}
+                          style={linkStyle}
+                        >
+                          {accountMode() === "signup" ? "Sign in" : "Sign up"}
+                        </a>
+                      </p>
+                    </form>
+                  </Match>
+                </Switch>
+
+                <Show when={error()}>
+                  {(msg) => (
+                    <p data-slot="error" style={errorStyle}>
+                      {msg()}
                     </p>
-                  </form>
-                </Match>
-              </Switch>
+                  )}
+                </Show>
 
-              <Show when={error()}>
-                {(msg) => (
-                  <p data-slot="error" style={errorStyle}>
-                    {msg()}
-                  </p>
-                )}
-              </Show>
-
-              <p style={hintStyle}>Credentials stay in your browser's localStorage and travel only over HTTPS.</p>
-              <p style={footerLinksStyle}>
-                <a href="/home" style={footerLinkStyle}>Home</a>
-                <span style={dotStyle}>·</span>
-                <a href="/guide" style={footerLinkStyle}>Guide</a>
-                <span style={dotStyle}>·</span>
-                <a href="/pricing" style={footerLinkStyle}>Pricing</a>
-                <span style={dotStyle}>·</span>
-                <a href="/faq" style={footerLinkStyle}>FAQ</a>
-                <span style={dotStyle}>·</span>
-                <a href="/terms" style={footerLinkStyle}>Terms</a>
-                <span style={dotStyle}>·</span>
-                <a href="/privacy" style={footerLinkStyle}>Privacy</a>
-              </p>
+                <p style={hintStyle}>Credentials stay in your browser's localStorage and travel only over HTTPS.</p>
+                <p style={footerLinksStyle}>
+                  <a href="/home" style={footerLinkStyle}>
+                    Home
+                  </a>
+                  <span style={dotStyle}>·</span>
+                  <a href="/guide" style={footerLinkStyle}>
+                    Guide
+                  </a>
+                  <span style={dotStyle}>·</span>
+                  <a href="/pricing" style={footerLinkStyle}>
+                    Pricing
+                  </a>
+                  <span style={dotStyle}>·</span>
+                  <a href="/faq" style={footerLinkStyle}>
+                    FAQ
+                  </a>
+                  <span style={dotStyle}>·</span>
+                  <a href="/terms" style={footerLinkStyle}>
+                    Terms
+                  </a>
+                  <span style={dotStyle}>·</span>
+                  <a href="/privacy" style={footerLinkStyle}>
+                    Privacy
+                  </a>
+                </p>
+              </div>
             </div>
-          </div>
           </Show>
         </Show>
       }
@@ -688,8 +716,8 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
   )
 }
 
-export function logout(): void {
-  clearCredentials()
+export async function logout(): Promise<void> {
+  await logoutSession()
   window.location.reload()
 }
 

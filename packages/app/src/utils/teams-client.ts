@@ -122,16 +122,37 @@ export interface SignInInput {
  *  "account_rejected").
  */
 export async function signUpWithAccount(input: SignUpInput): Promise<AccountResult> {
+  if (hasDesktopApi()) {
+    const api = (window as any).api.account
+    const result = await api.signUp({ username: input.username, password: input.password, telegram: input.telegram })
+    // Write session to Electron store so sync works across devices
+    if (result.status === "ok") {
+      await api.writeSession(result.token, result.customer_id, result.exp)
+    }
+    return result
+  }
   return accountJson("/license/auth/signup", input)
 }
 
 export async function signInWithAccount(input: SignInInput): Promise<AccountResult> {
+  if (hasDesktopApi()) {
+    const api = (window as any).api.account
+    const result = await api.signIn({ username: input.username, password: input.password })
+    // Write session to Electron store so sync works across devices
+    if (result.status === "ok") {
+      await api.writeSession(result.token, result.customer_id, result.exp)
+    }
+    return result
+  }
   return accountJson("/license/auth/signin", input)
 }
 
 export async function fetchApprovalStatus(
   customerId: string,
 ): Promise<{ status: "pending" | "approved" | "rejected"; rejected_reason?: string | null }> {
+  if (hasDesktopApi()) {
+    return (window as any).api.account.approvalStatus(customerId)
+  }
   const res = await fetch(`${API_BASE}/license/auth/status/${encodeURIComponent(customerId)}`)
   const text = await res.text()
   let parsed: unknown
@@ -427,4 +448,14 @@ export function getTeamsClient(): TeamsClient {
   if (_cached) return _cached
   _cached = hasDesktopApi() ? desktopClient() : webClient()
   return _cached
+}
+
+// ─── Logout (desktop-aware) ────────────────────────────────────────────────
+
+export async function logout(): Promise<void> {
+  if (hasDesktopApi()) {
+    await (window as any).api.account.logout()
+  }
+  // Always clear web session too (localStorage) so both paths are consistent
+  writeWebSession(null)
 }

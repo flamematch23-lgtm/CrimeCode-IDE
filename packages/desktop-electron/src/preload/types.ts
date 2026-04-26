@@ -131,13 +131,40 @@ export type ElectronAPI = {
     } | null>
     readonly startSignIn: () => Promise<{ pin: string; expires_at: number; bot_url: string }>
     readonly pollSignIn: (pin: string) => Promise<{
+      status: "ok" | "pending" | "expired" | "unknown" | "awaiting_approval" | "rejected"
+      token?: string
+      exp?: number
+      customer_id?: string
+      rejected_reason?: string | null
+    }>
+    readonly logout: () => Promise<void>
+    readonly signUp: (input: {
+      username: string
+      password: string
+      telegram?: string
+    }) => Promise<
+      { status: "ok"; token: string; exp: number; customer_id: string } | { status: "pending"; customer_id: string }
+    >
+    readonly signIn: (input: {
+      username: string
+      password: string
+    }) => Promise<
+      { status: "ok"; token: string; exp: number; customer_id: string } | { status: "pending"; customer_id: string }
+    >
+    readonly approvalStatus: (
+      customerId: string,
+    ) => Promise<{ status: "pending" | "approved" | "rejected"; rejected_reason?: string | null }>
+    readonly writeSession: (
+      token: string,
+      customerId: string,
+      expiresAt: number,
+    ) => Promise<{
       token: string
       customer_id: string
       telegram_user_id: number | null
       expires_at: number
       signed_in_at: number
-    } | null>
-    readonly logout: () => Promise<void>
+    }>
     readonly syncGet: (key: string) => Promise<{ key: string; value: string; updated_at: number } | null>
     readonly syncPut: (key: string, value: string) => Promise<{ key: string; value: string; updated_at: number }>
     readonly syncList: () => Promise<Array<{ key: string; value: string; updated_at: number }>>
