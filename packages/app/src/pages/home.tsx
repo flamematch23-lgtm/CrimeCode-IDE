@@ -54,41 +54,77 @@ export default function Home() {
    */
   async function createNewProject() {
     if (creating()) return
-    const raw = window.prompt(
-      language.t("home.newProject.promptName") ?? "Nome del nuovo progetto (opzionale)",
-      "",
-    )
-    // prompt returns null when cancelled; empty string means "default name"
-    if (raw === null) return
-    setCreating(true)
-    try {
-      const http = server.current?.http
-      const base = http?.url ?? ""
-      const r = await fetch(
-        `${base}/project/create`,
-        withAuthHeaders(http, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: raw.trim() || undefined }),
-        }),
-      )
-      if (!r.ok) {
-        throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
-      }
-      const data = (await r.json()) as { directory?: string; error?: string }
-      if (data.error || !data.directory) {
-        throw new Error(data.error ?? "no directory returned")
-      }
-      openProject(data.directory)
-    } catch (err) {
-      showToast({
-        variant: "error",
-        icon: "circle-x",
-        title: language.t("home.newProject.failed.title") ?? "Impossibile creare il progetto",
-        description: err instanceof Error ? err.message : String(err),
+
+    const http = server.current?.http
+    const isLocal = server.isLocal()
+
+    if (isLocal && platform.openDirectoryPickerDialog) {
+      const result = await platform.openDirectoryPickerDialog?.({
+        title: language.t("home.newProject.selectFolder") ?? "Seleziona cartella per nuovo progetto",
+        multiple: false,
       })
-    } finally {
-      setCreating(false)
+      if (!result) return
+      setCreating(true)
+      try {
+        const base = http?.url ?? ""
+        const r = await fetch(
+          `${base}/project/create`,
+          withAuthHeaders(http, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ directory: result }),
+          }),
+        )
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+        }
+        const data = (await r.json()) as { directory?: string; error?: string }
+        if (data.error || !data.directory) {
+          throw new Error(data.error ?? "no directory returned")
+        }
+        openProject(data.directory)
+      } catch (err) {
+        showToast({
+          variant: "error",
+          icon: "circle-x",
+          title: language.t("home.newProject.failed.title") ?? "Impossibile creare il progetto",
+          description: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        setCreating(false)
+      }
+    } else {
+      const raw = window.prompt(language.t("home.newProject.promptName") ?? "Nome del nuovo progetto (opzionale)", "")
+      if (raw === null) return
+      setCreating(true)
+      try {
+        const base = http?.url ?? ""
+        const r = await fetch(
+          `${base}/project/create`,
+          withAuthHeaders(http, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: raw.trim() || undefined }),
+          }),
+        )
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status}: ${r.statusText || "request failed"}`)
+        }
+        const data = (await r.json()) as { directory?: string; error?: string }
+        if (data.error || !data.directory) {
+          throw new Error(data.error ?? "no directory returned")
+        }
+        openProject(data.directory)
+      } catch (err) {
+        showToast({
+          variant: "error",
+          icon: "circle-x",
+          title: language.t("home.newProject.failed.title") ?? "Impossibile creare il progetto",
+          description: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        setCreating(false)
+      }
     }
   }
 
@@ -148,8 +184,8 @@ export default function Home() {
                   disabled={creating()}
                 >
                   {creating()
-                    ? language.t("home.newProject.creating") ?? "Creazione…"
-                    : language.t("home.newProject") ?? "Nuovo progetto"}
+                    ? (language.t("home.newProject.creating") ?? "Creazione…")
+                    : (language.t("home.newProject") ?? "Nuovo progetto")}
                 </Button>
                 <Button icon="folder-add-left" size="normal" variant="ghost" class="pl-2 pr-3" onClick={chooseProject}>
                   {language.t("command.project.open")}
@@ -181,8 +217,8 @@ export default function Home() {
             <div class="flex gap-2">
               <Button class="px-3" onClick={createNewProject} disabled={creating()}>
                 {creating()
-                  ? language.t("home.newProject.creating") ?? "Creazione…"
-                  : language.t("home.newProject") ?? "Nuovo progetto"}
+                  ? (language.t("home.newProject.creating") ?? "Creazione…")
+                  : (language.t("home.newProject") ?? "Nuovo progetto")}
               </Button>
               <Button variant="ghost" class="px-3" onClick={chooseProject}>
                 {language.t("command.project.open")}
@@ -200,8 +236,8 @@ export default function Home() {
             <div class="flex gap-2 mt-1">
               <Button class="px-3" onClick={createNewProject} disabled={creating()}>
                 {creating()
-                  ? language.t("home.newProject.creating") ?? "Creazione…"
-                  : language.t("home.newProject") ?? "Nuovo progetto"}
+                  ? (language.t("home.newProject.creating") ?? "Creazione…")
+                  : (language.t("home.newProject") ?? "Nuovo progetto")}
               </Button>
               <Button variant="ghost" class="px-3" onClick={chooseProject}>
                 {language.t("command.project.open")}
