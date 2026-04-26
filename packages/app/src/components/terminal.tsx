@@ -522,7 +522,14 @@ export const Terminal = (props: TerminalProps) => {
         next.username = username
         next.password = password
 
-        const socket = new WebSocket(next)
+        let socket: WebSocket
+        try {
+          socket = new WebSocket(next)
+        } catch (err) {
+          debugTerminal("websocket constructor failed", err)
+          retry(err)
+          return
+        }
         socket.binaryType = "arraybuffer"
         ws = socket
 
