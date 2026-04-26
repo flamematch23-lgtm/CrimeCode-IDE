@@ -70,7 +70,6 @@
   "dependencies": {
     "@actions/core": "1.11.1",
     "@actions/github": "6.0.1",
-    "@sentry/node": "^8",
     "@agentclientprotocol/sdk": "0.14.1",
     "@ai-sdk/amazon-bedrock": "3.0.82",
     "@ai-sdk/anthropic": "2.0.65",
@@ -109,6 +108,7 @@
     "@opentui/solid": "0.1.90",
     "@parcel/watcher": "2.5.1",
     "@pierre/diffs": "catalog:",
+    "@sentry/node": "^8",
     "@solid-primitives/event-bus": "1.1.2",
     "@solid-primitives/scheduled": "1.5.2",
     "@standard-schema/spec": "1.0.0",

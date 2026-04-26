@@ -22,6 +22,7 @@ const winSign = signEnabled
         signingHashAlgorithms: ["sha256"],
         publisherName: process.env.SIGN_PUBLISHER || "OpenCode Dev (Self-signed)",
       },
+      files: ["!**/opencode-cli*"],
     } satisfies Partial<NonNullable<Configuration["win"]>>)
   : {}
 
