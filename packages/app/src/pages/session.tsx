@@ -334,6 +334,12 @@ export default function Page() {
     onCleanup(() => window.removeEventListener("open-live-share", handler))
   })
 
+  onCleanup(() => {
+    if (refreshDebounceTimer !== undefined) clearTimeout(refreshDebounceTimer)
+    if (refreshFrame !== undefined) cancelAnimationFrame(refreshFrame)
+    if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+  })
+
   createEffect(() => {
     if (!untrack(() => prompt.ready())) return
     prompt.ready()
@@ -539,16 +545,17 @@ export default function Page() {
     >,
   })
 
-  createComputed((prev) => {
+  let lastDeferKey: string | undefined
+  createComputed(() => {
     const key = sessionKey()
-    if (key !== prev) {
+    if (key !== lastDeferKey) {
+      lastDeferKey = key
       setStore("deferRender", true)
       requestAnimationFrame(() => {
         setTimeout(() => setStore("deferRender", false), 0)
       })
     }
-    return key
-  }, sessionKey())
+  })
 
   let reviewFrame: number | undefined
   let refreshFrame: number | undefined
@@ -711,38 +718,46 @@ export default function Page() {
 
   const hasScrollGesture = () => Date.now() - ui.scrollGesture < scrollGestureWindowMs
 
+  let refreshDebounceTimer: number | undefined
+
   createEffect(
     on([() => sdk.directory, () => params.id] as const, ([, id]) => {
+      if (refreshDebounceTimer !== undefined) clearTimeout(refreshDebounceTimer)
       if (refreshFrame !== undefined) cancelAnimationFrame(refreshFrame)
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
       refreshFrame = undefined
       refreshTimer = undefined
+      refreshDebounceTimer = undefined
       if (!id) return
 
-      const cached = untrack(() => sync.data.message[id] !== undefined)
-      const stale = !cached
-        ? false
-        : (() => {
-            const info = getSessionPrefetch(sdk.directory, id)
-            if (!info) return true
-            return Date.now() - info.at > SESSION_PREFETCH_TTL
-          })()
-      const todos = untrack(() => sync.data.todo[id] !== undefined || globalSync.data.session_todo[id] !== undefined)
-      untrack(() => {
-        void sync.session.sync(id)
-      })
+      const doRefresh = () => {
+        const cached = untrack(() => sync.data.message[id] !== undefined)
+        const stale = !cached
+          ? false
+          : (() => {
+              const info = getSessionPrefetch(sdk.directory, id)
+              if (!info) return true
+              return Date.now() - info.at > SESSION_PREFETCH_TTL
+            })()
+        const todos = untrack(() => sync.data.todo[id] !== undefined || globalSync.data.session_todo[id] !== undefined)
+        untrack(() => {
+          void sync.session.sync(id)
+        })
 
-      refreshFrame = requestAnimationFrame(() => {
-        refreshFrame = undefined
-        refreshTimer = window.setTimeout(() => {
-          refreshTimer = undefined
-          if (params.id !== id) return
-          untrack(() => {
-            if (stale) void sync.session.sync(id, { force: true })
-            void sync.session.todo(id, todos ? { force: true } : undefined)
-          })
-        }, 0)
-      })
+        refreshFrame = requestAnimationFrame(() => {
+          refreshFrame = undefined
+          refreshTimer = window.setTimeout(() => {
+            refreshTimer = undefined
+            if (params.id !== id) return
+            untrack(() => {
+              if (stale) void sync.session.sync(id, { force: true })
+              void sync.session.todo(id, todos ? { force: true } : undefined)
+            })
+          }, 0)
+        })
+      }
+
+      refreshDebounceTimer = window.setTimeout(doRefresh, 500)
     }),
   )
 

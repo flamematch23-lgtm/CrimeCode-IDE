@@ -1,6 +1,6 @@
 const key = (directory: string, sessionID: string) => `${directory}\n${sessionID}`
 
-export const SESSION_PREFETCH_TTL = 15_000
+export const SESSION_PREFETCH_TTL = 60_000
 
 type Meta = {
   limit: number
