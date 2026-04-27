@@ -1066,6 +1066,62 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
+[data-component="workspace-switcher-popover"] [data-slot="login-form"] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0;
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-form"] input {
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-form"] input:focus {
+  border-color: rgba(255, 87, 34, 0.6);
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-error"] {
+  color: #ff8a8a;
+  font-size: 12px;
+  text-align: center;
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-actions"] {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-actions"] button[type="submit"] {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #ff5722, #f4511e);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-actions"] button[type="submit"]:hover {
+  background: linear-gradient(135deg, #ff7043, #ff5722);
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-actions"] button[type="button"] {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="login-actions"] button[type="button"]:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
 [data-component="workspace-switcher-popover"] [data-slot="create"] {
   display: flex;
   align-items: center;

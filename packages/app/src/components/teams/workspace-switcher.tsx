@@ -1,6 +1,12 @@
 import { For, Show, createEffect, createResource, createSignal, onCleanup } from "solid-js"
 import { Portal } from "solid-js/web"
-import { getTeamsClient, readWebSession, type TeamSummary, logout as logoutSession } from "../../utils/teams-client"
+import {
+  getTeamsClient,
+  readWebSession,
+  signInWithAccount,
+  type TeamSummary,
+  logout as logoutSession,
+} from "../../utils/teams-client"
 import { CreateTeamDialog } from "./create-team-dialog"
 import { ManageTeamDialog } from "./manage-team-dialog"
 
@@ -45,6 +51,11 @@ export function WorkspaceSwitcher() {
   })
   const [showCreate, setShowCreate] = createSignal(false)
   const [manageId, setManageId] = createSignal<string | null>(null)
+  const [showLoginForm, setShowLoginForm] = createSignal(false)
+  const [loginUsername, setLoginUsername] = createSignal("")
+  const [loginPassword, setLoginPassword] = createSignal("")
+  const [loginError, setLoginError] = createSignal<string | null>(null)
+  const [loginSubmitting, setLoginSubmitting] = createSignal(false)
   // Popover lives in a Portal so it can never be clipped by a parent's
   // overflow or trapped behind another stacking context. Position is
   // measured from the trigger the moment we open.
@@ -84,15 +95,41 @@ export function WorkspaceSwitcher() {
     close()
   }
 
-  async function handleSignIn() {
-    close()
-    // Clear any stale session and reload to show the AuthGate
-    await logoutSession()
+  function handleSignIn() {
+    setShowLoginForm(true)
+    setLoginError(null)
+  }
+
+  async function submitLogin(e: Event) {
+    e.preventDefault()
+    setLoginError(null)
+    const user = loginUsername().trim()
+    const pass = loginPassword()
+    if (!user || !pass) {
+      setLoginError("Inserisci username e password")
+      return
+    }
+    setLoginSubmitting(true)
+    try {
+      const result = await signInWithAccount({ username: user, password: pass })
+      if (result.status === "approved") {
+        setShowLoginForm(false)
+        // Reload to pick up the new session
+        window.location.reload()
+      } else {
+        setLoginError("Account in attesa di approvazione admin")
+      }
+    } catch (err: any) {
+      setLoginError(err?.message || "Errore di autenticazione")
+    } finally {
+      setLoginSubmitting(false)
+    }
   }
 
   async function handleSignOut() {
     close()
     await logoutSession()
+    window.location.reload()
   }
 
   // Close on outside click. The popover is portalled to document.body so
@@ -165,18 +202,51 @@ export function WorkspaceSwitcher() {
                 fallback={
                   <div data-slot="section">
                     <div data-slot="section-label">Account</div>
-                    <div data-slot="not-signed-in">
-                      <div data-slot="not-signed-in-title">Accedi per creare o unirti a un Team</div>
-                      <div data-slot="not-signed-in-sub">
-                        I Team Workspace ti permettono di condividere progetti e collaborare in tempo reale.
-                      </div>
-                      <button type="button" data-slot="signin" onClick={handleSignIn}>
-                        <span data-slot="signin-icon" aria-hidden="true">
-                          🔑
-                        </span>
-                        <span data-slot="signin-label">Accedi</span>
-                      </button>
-                    </div>
+                    <Show
+                      when={showLoginForm()}
+                      fallback={
+                        <div data-slot="not-signed-in">
+                          <div data-slot="not-signed-in-title">Accedi per creare o unirti a un Team</div>
+                          <div data-slot="not-signed-in-sub">
+                            I Team Workspace ti permettono di condividere progetti e collaborare in tempo reale.
+                          </div>
+                          <button type="button" data-slot="signin" onClick={handleSignIn}>
+                            <span data-slot="signin-icon" aria-hidden="true">
+                              🔑
+                            </span>
+                            <span data-slot="signin-label">Accedi</span>
+                          </button>
+                        </div>
+                      }
+                    >
+                      <form data-slot="login-form" onSubmit={submitLogin}>
+                        <input
+                          type="text"
+                          placeholder="Username"
+                          value={loginUsername()}
+                          onInput={(e) => setLoginUsername(e.currentTarget.value)}
+                          required
+                        />
+                        <input
+                          type="password"
+                          placeholder="Password"
+                          value={loginPassword()}
+                          onInput={(e) => setLoginPassword(e.currentTarget.value)}
+                          required
+                        />
+                        <Show when={loginError()}>
+                          <div data-slot="login-error">{loginError()}</div>
+                        </Show>
+                        <div data-slot="login-actions">
+                          <button type="button" onClick={() => setShowLoginForm(false)}>
+                            Annulla
+                          </button>
+                          <button type="submit" disabled={loginSubmitting()}>
+                            {loginSubmitting() ? "Caricamento..." : "Accedi"}
+                          </button>
+                        </div>
+                      </form>
+                    </Show>
                   </div>
                 }
               >
