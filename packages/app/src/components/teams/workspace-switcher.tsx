@@ -4,6 +4,9 @@ import {
   getTeamsClient,
   readWebSession,
   signInWithAccount,
+  signUpWithAccount,
+  fetchApprovalStatus,
+  writeWebSession,
   type TeamSummary,
   logout as logoutSession,
 } from "../../utils/teams-client"
@@ -12,6 +15,7 @@ import { ManageTeamDialog } from "./manage-team-dialog"
 
 const LOCAL_WORKSPACE_KEY = "client.active-workspace"
 const DEFAULT_PERSONAL = { kind: "personal", id: null } as const
+const API_BASE = "https://api.crimecode.cc"
 
 type ActiveWorkspace = { kind: "personal"; id: null } | { kind: "team"; id: string }
 
@@ -32,13 +36,51 @@ function writeActive(ws: ActiveWorkspace): void {
   window.dispatchEvent(new CustomEvent("workspace-changed", { detail: ws }))
 }
 
+async function startTgAuth(): Promise<{ pin: string; bot_url: string; expires_at: number }> {
+  const isDesktop = typeof (window as any).api?.account?.startSignIn === "function"
+  if (isDesktop) return (window as any).api.account.startSignIn()
+  const res = await fetch(`${API_BASE}/license/auth/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device_label: navigator.userAgent.slice(0, 80) }),
+  })
+  if (!res.ok) throw new Error(`auth/start ${res.status}`)
+  return res.json()
+}
+
+async function pollTgAuth(pin: string): Promise<Record<string, unknown>> {
+  const isDesktop = typeof (window as any).api?.account?.pollSignIn === "function"
+  if (isDesktop) {
+    const session = await (window as any).api.account.pollSignIn(pin)
+    if (session)
+      return { status: "ok", token: session.token, customer_id: session.customer_id, exp: session.expires_at }
+    return { status: "pending" }
+  }
+  const res = await fetch(`${API_BASE}/license/auth/poll/${encodeURIComponent(pin)}`)
+  if (!res.ok) throw new Error(`auth/poll ${res.status}`)
+  return res.json()
+}
+
+function friendlyError(code: string): string {
+  const map: Record<string, string> = {
+    invalid_username: "Username: 3-32 caratteri (lettere, numeri, _, -, .).",
+    invalid_password: "Password: minimo 8 caratteri.",
+    username_taken: "Username già in uso. Prova ad accedere.",
+    invalid_credentials: "Username o password errati.",
+    account_revoked: "Account disabilitato. Contatta @OpCrime1312.",
+    account_rejected: "Richiesta respinta. Contatta @OpCrime1312.",
+    account_pending_approval: "Account in attesa di approvazione.",
+    missing_credentials: "Inserisci username e password.",
+    rate_limited: "Troppi tentativi. Riprova tra un minuto.",
+  }
+  return map[code] ?? code
+}
+
 export function WorkspaceSwitcher() {
   const client = getTeamsClient()
   const [open, setOpen] = createSignal(false)
   const [active, setActive] = createSignal<ActiveWorkspace>(readActive())
   const [account] = createResource(async () => {
-    // Desktop: window.api.account.get is authoritative.
-    // Web: fall back to the localStorage session.
     const api = (window as unknown as { api?: { account?: { get: () => Promise<unknown> } } }).api
     if (api?.account?.get) return api.account.get()
     return readWebSession()
@@ -51,14 +93,24 @@ export function WorkspaceSwitcher() {
   })
   const [showCreate, setShowCreate] = createSignal(false)
   const [manageId, setManageId] = createSignal<string | null>(null)
-  const [showLoginForm, setShowLoginForm] = createSignal(false)
-  const [loginUsername, setLoginUsername] = createSignal("")
-  const [loginPassword, setLoginPassword] = createSignal("")
-  const [loginError, setLoginError] = createSignal<string | null>(null)
-  const [loginSubmitting, setLoginSubmitting] = createSignal(false)
-  // Popover lives in a Portal so it can never be clipped by a parent's
-  // overflow or trapped behind another stacking context. Position is
-  // measured from the trigger the moment we open.
+
+  // Login form state
+  const [showLogin, setShowLogin] = createSignal(false)
+  const [loginMode, setLoginMode] = createSignal<"signin" | "signup">("signin")
+  const [user, setUser] = createSignal("")
+  const [pass, setPass] = createSignal("")
+  const [tgHandle, setTgHandle] = createSignal("")
+  const [error, setError] = createSignal<string | null>(null)
+  const [submitting, setSubmitting] = createSignal(false)
+
+  // Telegram auth state
+  const [tgPin, setTgPin] = createSignal<string | null>(null)
+  const [tgBotUrl, setTgBotUrl] = createSignal("")
+  const [tgPolling, setTgPolling] = createSignal(false)
+
+  // Pending approval state
+  const [pendingCid, setPendingCid] = createSignal<string | null>(null)
+
   const [popoverPos, setPopoverPos] = createSignal<{ top: number; right: number } | null>(null)
   let triggerRef: HTMLButtonElement | undefined
 
@@ -95,36 +147,186 @@ export function WorkspaceSwitcher() {
     close()
   }
 
-  function handleSignIn() {
-    setShowLoginForm(true)
-    setLoginError(null)
+  function openLogin() {
+    setShowLogin(true)
+    setLoginMode("signin")
+    setUser("")
+    setPass("")
+    setTgHandle("")
+    setError(null)
+    setTgPin(null)
+    setPendingCid(null)
   }
 
-  async function submitLogin(e: Event) {
-    e.preventDefault()
-    setLoginError(null)
-    const user = loginUsername().trim()
-    const pass = loginPassword()
-    if (!user || !pass) {
-      setLoginError("Inserisci username e password")
-      return
+  function closeLogin() {
+    setShowLogin(false)
+    setTgPin(null)
+    setTgPolling(false)
+    if (tgTimer) {
+      clearInterval(tgTimer)
+      tgTimer = null
     }
-    setLoginSubmitting(true)
-    try {
-      const result = await signInWithAccount({ username: user, password: pass })
-      if (result.status === "approved") {
-        setShowLoginForm(false)
-        // Reload to pick up the new session
-        window.location.reload()
-      } else {
-        setLoginError("Account in attesa di approvazione admin")
-      }
-    } catch (err: any) {
-      setLoginError(err?.message || "Errore di autenticazione")
-    } finally {
-      setLoginSubmitting(false)
+    if (approvalTimer) {
+      clearInterval(approvalTimer)
+      approvalTimer = null
     }
   }
+
+  async function submitAccount(e: Event) {
+    e.preventDefault()
+    setError(null)
+    const trimmed = user().trim()
+    if (trimmed.length < 3 || trimmed.length > 32 || !/^[a-zA-Z0-9_.\-]+$/.test(trimmed)) {
+      setError(friendlyError("invalid_username"))
+      return
+    }
+    if (pass().length < 8) {
+      setError(friendlyError("invalid_password"))
+      return
+    }
+    setSubmitting(true)
+    try {
+      const fn = loginMode() === "signup" ? signUpWithAccount : signInWithAccount
+      const result = await fn({
+        username: trimmed,
+        password: pass(),
+        ...(loginMode() === "signup" && tgHandle().trim() ? { telegram: tgHandle().trim() } : {}),
+        device_label: `web (${navigator.userAgent.slice(0, 60)})`,
+      })
+      if (result.status === "approved") {
+        writeWebSession({
+          token: result.token,
+          customer_id: result.customer_id,
+          telegram_user_id: null,
+          expires_at: result.exp,
+        })
+        closeLogin()
+        window.location.reload()
+      } else if (result.status === "pending") {
+        setPendingCid(result.customer_id)
+        startApprovalPolling(result.customer_id)
+      }
+    } catch (err: any) {
+      setError(friendlyError(err?.message || "Errore di autenticazione"))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Telegram auth
+  let tgTimer: ReturnType<typeof setInterval> | null = null
+  async function startTelegram() {
+    setError(null)
+    setTgPin(null)
+    try {
+      const s = await startTgAuth()
+      setTgPin(s.pin)
+      setTgBotUrl(s.bot_url)
+      setTgPolling(true)
+      window.open(s.bot_url, "_blank", "noopener")
+      tgTimer = setInterval(async () => {
+        try {
+          const r = await pollTgAuth(s.pin)
+          if (r.status === "ok") {
+            clearInterval(tgTimer!)
+            tgTimer = null
+            setTgPolling(false)
+            setTgPin(null)
+            writeWebSession({
+              token: r.token as string,
+              customer_id: r.customer_id as string,
+              telegram_user_id: null,
+              expires_at: r.exp as number,
+            })
+            closeLogin()
+            window.location.reload()
+          }
+          if (r.status === "awaiting_approval") {
+            clearInterval(tgTimer!)
+            tgTimer = null
+            setTgPolling(false)
+            setTgPin(null)
+            setPendingCid(r.customer_id as string)
+            startApprovalPolling(r.customer_id as string)
+          }
+          if (r.status === "rejected") {
+            clearInterval(tgTimer!)
+            tgTimer = null
+            setTgPolling(false)
+            setTgPin(null)
+            setPendingCid(r.customer_id as string)
+            setError("Richiesta respinta dall'admin.")
+          }
+          if (r.status === "expired") {
+            clearInterval(tgTimer!)
+            tgTimer = null
+            setTgPolling(false)
+            setTgPin(null)
+            setError("PIN scaduto. Riprova.")
+          }
+        } catch (err) {
+          clearInterval(tgTimer!)
+          tgTimer = null
+          setTgPolling(false)
+          setTgPin(null)
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      }, 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // Approval polling
+  let approvalTimer: ReturnType<typeof setInterval> | null = null
+  function startApprovalPolling(cid: string) {
+    setTgPin(null)
+    setTgPolling(false)
+    approvalTimer = setInterval(async () => {
+      try {
+        const st = await fetchApprovalStatus(cid)
+        if (st.status === "approved") {
+          clearInterval(approvalTimer!)
+          approvalTimer = null
+          // Re-sign in now that approved
+          try {
+            const result = await signInWithAccount({ username: user() || "bearer", password: pass() })
+            if (result.status === "approved") {
+              writeWebSession({
+                token: result.token,
+                customer_id: result.customer_id,
+                telegram_user_id: null,
+                expires_at: result.exp,
+              })
+              closeLogin()
+              window.location.reload()
+            }
+          } catch {
+            setError("Approvato! Ora accedi con le tue credenziali.")
+            setPendingCid(null)
+          }
+        } else if (st.status === "rejected") {
+          clearInterval(approvalTimer!)
+          approvalTimer = null
+          setError("Richiesta respinta dall'admin.")
+          setPendingCid(null)
+        }
+      } catch {
+        // keep polling
+      }
+    }, 5000)
+  }
+
+  onCleanup(() => {
+    if (tgTimer) {
+      clearInterval(tgTimer)
+      tgTimer = null
+    }
+    if (approvalTimer) {
+      clearInterval(approvalTimer)
+      approvalTimer = null
+    }
+  })
 
   async function handleSignOut() {
     close()
@@ -132,9 +334,6 @@ export function WorkspaceSwitcher() {
     window.location.reload()
   }
 
-  // Close on outside click. The popover is portalled to document.body so
-  // we need to accept clicks inside either the trigger OR the portaled
-  // popover (marked with data-component="workspace-switcher-popover").
   function onDocClick(e: MouseEvent) {
     if (!open()) return
     const t = e.target as HTMLElement | null
@@ -203,49 +402,136 @@ export function WorkspaceSwitcher() {
                   <div data-slot="section">
                     <div data-slot="section-label">Account</div>
                     <Show
-                      when={showLoginForm()}
+                      when={showLogin()}
                       fallback={
                         <div data-slot="not-signed-in">
                           <div data-slot="not-signed-in-title">Accedi per creare o unirti a un Team</div>
                           <div data-slot="not-signed-in-sub">
                             I Team Workspace ti permettono di condividere progetti e collaborare in tempo reale.
                           </div>
-                          <button type="button" data-slot="signin" onClick={handleSignIn}>
+                          <button type="button" data-slot="tg-login" onClick={startTelegram}>
+                            <span data-slot="signin-icon" aria-hidden="true">
+                              📱
+                            </span>
+                            <span data-slot="signin-label">Accedi con Telegram</span>
+                          </button>
+                          <div data-slot="divider">
+                            <span>oppure</span>
+                          </div>
+                          <button type="button" data-slot="signin" onClick={openLogin}>
                             <span data-slot="signin-icon" aria-hidden="true">
                               🔑
                             </span>
-                            <span data-slot="signin-label">Accedi</span>
+                            <span data-slot="signin-label">Username e password</span>
                           </button>
                         </div>
                       }
                     >
-                      <form data-slot="login-form" onSubmit={submitLogin}>
-                        <input
-                          type="text"
-                          placeholder="Username"
-                          value={loginUsername()}
-                          onInput={(e) => setLoginUsername(e.currentTarget.value)}
-                          required
-                        />
-                        <input
-                          type="password"
-                          placeholder="Password"
-                          value={loginPassword()}
-                          onInput={(e) => setLoginPassword(e.currentTarget.value)}
-                          required
-                        />
-                        <Show when={loginError()}>
-                          <div data-slot="login-error">{loginError()}</div>
-                        </Show>
-                        <div data-slot="login-actions">
-                          <button type="button" onClick={() => setShowLoginForm(false)}>
-                            Annulla
-                          </button>
-                          <button type="submit" disabled={loginSubmitting()}>
-                            {loginSubmitting() ? "Caricamento..." : "Accedi"}
+                      {/* Pending approval */}
+                      <Show
+                        when={pendingCid()}
+                        fallback={
+                          <>
+                            {/* Telegram login in progress */}
+                            <Show
+                              when={tgPin()}
+                              fallback={
+                                <div data-slot="login-panel">
+                                  <div data-slot="login-tabs">
+                                    <button
+                                      type="button"
+                                      data-slot="tab"
+                                      data-active={loginMode() === "signin"}
+                                      onClick={() => setLoginMode("signin")}
+                                    >
+                                      Accedi
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-slot="tab"
+                                      data-active={loginMode() === "signup"}
+                                      onClick={() => setLoginMode("signup")}
+                                    >
+                                      Crea account
+                                    </button>
+                                  </div>
+                                  <form data-slot="login-form" onSubmit={submitAccount}>
+                                    <input
+                                      type="text"
+                                      placeholder="Username"
+                                      value={user()}
+                                      onInput={(e) => setUser(e.currentTarget.value)}
+                                      minlength={3}
+                                      maxlength={32}
+                                      required
+                                    />
+                                    <input
+                                      type="password"
+                                      placeholder="Password"
+                                      value={pass()}
+                                      onInput={(e) => setPass(e.currentTarget.value)}
+                                      minlength={8}
+                                      required
+                                    />
+                                    <Show when={loginMode() === "signup"}>
+                                      <input
+                                        type="text"
+                                        placeholder="Telegram @username (opzionale)"
+                                        value={tgHandle()}
+                                        onInput={(e) => setTgHandle(e.currentTarget.value)}
+                                      />
+                                    </Show>
+                                    <Show when={error()}>
+                                      <div data-slot="login-error">{error()}</div>
+                                    </Show>
+                                    <div data-slot="login-actions">
+                                      <button type="button" onClick={closeLogin}>
+                                        Annulla
+                                      </button>
+                                      <button type="submit" disabled={submitting()}>
+                                        {submitting() ? "Caricamento..." : loginMode() === "signup" ? "Crea" : "Accedi"}
+                                      </button>
+                                    </div>
+                                  </form>
+                                  <button type="button" data-slot="tg-login-bottom" onClick={startTelegram}>
+                                    📱 Accedi con Telegram
+                                  </button>
+                                </div>
+                              }
+                            >
+                              <div data-slot="tg-polling">
+                                <div data-slot="tg-polling-icon">📱</div>
+                                <div data-slot="tg-polling-title">Apri Telegram</div>
+                                <div data-slot="tg-polling-sub">Clicca il link nel bot Telegram per accedere</div>
+                                <button type="button" onClick={() => window.open(tgBotUrl(), "_blank", "noopener")}>
+                                  Apri Telegram
+                                </button>
+                                <div data-slot="tg-polling-spinner">
+                                  <span class="loading-dot" />
+                                  <span class="loading-dot" />
+                                  <span class="loading-dot" />
+                                </div>
+                              </div>
+                            </Show>
+                          </>
+                        }
+                      >
+                        <div data-slot="approval-pending">
+                          <div data-slot="approval-icon">⏳</div>
+                          <div data-slot="approval-title">In attesa di approvazione</div>
+                          <div data-slot="approval-sub">
+                            Il tuo account è stato creato. Un admin deve approvarlo prima di accedere.
+                          </div>
+                          <div data-slot="approval-spinner">
+                            <span class="loading-dot" />
+                            <span class="loading-dot" />
+                            <span class="loading-dot" />
+                          </div>
+                          <button type="button" onClick={closeLogin}>
+                            Chiudi
                           </button>
                         </div>
-                      </form>
+                      </Show>
                     </Show>
                   </div>
                 }

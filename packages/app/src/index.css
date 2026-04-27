@@ -1182,6 +1182,219 @@
   border-radius: 6px;
 }
 
+/* Login panel with tabs */
+[data-component="workspace-switcher-popover"] [data-slot="login-panel"] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0;
+}
+
+/* Login tabs (Accedi / Crea account) */
+[data-component="workspace-switcher-popover"] [data-slot="login-tabs"] {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 3px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tab"] {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tab"][data-active="true"] {
+  background: rgba(255, 87, 34, 0.2);
+  color: #ff7a4c;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tab"]:hover:not([data-active="true"]) {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Telegram login button (not-signed-in section) */
+[data-component="workspace-switcher-popover"] [data-slot="tg-login"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #229ed9, #1b7db8);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+  margin-bottom: 8px;
+  width: 100%;
+  justify-content: center;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-login"]:hover {
+  background: linear-gradient(135deg, #32b4ed, #229ed9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(34, 158, 217, 0.4);
+}
+
+/* Divider between login options */
+[data-component="workspace-switcher-popover"] [data-slot="divider"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 11px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="divider"]::before,
+[data-component="workspace-switcher-popover"] [data-slot="divider"]::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Telegram login button (bottom of form) */
+[data-component="workspace-switcher-popover"] [data-slot="tg-login-bottom"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #229ed9, #1b7db8);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s;
+  margin-top: 8px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-login-bottom"]:hover {
+  background: linear-gradient(135deg, #32b4ed, #229ed9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(34, 158, 217, 0.3);
+}
+
+/* Telegram polling screen */
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+  text-align: center;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling-icon"] {
+  font-size: 36px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling-title"] {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling-sub"] {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.4;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling"] button {
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #229ed9, #1b7db8);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling"] button:hover {
+  background: linear-gradient(135deg, #32b4ed, #229ed9);
+}
+[data-component="workspace-switcher-popover"] [data-slot="tg-polling-spinner"] {
+  display: flex;
+  gap: 6px;
+}
+
+/* Approval pending screen */
+[data-component="workspace-switcher-popover"] [data-slot="approval-pending"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+  text-align: center;
+}
+[data-component="workspace-switcher-popover"] [data-slot="approval-icon"] {
+  font-size: 36px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="approval-title"] {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+[data-component="workspace-switcher-popover"] [data-slot="approval-sub"] {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.4;
+  max-width: 260px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="approval-spinner"] {
+  display: flex;
+  gap: 6px;
+}
+[data-component="workspace-switcher-popover"] [data-slot="approval-pending"] button {
+  padding: 8px 20px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 8px;
+  transition: all 0.15s;
+}
+[data-component="workspace-switcher-popover"] [data-slot="approval-pending"] button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Loading dots animation */
+@keyframes dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+.loading-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: rgba(255, 87, 34, 0.7);
+  border-radius: 50%;
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+.loading-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.loading-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-component="workspace-switcher-popover"],
   [data-component="workspace-switcher-popover"] * {
