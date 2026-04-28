@@ -41,12 +41,39 @@ export async function sendTelegramMessage(
   }
 }
 
-/** Resolve the admin chat_id the approval notifications go to. */
-function adminChatId(): number | null {
-  const raw = process.env.OPENCODE_ADMIN_CHAT_ID
-  if (!raw) return null
-  const n = Number.parseInt(raw, 10)
-  return Number.isFinite(n) ? n : null
+/**
+ * Resolve every admin chat_id we should ping for approval notifications.
+ *
+ * Two env vars feed this — either is sufficient:
+ *
+ *   • `OPENCODE_ADMIN_CHAT_ID`     — single chat (legacy / explicit override)
+ *   • `TELEGRAM_ADMIN_USER_IDS`    — comma- or whitespace-separated user
+ *                                    ids (also used to gate `/approve`,
+ *                                    `/reject`, etc. in telegram.ts).
+ *                                    Each user_id IS a valid private-chat
+ *                                    chat_id when the user has DM'd the bot.
+ *
+ * Returns the union, deduplicated. The previous version of this function
+ * returned `null` whenever `OPENCODE_ADMIN_CHAT_ID` wasn't set, even when
+ * `TELEGRAM_ADMIN_USER_IDS` contained valid admins — the symptom was
+ * /pendingusers working (it's gated on the user-ids env) while the
+ * automatic "new signup" notification silently no-op'd. That's the
+ * config trap this fallback closes.
+ */
+function adminChatIds(): number[] {
+  const ids = new Set<number>()
+  const single = process.env.OPENCODE_ADMIN_CHAT_ID
+  if (single) {
+    const n = Number.parseInt(single, 10)
+    if (Number.isFinite(n)) ids.add(n)
+  }
+  const many = process.env.TELEGRAM_ADMIN_USER_IDS ?? ""
+  for (const piece of many.split(/[,\s]+/)) {
+    if (!piece) continue
+    const n = Number.parseInt(piece, 10)
+    if (Number.isFinite(n)) ids.add(n)
+  }
+  return [...ids]
 }
 
 /**
@@ -65,9 +92,12 @@ export async function notifyAdminNewPendingUser(opts: {
   method: "password" | "telegram"
   created_at: number
 }): Promise<void> {
-  const chatId = adminChatId()
-  if (!chatId) {
-    log.warn("admin chat id not configured — cannot notify new pending user", { customer: opts.customer_id })
+  const chatIds = adminChatIds()
+  if (chatIds.length === 0) {
+    log.warn(
+      "admin chat ids not configured — cannot notify new pending user. Set OPENCODE_ADMIN_CHAT_ID or TELEGRAM_ADMIN_USER_IDS.",
+      { customer: opts.customer_id },
+    )
     return
   }
 
@@ -89,13 +119,41 @@ export async function notifyAdminNewPendingUser(opts: {
   const cid = opts.customer_id
   const keyboard: InlineKeyboard = [
     [
-      { text: "\u2705 Approva (2gg)", callback_data: `approve:${cid}:2` },
-      { text: "\uD83C\uDF81 Approva (7gg)", callback_data: `approve:${cid}:7` },
+      { text: "\u2705 Approva (2gg)", callback_data: `adm:approve:${cid}:2` },
+      { text: "\uD83C\uDF81 Approva (7gg)", callback_data: `adm:approve:${cid}:7` },
     ],
-    [{ text: "\u274C Rifiuta", callback_data: `reject:${cid}` }],
+    [{ text: "\u274C Rifiuta", callback_data: `adm:reject:${cid}` }],
   ]
 
-  await sendTelegramMessage(chatId, parts.join("\n"), "Markdown", { inline_keyboard: keyboard })
+  log.info("notifying admins of new pending user", {
+    admins: chatIds.length,
+    customer: opts.customer_id,
+  })
+  // Fan out in parallel — one wedged admin chat shouldn't block the others.
+  await Promise.all(
+    chatIds.map((chatId) =>
+      sendTelegramMessage(chatId, parts.join("\n"), "Markdown", { inline_keyboard: keyboard }).catch((err) => {
+        log.warn("notify admin failed", {
+          chatId,
+          customer: opts.customer_id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }),
+    ),
+  )
+}
+
+/**
+ * Diagnostic helper used by the /notify_test admin command — sends a
+ * "is the channel alive" message to every configured admin and returns
+ * how many slots received it.
+ */
+export async function pingAdminsForTest(text: string): Promise<{ delivered: number; configured: number; ids: number[] }> {
+  const ids = adminChatIds()
+  if (ids.length === 0) return { delivered: 0, configured: 0, ids: [] }
+  const results = await Promise.allSettled(ids.map((chatId) => sendTelegramMessage(chatId, text, "Markdown")))
+  const delivered = results.filter((r) => r.status === "fulfilled").length
+  return { delivered, configured: ids.length, ids }
 }
 
 /** DM the customer when the admin approves them (if we have their tg id). */

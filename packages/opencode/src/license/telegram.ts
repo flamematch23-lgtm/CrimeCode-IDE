@@ -9,7 +9,12 @@ import {
   revokeAllSessionsForCustomer,
   revokeSession,
 } from "./auth"
-import { notifyAdminNewPendingUser, notifyUserApproved, notifyUserRejected } from "./telegram-notify"
+import {
+  notifyAdminNewPendingUser,
+  notifyUserApproved,
+  notifyUserRejected,
+  pingAdminsForTest,
+} from "./telegram-notify"
 import { listTeamsForCustomer } from "./teams"
 import { helpUser, orderCreatedMessage, pickLang, recallLang, rememberLang, type Lang } from "./telegram-i18n"
 import {
@@ -163,11 +168,13 @@ We store only your Telegram handle, your order, and the license token signature.
 const HELP_ADMIN = `🛠️ *Admin commands* (you only)
 
 *Approvals*
-\`/pendingusers\` — list customers awaiting approval
+\`/pendingusers\` — list customers awaiting approval (one card per user, with buttons)
+\`/pendingnotify\` — re-send the inline-button card for every currently-pending user (catch-up after a deploy)
+\`/notify_test\` — diagnostic ping to all configured admin chats — confirms notifications are wired
 \`/approve <cus_id|@telegram|user_id> [days=2]\` — approve + start trial
 \`/reject <cus_id|@telegram|user_id> [reason]\` — reject the request
-   _Tip: when a new user signs up, the bot DMs you a card with inline_
-   _approve/reject buttons. These commands cover the same flow on demand._
+   _Tip: when a new user signs up, the bot DMs every admin in TELEGRAM_ADMIN_USER_IDS_
+   _(or OPENCODE_ADMIN_CHAT_ID if set) with an inline approve/reject card._
 
 *Orders & licenses*
 \`/confirm <order_id> [tx_hash]\` — confirm payment + auto-deliver token
@@ -977,6 +984,75 @@ async function handle(update: TgUpdate) {
     // ── Pending-approval flow (Telegram-side admin tools) ──
     // The dashboard at /license/admin already exposes the same data
     // through HTML — these mirror it for admins who live in Telegram.
+    case "notify_test":
+    case "notifytest": {
+      // Diagnostic — verify the admin notification channel actually
+      // works without having to wait for a real signup. Reports how
+      // many admins are configured and how many received the test
+      // message.
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      const r = await pingAdminsForTest(
+        "🧪 *Notify test*\n\nIf you see this, admin notifications are wired correctly.\n_Triggered by " +
+          (username ?? "admin " + userId) +
+          " at " +
+          new Date().toISOString().slice(0, 19) +
+          " UTC._",
+      )
+      if (r.configured === 0) {
+        await send(
+          chatId,
+          "⚠️ *No admin chat ids configured.*\n\nSet either `OPENCODE_ADMIN_CHAT_ID` or `TELEGRAM_ADMIN_USER_IDS` (comma-separated user ids) on the API server, then redeploy.",
+          "Markdown",
+        )
+        return
+      }
+      await send(
+        chatId,
+        `✅ Sent test notification to *${r.delivered}/${r.configured}* admin chat${r.configured === 1 ? "" : "s"}.\n\n` +
+          `Configured chat ids: ${r.ids.map((id) => "\`" + id + "\`").join(", ")}`,
+        "Markdown",
+      )
+      return
+    }
+    case "pendingnotify":
+    case "pending_notify": {
+      // Catch-up — re-send the new-pending-user notification for every
+      // currently-pending customer in the DB. Useful right after rolling
+      // out the notification fix so admin sees the cards for users who
+      // signed up BEFORE the fix landed.
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      const list = listPendingCustomers(50)
+      if (list.length === 0) {
+        await send(chatId, "✨ No pending users — nothing to re-notify.")
+        return
+      }
+      let sent = 0
+      for (const c of list) {
+        try {
+          await notifyAdminNewPendingUser({
+            customer_id: c.id,
+            username: c.username ?? null,
+            telegram: c.telegram,
+            telegram_user_id: c.telegram_user_id,
+            email: c.email,
+            method: c.username ? "password" : "telegram",
+            created_at: c.created_at,
+          })
+          sent++
+        } catch (err) {
+          log.warn("pendingnotify replay failed", {
+            customer: c.id,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+      await send(
+        chatId,
+        `📨 Re-sent the pending-approval card for *${sent}/${list.length}* customer${list.length === 1 ? "" : "s"}.`,
+        "Markdown",
+      )
+      return
+    }
     case "pendingusers":
     case "pending_users": {
       if (!isAdmin) { await send(chatId, "Not authorized."); return }
