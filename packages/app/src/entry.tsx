@@ -10,6 +10,12 @@ import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 import { AuthGate, buildAuthHeader, readCredentials } from "./pages/auth-gate"
 import { LiveCursors } from "./components/teams/live-cursors"
+import { hydrateTeamSessionFromStorage } from "./utils/team-session"
+
+// Re-attach to whatever team-session id was in localStorage before the
+// reload, restarting the heartbeat loop so we don't get reaped. Cheap and
+// idempotent — safe to run unconditionally on every entry boot.
+hydrateTeamSessionFromStorage()
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 

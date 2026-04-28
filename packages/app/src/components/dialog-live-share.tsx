@@ -20,8 +20,10 @@ import qrcode from "qrcode-generator"
 
 // Built-in presets for relay servers. Edit RELAY_PRESETS to add hosted defaults.
 // See RELAY-DEPLOY.md to spin one up on Fly.io / Cloudflare Tunnel / Docker.
+// LAN mode was removed (no token verification on the local WebSocket open
+// handler made it a security hole) — every preset must point at a real
+// relay URL now.
 const RELAY_PRESETS: { label: string; url: string }[] = [
-  { label: "LAN only", url: "" },
   { label: "Fly (jolly)", url: "wss://crimecode-relay-jolly.fly.dev" },
   { label: "Cloudflare tunnel hint", url: "wss://YOUR-TUNNEL.trycloudflare.com" },
 ]
@@ -476,7 +478,7 @@ export function DialogLiveShare() {
                         type="button"
                         class="text-xs px-2 py-0.5 rounded border border-border-base text-text-secondary hover:bg-fill-hover"
                         onClick={() => setRelayInput(p.url)}
-                        title={p.url || "Clear (LAN only)"}
+                        title={p.url}
                       >
                         {p.label}
                       </button>

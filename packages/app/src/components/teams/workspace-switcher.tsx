@@ -12,6 +12,7 @@ import {
 } from "../../utils/teams-client"
 import { CreateTeamDialog } from "./create-team-dialog"
 import { ManageTeamDialog } from "./manage-team-dialog"
+import { joinOrStartTeamSession, leaveActiveTeamSession } from "../../utils/team-session"
 
 const LOCAL_WORKSPACE_KEY = "client.active-workspace"
 const DEFAULT_PERSONAL = { kind: "personal", id: null } as const
@@ -137,6 +138,10 @@ export function WorkspaceSwitcher() {
     const w: ActiveWorkspace = { kind: "personal", id: null }
     setActive(w)
     writeActive(w)
+    // Tear down any team-live-session we were in (heartbeat loop +
+    // localStorage key) — leaving the session id behind would have
+    // live-cursors keep publishing into the wrong team's SSE channel.
+    void leaveActiveTeamSession()
     close()
   }
 
@@ -144,6 +149,11 @@ export function WorkspaceSwitcher() {
     const w: ActiveWorkspace = { kind: "team", id: team.id }
     setActive(w)
     writeActive(w)
+    // Eagerly join (or start) the team's live session so cursor sync,
+    // presence and the SSE event stream all activate without the user
+    // having to click anything else. Best-effort: any failure leaves
+    // the workspace selection in place but cursor sync stays off.
+    void joinOrStartTeamSession(team.id)
     close()
   }
 
