@@ -23,6 +23,72 @@ export interface TelegramUser {
   hash: string
 }
 
+export function validateTelegramAuth(initData: string, botToken: string): TelegramUser | null {
+  const params = new URLSearchParams(initData)
+  const hash = params.get("hash")
+  if (!hash) return null
+
+  const dataCheckString = Array.from(params.entries())
+    .filter(([key]) => key !== "hash")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n")
+
+  const encoder = new TextEncoder()
+  const key = crypto.subtle.importKey(
+    "raw",
+    encoder.encode(botToken),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const signature = crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(dataCheckString)
+  )
+  const expectedHash = Array.from(new Uint8Array(signature))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  if (expectedHash !== hash) return null
+
+  return {
+    id: Number(params.get("id")),
+    first_name: params.get("first_name") || undefined,
+    last_name: params.get("last_name") || undefined,
+    username: params.get("username") || undefined,
+    photo_url: params.get("photo_url") || undefined,
+    auth_date: Number(params.get("auth_date")),
+    hash,
+  }
+}
+
+export const TelegramProvider = (config: TelegramAuthConfig) => {
+  return {
+    type: "telegram" as const,
+    init: async (route: any) => {
+      const user = validateTelegramAuth(route.data || "", config.botToken)
+      if (!user) throw new Error("Invalid Telegram auth data")
+      return {
+        id: user.id.toString(),
+        email: `${user.username || user.id}@telegram.user`,
+        name: [user.first_name, user.last_name].filter(Boolean).join(" "),
+      }
+    },
+  }
+}
+
+export interface TelegramUser {
+  id: number
+  first_name?: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+  auth_date: number
+  hash: string
+}
+
 export const TelegramProvider = (config: TelegramAuthConfig) => {
   return {
     type: "telegram" as const,
