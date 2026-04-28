@@ -290,6 +290,31 @@ function runMigrations(db: Database): void {
       "v3.referral_claims.referred_credited_at",
       "ALTER TABLE referral_claims ADD COLUMN referred_credited_at INTEGER",
     ],
+    // v2.22.25: track in-progress payments. Before this, payment_offers
+    // only flipped from "open" → "matched_tx_hash IS NOT NULL" when the
+    // tx hit minConfirmations. The user got a single message at issuance
+    // and nothing in between — bad UX for slow chains. We now record:
+    //   * seen_tx_hash       — first tx that matched the expected amount
+    //   * seen_at            — when we first detected it
+    //   * seen_confirmations — last polled conf count (lets /status show progress)
+    //   * notified_seen_at   — gates the "payment received, awaiting confirmations"
+    //                          notification so it only fires once per offer
+    [
+      "v3.payment_offers.seen_tx_hash",
+      "ALTER TABLE payment_offers ADD COLUMN seen_tx_hash TEXT",
+    ],
+    [
+      "v3.payment_offers.seen_at",
+      "ALTER TABLE payment_offers ADD COLUMN seen_at INTEGER",
+    ],
+    [
+      "v3.payment_offers.seen_confirmations",
+      "ALTER TABLE payment_offers ADD COLUMN seen_confirmations INTEGER",
+    ],
+    [
+      "v3.payment_offers.notified_seen_at",
+      "ALTER TABLE payment_offers ADD COLUMN notified_seen_at INTEGER",
+    ],
   ]
   for (const [name, sql] of ops) {
     try {

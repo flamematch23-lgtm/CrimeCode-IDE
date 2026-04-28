@@ -1,6 +1,7 @@
 import { useFile } from "@/context/file"
 import { encodeFilePath } from "@/context/file/path"
 import { Collapsible } from "@opencode-ai/ui/collapsible"
+import { ContextMenu } from "@opencode-ai/ui/context-menu"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import {
@@ -19,6 +20,19 @@ import {
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import type { FileNode } from "@opencode-ai/sdk/v2"
+import { useLanguage } from "@/context/language"
+import { usePrompt } from "@/context/prompt"
+import { useSDK } from "@/context/sdk"
+import {
+  attachAsContext,
+  copyToClipboard,
+  isDesktop,
+  openWithApp,
+  revealInFileManager,
+  toAbsolute,
+  toFilename,
+  toRelative,
+} from "@/components/file-actions"
 
 const MAX_DEPTH = 128
 
@@ -384,6 +398,79 @@ export default function FileTree(props: {
     return out
   })
 
+  // Local helper component: wraps a file row in a right-click ContextMenu
+  // with the same five actions as the editor-tab menu (attach, copy
+  // path/relative-path/filename, open in VS Code, reveal). Folders skip
+  // the menu — those don't have file content / open-in semantics.
+  const FileNodeWithMenu = (props2: {
+    node: FileNode
+    active: boolean
+    kind?: Kind
+    children: JSXElement
+  }): JSXElement => {
+    const language = useLanguage()
+    const prompt = usePrompt()
+    const sdk = useSDK()
+
+    const onAttach = () => attachAsContext(prompt, file.normalize(props2.node.path))
+    const onCopyAbsolute = () => {
+      const abs = props2.node.absolute || toAbsolute(file, sdk.directory, props2.node.path)
+      void copyToClipboard(abs, language.t("editor.menu.path"), language.t)
+    }
+    const onCopyRelative = () =>
+      void copyToClipboard(toRelative(file, props2.node.path), language.t("editor.menu.relativePath"), language.t)
+    const onCopyName = () => void copyToClipboard(toFilename(props2.node.path), language.t("editor.menu.fileName"), language.t)
+    const onOpenInVSCode = () => {
+      const abs = props2.node.absolute || toAbsolute(file, sdk.directory, props2.node.path)
+      void openWithApp(abs, "code", "VS Code", language.t)
+    }
+    const onReveal = () => {
+      const abs = props2.node.absolute || toAbsolute(file, sdk.directory, props2.node.path)
+      void revealInFileManager(abs, language.t)
+    }
+
+    return (
+      <ContextMenu>
+        <ContextMenu.Trigger>{props2.children}</ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Content>
+            <ContextMenu.Item onSelect={onAttach}>
+              <ContextMenu.ItemLabel>{language.t("editor.menu.attachAsContext")}</ContextMenu.ItemLabel>
+            </ContextMenu.Item>
+            <ContextMenu.Separator />
+            <ContextMenu.Item onSelect={onCopyAbsolute}>
+              <ContextMenu.ItemLabel>{language.t("editor.menu.copyPath")}</ContextMenu.ItemLabel>
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={onCopyRelative}>
+              <ContextMenu.ItemLabel>{language.t("editor.menu.copyRelativePath")}</ContextMenu.ItemLabel>
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={onCopyName}>
+              <ContextMenu.ItemLabel>{language.t("editor.menu.copyName")}</ContextMenu.ItemLabel>
+            </ContextMenu.Item>
+            <Show when={isDesktop()}>
+              <ContextMenu.Separator />
+              <ContextMenu.Sub>
+                <ContextMenu.SubTrigger>
+                  <ContextMenu.ItemLabel>{language.t("editor.menu.openIn")}</ContextMenu.ItemLabel>
+                </ContextMenu.SubTrigger>
+                <ContextMenu.Portal>
+                  <ContextMenu.SubContent>
+                    <ContextMenu.Item onSelect={onOpenInVSCode}>
+                      <ContextMenu.ItemLabel>{language.t("editor.menu.openInVSCode")}</ContextMenu.ItemLabel>
+                    </ContextMenu.Item>
+                    <ContextMenu.Item onSelect={onReveal}>
+                      <ContextMenu.ItemLabel>{language.t("editor.menu.openInExplorer")}</ContextMenu.ItemLabel>
+                    </ContextMenu.Item>
+                  </ContextMenu.SubContent>
+                </ContextMenu.Portal>
+              </ContextMenu.Sub>
+            </Show>
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu>
+    )
+  }
+
   return (
     <div data-component="filetree" class={`flex flex-col gap-0.5 ${props.class ?? ""}`}>
       <For each={nodes()}>
@@ -452,18 +539,19 @@ export default function FileTree(props: {
                 </Collapsible>
               </Match>
               <Match when={node.type === "file"}>
-                <FileTreeNode
-                  node={node}
-                  level={level}
-                  active={props.active}
-                  nodeClass={props.nodeClass}
-                  draggable={draggable()}
-                  kinds={kinds()}
-                  marks={marks()}
-                  as="button"
-                  type="button"
-                  onClick={() => props.onFileClick?.(node)}
-                >
+                <FileNodeWithMenu node={node} active={active()} kind={kind()}>
+                  <FileTreeNode
+                    node={node}
+                    level={level}
+                    active={props.active}
+                    nodeClass={props.nodeClass}
+                    draggable={draggable()}
+                    kinds={kinds()}
+                    marks={marks()}
+                    as="button"
+                    type="button"
+                    onClick={() => props.onFileClick?.(node)}
+                  >
                   <div class="w-4 shrink-0" />
                   <Switch>
                     <Match when={node.ignored}>
@@ -496,7 +584,8 @@ export default function FileTree(props: {
                       </span>
                     </Match>
                   </Switch>
-                </FileTreeNode>
+                  </FileTreeNode>
+                </FileNodeWithMenu>
               </Match>
             </Switch>
           )

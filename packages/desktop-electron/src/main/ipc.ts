@@ -208,6 +208,15 @@ export function registerIpcHandlers(deps: Deps) {
     })
   })
 
+  // Reveal a file or folder in the OS file manager (Explorer on Windows,
+  // Finder on macOS, default file manager on Linux). Different from
+  // `open-path` which opens the file with its default app — this one
+  // opens the *parent folder* with the target highlighted.
+  ipcMain.handle("show-item-in-folder", async (_event: IpcMainInvokeEvent, path: string) => {
+    if (!path || typeof path !== "string") return
+    shell.showItemInFolder(path)
+  })
+
   ipcMain.handle("read-clipboard-image", () => {
     const image = clipboard.readImage()
     if (image.isEmpty()) return null

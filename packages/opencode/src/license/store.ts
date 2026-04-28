@@ -380,6 +380,14 @@ export interface PaymentOfferRow {
   matched_tx_hash: string | null
   matched_at: number | null
   created_at: number
+  // Payment-in-progress tracking (set when the poller sees the tx for the
+  // first time but it doesn't yet have enough confirmations). Distinct
+  // from `matched_tx_hash` which only flips at issuance. See migrations
+  // v3.payment_offers.seen_* for rationale.
+  seen_tx_hash: string | null
+  seen_at: number | null
+  seen_confirmations: number | null
+  notified_seen_at: number | null
 }
 
 export function attachPaymentOffer(opts: {
