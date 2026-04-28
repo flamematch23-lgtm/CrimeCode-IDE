@@ -26,6 +26,7 @@ const log = Log.create({ service: "server" })
 
 export const SessionRoutes = lazy(() =>
   new Hono()
+    .get('/health', (c) => c.json({ ok: true, ts: Date.now() }))
     .get(
       "/",
       describeRoute({
