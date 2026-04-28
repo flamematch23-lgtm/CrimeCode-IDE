@@ -159,9 +159,18 @@ export namespace Server {
         //   - Anyone wanting to see the deployed version + commit hash.
         // Returns only {healthy, version, commit} — no PII, no secrets.
         if (c.req.path === "/global/health") return next()
+        // /account/me/resolve-referral is intentionally public — it's
+        // called by the /r/<CODE> referral-landing page BEFORE the user
+        // signs up (so they can see "🎁 Valid! +3 days bonus" before
+        // committing). Returns only bonus constants and a valid/invalid
+        // bit for the supplied code; no PII, no enumeration risk (codes
+        // are 8-32 chars from a 32-char alphabet).
+        if (c.req.path === "/account/me/resolve-referral") return next()
         // The license sub-app has its own auth layer (Bearer JWT for user
-        // endpoints, admin Basic Auth for admin endpoints). Let it through
-        // unconditionally — it enforces its own authz downstream.
+        // endpoints, admin Basic Auth for admin endpoints, and explicit
+        // public sub-paths like /license/auth/start, /license/order/.../status,
+        // /license/order/:id/status). Let it through unconditionally — it
+        // enforces its own authz downstream.
         if (c.req.path.startsWith("/license/")) return next()
         const password = Flag.OPENCODE_SERVER_PASSWORD
         if (!password) return next()
