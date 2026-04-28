@@ -60,13 +60,20 @@ jobs:
 
       - name: Health check
         run: |
-          # Server is password-gated; 200 (no auth) and 401 (auth required)
-          # both prove the process is listening. Anything else = dead.
+          # Hit the public canonical URL (api.crimecode.cc) — the renderer
+          # talks to that, so the deploy is only "good" if DNS, the
+          # crimecode.cc → Fly CNAME, and the custom-domain SSL cert all
+          # work. The bare Fly URL would pass even with a broken cert or
+          # missing DNS, masking real production breakage.
+          #
+          # 200 (no auth) or 401 (auth required) both prove the process
+          # is listening behind a working TLS termination — anything else
+          # is dead.
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://crimecode-api.fly.dev/ || echo 000)
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://api.crimecode.cc/ || echo 000)
             case "$code" in
               200|401)
-                echo "API responsive (HTTP $code)"
+                echo "API responsive at api.crimecode.cc (HTTP $code)"
                 exit 0
                 ;;
               *)
