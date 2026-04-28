@@ -9,6 +9,7 @@ import {
   logout as logoutSession,
 } from "../utils/teams-client"
 import { applyCloudLicenseIfDesktop, configureCloudSyncIfDesktop } from "../utils/cloud-sync"
+import { clearStoredReferral, readStoredReferral } from "./referral-landing"
 
 /**
  * AuthGate — wraps the AppInterface. Two sign-in paths:
@@ -143,6 +144,31 @@ async function pollTgAuth(
   return (await res.json()) as never
 }
 
+/**
+ * Read a referral code from either the URL (?ref=ABCD…) or from the
+ * localStorage stash that the /r/<CODE> landing page wrote. URL wins
+ * because a freshly-clicked link should override an old stale stash.
+ */
+function readInitialReferral(): string {
+  if (typeof window === "undefined") return ""
+  try {
+    const url = new URL(window.location.href)
+    const fromQuery = (url.searchParams.get("ref") ?? "").trim().toUpperCase()
+    if (fromQuery && /^[A-Z0-9]{4,32}$/.test(fromQuery)) return fromQuery
+  } catch {
+    /* ignore */
+  }
+  return readStoredReferral() ?? ""
+}
+
+async function resolveReferral(
+  code: string,
+): Promise<{ valid: false } | { valid: true; bonus_for_you: number; bonus_for_them: number }> {
+  const res = await fetch(`${DEFAULT_URL}/account/me/resolve-referral?code=${encodeURIComponent(code)}`)
+  if (!res.ok) return { valid: false }
+  return (await res.json()) as never
+}
+
 export function AuthGate(props: { children: (creds: Credentials) => JSX.Element }) {
   const [creds, setCreds] = createSignal<Credentials | null>(null)
   const [checking, setChecking] = createSignal(true)
@@ -158,6 +184,14 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
   const [accUsername, setAccUsername] = createSignal("")
   const [accPassword, setAccPassword] = createSignal("")
   const [accTelegram, setAccTelegram] = createSignal("")
+  // Referral code: prefilled from localStorage (set by /r/<CODE> landing) or
+  // from a ?ref=<CODE> query param so deep-link survives even if the visitor
+  // skipped the landing page entirely.
+  const [accReferral, setAccReferral] = createSignal(readInitialReferral())
+  // Live "this code is valid" status hint, populated by GET /resolve-referral.
+  const [referralStatus, setReferralStatus] = createSignal<
+    null | { kind: "valid"; bonusForYou: number; bonusForThem: number } | { kind: "invalid" } | { kind: "checking" }
+  >(null)
   const [submitting, setSubmitting] = createSignal(false)
 
   /**
@@ -195,6 +229,48 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
     setPolling(false)
   }
   onCleanup(stopPoll)
+
+  // If a referral was pre-filled, switch the form straight to "Crea account"
+  // mode and resolve the code so the user sees the live "+3 days bonus"
+  // confirmation. Saves a click on the toggle and primes social-proof copy.
+  onMount(() => {
+    const ref = accReferral()
+    if (ref) {
+      setMode("account")
+      setAccountMode("signup")
+      void liveCheckReferral(ref)
+    }
+  })
+
+  let referralDebounce: ReturnType<typeof setTimeout> | null = null
+  function onReferralInput(value: string) {
+    const trimmed = value.trim().toUpperCase()
+    setAccReferral(trimmed)
+    setReferralStatus(null)
+    if (referralDebounce) clearTimeout(referralDebounce)
+    if (!trimmed) return
+    if (!/^[A-Z0-9]{4,32}$/.test(trimmed)) {
+      setReferralStatus({ kind: "invalid" })
+      return
+    }
+    setReferralStatus({ kind: "checking" })
+    referralDebounce = setTimeout(() => {
+      void liveCheckReferral(trimmed)
+    }, 350)
+  }
+
+  async function liveCheckReferral(code: string) {
+    try {
+      const r = await resolveReferral(code)
+      if (r.valid) {
+        setReferralStatus({ kind: "valid", bonusForYou: r.bonus_for_you, bonusForThem: r.bonus_for_them })
+      } else {
+        setReferralStatus({ kind: "invalid" })
+      }
+    } catch {
+      setReferralStatus({ kind: "invalid" })
+    }
+  }
 
   onMount(async () => {
     const stored = readCredentials()
@@ -318,8 +394,15 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
         username: trimmedUser,
         password: accPassword(),
         ...(accountMode() === "signup" && accTelegram().trim() ? { telegram: accTelegram().trim() } : {}),
+        ...(accountMode() === "signup" && accReferral().trim() ? { referral_code: accReferral().trim() } : {}),
         device_label: `web (${navigator.userAgent.slice(0, 60)})`,
       })
+      // Whatever happens after a successful signup, the stashed referral
+      // code has now done its job — clear it so a future returning visitor
+      // doesn't re-redeem on a different account.
+      if (accountMode() === "signup" && accReferral().trim()) {
+        clearStoredReferral()
+      }
       if (result.status === "pending") {
         // Admin hasn't approved yet — park on the pending screen and
         // poll /auth/status until the decision lands.
@@ -656,6 +739,40 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
                             placeholder="@yourhandle"
                           />
                         </label>
+                        <label style={labelStyle}>
+                          <span>Referral code (optional)</span>
+                          <input
+                            type="text"
+                            value={accReferral()}
+                            onInput={(e) => onReferralInput(e.currentTarget.value)}
+                            style={inputStyle}
+                            placeholder="e.g. SHQX3J5X"
+                            maxlength="32"
+                            autocomplete="off"
+                          />
+                          <Show
+                            when={
+                              referralStatus()?.kind === "valid"
+                                ? (referralStatus() as { kind: "valid"; bonusForYou: number; bonusForThem: number })
+                                : null
+                            }
+                          >
+                            {(s) => (
+                              <span data-slot="referral-ok" style={referralOkStyle}>
+                                🎁 Valid! You'll get <strong>+{s().bonusForYou} bonus trial days</strong> on top
+                                of your free trial.
+                              </span>
+                            )}
+                          </Show>
+                          <Show when={referralStatus()?.kind === "checking"}>
+                            <span style={referralCheckingStyle}>Checking…</span>
+                          </Show>
+                          <Show when={referralStatus()?.kind === "invalid" && accReferral().length > 0}>
+                            <span data-slot="referral-bad" style={referralBadStyle}>
+                              That code doesn't exist. You can leave it empty.
+                            </span>
+                          </Show>
+                        </label>
                       </Show>
                       <button type="submit" disabled={submitting()} style={primaryButtonStyle}>
                         {submitting()
@@ -951,6 +1068,29 @@ const toggleModeStyle: JSX.CSSProperties = {
   margin: "14px 0 0 0",
   "font-size": "13px",
   color: "rgba(255,255,255,0.6)",
+}
+const referralOkStyle: JSX.CSSProperties = {
+  display: "block",
+  "margin-top": "6px",
+  padding: "6px 10px",
+  background: "rgba(80, 200, 120, 0.10)",
+  border: "1px solid rgba(80, 200, 120, 0.35)",
+  "border-radius": "6px",
+  color: "#7adf9c",
+  "font-size": "12px",
+  "line-height": "1.4",
+}
+const referralBadStyle: JSX.CSSProperties = {
+  display: "block",
+  "margin-top": "6px",
+  "font-size": "12px",
+  color: "rgba(255, 138, 138, 0.85)",
+}
+const referralCheckingStyle: JSX.CSSProperties = {
+  display: "block",
+  "margin-top": "6px",
+  "font-size": "12px",
+  color: "rgba(255,255,255,0.45)",
 }
 const newHereStyle: JSX.CSSProperties = {
   display: "block",

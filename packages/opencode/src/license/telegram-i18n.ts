@@ -46,6 +46,7 @@ The IDE built for fraud researchers and security pros — by the team, for the t
 \`/myorders\` — list your last orders
 \`/mylicense\` — re-fetch your activation token (auto-applied on login)
 \`/referral\` — your invite code + bonus-trial-days history
+\`/redeem <CODE>\` — apply a friend's referral code to your account (24h post-signup)
 \`/teams\` — list your teams
 
 🔁 *Account & sync*
@@ -87,6 +88,7 @@ L'IDE costruito per ricercatori di frodi e professionisti della sicurezza — da
 \`/myorders\` — elenca i tuoi ultimi ordini
 \`/mylicense\` — re-invia il token di attivazione (applicato in automatico al login)
 \`/referral\` — il tuo codice invito + storia dei bonus
+\`/redeem <CODICE>\` — applica un codice invito di un amico al tuo account (entro 24h dalla registrazione)
 \`/teams\` — elenca i tuoi team
 
 🔁 *Account e sync*

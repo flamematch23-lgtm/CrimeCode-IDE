@@ -6,14 +6,17 @@ import { useServer } from "@/context/server"
 import {
   getAccountMe,
   getAccountDevices,
+  getReferralInfo,
   getSyncMe,
   getSyncStatus,
   hasAccountSession,
+  redeemReferralCode,
   revokeDevice,
   logoutAllDevices,
   triggerSyncNow,
   type AccountDevice,
   type AccountMe,
+  type ReferralInfo,
   type SyncMe,
 } from "@/utils/account-client"
 import { clearCredentials } from "@/pages/auth-gate"
@@ -69,6 +72,19 @@ export default function AccountPage() {
     return getSyncStatus(creds)
   })
 
+  // Referral info — shareable code, claim history, eligibility flag for the
+  // "redeem a code from a friend" form below.
+  const [referral, referralActions] = createResource(signedIn, async (yes) => {
+    if (!yes) return null
+    try {
+      return await getReferralInfo()
+    } catch {
+      return null
+    }
+  })
+
+  const [redeemCode, setRedeemCode] = createSignal("")
+
   const [busy, setBusy] = createSignal<string | null>(null)
   const [toast, setToast] = createSignal<string | null>(null)
 
@@ -104,6 +120,62 @@ export default function AccountPage() {
       window.location.reload()
     } catch (err) {
       flash("Logout failed: " + (err instanceof Error ? err.message : String(err)))
+      setBusy(null)
+    }
+  }
+
+  async function onCopyToClipboard(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      flash(`${what} copied to clipboard.`)
+    } catch {
+      // Fallback: legacy execCommand for older browsers/electron with disabled clipboard.
+      const ta = document.createElement("textarea")
+      ta.value = text
+      ta.style.position = "fixed"
+      ta.style.opacity = "0"
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand("copy")
+        flash(`${what} copied to clipboard.`)
+      } finally {
+        document.body.removeChild(ta)
+      }
+    }
+  }
+
+  function onShareViaTelegram(url: string) {
+    const text = encodeURIComponent(`Try CrimeCode IDE — sign up via my link and we both get bonus trial days: ${url}`)
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${text}`, "_blank", "noopener")
+  }
+
+  async function onRedeemCode() {
+    const code = redeemCode().trim().toUpperCase()
+    if (!code || !/^[A-Z0-9]{4,32}$/.test(code)) {
+      flash("Inserisci un codice valido (4–32 caratteri).")
+      return
+    }
+    setBusy("redeem-referral")
+    try {
+      const r = await redeemReferralCode(code)
+      flash(`🎁 Bonus applied: +${r.referred_bonus_days} days`)
+      setRedeemCode("")
+      referralActions.refetch()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // Surface a friendlier message for the most common server reasons.
+      const friendly = msg.includes("self_referral")
+        ? "You can't redeem your own code."
+        : msg.includes("already_claimed") || msg.includes("ineligible")
+          ? "You've already redeemed a code on this account."
+          : msg.includes("monthly_cap")
+            ? "The referrer has hit their monthly cap. Try a different code."
+            : msg.includes("unknown_code") || msg.includes("bad_code")
+              ? "That code doesn't exist."
+              : msg
+      flash("Redeem failed: " + friendly)
+    } finally {
       setBusy(null)
     }
   }
@@ -254,6 +326,30 @@ export default function AccountPage() {
               <Show when={sync()} fallback={<Empty>Linked. No events synced yet — try opening a session.</Empty>}>
                 {(s) => <SyncCard stats={s()} />}
               </Show>
+            </Show>
+          </Section>
+
+          {/* ───────── Referral ───────── */}
+          <Section
+            title="🎁 Refer a friend"
+            onRefresh={() => referralActions.refetch()}
+            loading={referral.loading}
+          >
+            <Show
+              when={referral()}
+              fallback={<Empty>Loading referral info…</Empty>}
+            >
+              {(rRes) => (
+                <ReferralCard
+                  referral={rRes()!}
+                  redeemCode={redeemCode()}
+                  setRedeemCode={setRedeemCode}
+                  onCopy={onCopyToClipboard}
+                  onShareTelegram={onShareViaTelegram}
+                  onRedeem={onRedeemCode}
+                  busyKey={busy()}
+                />
+              )}
             </Show>
           </Section>
         </Show>
@@ -422,6 +518,109 @@ function SyncCard(props: { stats: SyncMe }) {
               )}
             </For>
           </ul>
+        </div>
+      </Show>
+    </div>
+  )
+}
+
+function ReferralCard(props: {
+  referral: ReferralInfo
+  redeemCode: string
+  setRedeemCode: (v: string) => void
+  onCopy: (text: string, what: string) => void
+  onShareTelegram: (url: string) => void
+  onRedeem: () => void
+  busyKey: string | null
+}) {
+  const totalEarned = () => props.referral.claims.reduce((acc, c) => acc + c.referrer_bonus_days, 0)
+  const claimsCount = () => props.referral.claims.length
+  return (
+    <div class="px-4 py-4 space-y-5">
+      <p class="text-12-regular text-text-subtle">
+        Share your code or link with a friend. They get{" "}
+        <strong class="text-text-strong">+{props.referral.bonus.referred} days</strong> bonus on
+        signup, and you get <strong class="text-text-strong">+{props.referral.bonus.referrer} days</strong>{" "}
+        when they join. Cap: {props.referral.bonus.monthlyCap} bonus days per 30 rolling days.
+      </p>
+
+      {/* Code + share link, both with copy buttons */}
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="text-12-medium text-text-subtle w-20">Your code</span>
+          <code class="flex-1 font-mono text-13-medium text-text-strong px-3 py-2 rounded border border-border-base bg-surface-base">
+            {props.referral.code}
+          </code>
+          <Button variant="secondary" onClick={() => props.onCopy(props.referral.code, "Code")}>
+            Copy
+          </Button>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-12-medium text-text-subtle w-20">Share link</span>
+          <code class="flex-1 font-mono text-12-regular text-text-strong px-3 py-2 rounded border border-border-base bg-surface-base truncate">
+            {props.referral.shareUrl}
+          </code>
+          <Button variant="secondary" onClick={() => props.onCopy(props.referral.shareUrl, "Link")}>
+            Copy
+          </Button>
+          <Button variant="secondary" onClick={() => props.onShareTelegram(props.referral.shareUrl)}>
+            ✈️ Telegram
+          </Button>
+        </div>
+      </div>
+
+      {/* Counters */}
+      <dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-12-regular">
+        <Row label="Claims">
+          <span class="text-text-strong">{claimsCount()}</span>
+        </Row>
+        <Row label="Total earned">
+          <span class="text-text-strong">{totalEarned()} days</span>
+        </Row>
+      </dl>
+
+      {/* Recent claims list */}
+      <Show when={claimsCount() > 0}>
+        <div>
+          <p class="text-12-medium text-text-subtle mb-2">Recent claims</p>
+          <ul class="text-12-regular text-text-base divide-y divide-border-base border border-border-base rounded">
+            <For each={props.referral.claims.slice(0, 5)}>
+              {(c) => (
+                <li class="px-3 py-2 flex items-center justify-between gap-3">
+                  <code class="font-mono">{shortId(c.referred_customer_id)}</code>
+                  <span class="text-text-subtle">{humanAgo(Date.now() - c.claimed_at * 1000)}</span>
+                  <span class="text-text-strong">+{c.referrer_bonus_days}d</span>
+                </li>
+              )}
+            </For>
+          </ul>
+        </div>
+      </Show>
+
+      {/* "Got a code from a friend?" — only shown when eligible */}
+      <Show when={props.referral.eligibleToRedeem}>
+        <div class="pt-3 border-t border-border-base space-y-2">
+          <p class="text-12-medium text-text-strong">Got a code from a friend?</p>
+          <p class="text-12-regular text-text-subtle">
+            Redeem it within 24 hours of signup to claim your bonus +{props.referral.bonus.referred} days.
+          </p>
+          <div class="flex items-center gap-2">
+            <input
+              type="text"
+              class="flex-1 font-mono text-13-medium text-text-strong px-3 py-2 rounded border border-border-base bg-surface-base"
+              value={props.redeemCode}
+              maxlength="32"
+              placeholder="e.g. SHQX3J5X"
+              onInput={(e) => props.setRedeemCode(e.currentTarget.value.toUpperCase())}
+            />
+            <Button
+              variant="primary"
+              disabled={props.busyKey === "redeem-referral" || !props.redeemCode.trim()}
+              onClick={() => props.onRedeem()}
+            >
+              {props.busyKey === "redeem-referral" ? "Redeeming…" : "Redeem"}
+            </Button>
+          </div>
         </div>
       </Show>
     </div>

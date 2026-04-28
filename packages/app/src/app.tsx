@@ -52,6 +52,7 @@ import { useCheckServerHealth } from "./utils/server-health"
 const HomeRoute = lazy(() => import("@/pages/home"))
 const SecurityRoute = lazy(() => import("@/pages/security"))
 const AccountRoute = lazy(() => import("@/pages/account"))
+const ReferralLandingRoute = lazy(() => import("@/pages/referral-landing"))
 const Session = lazy(() => import("@/pages/session"))
 const Loading = () => <div class="size-full" />
 
@@ -309,6 +310,7 @@ export function AppInterface(props: {
                   <Route path="/" component={HomeRoute} />
                   <Route path="/security" component={SecurityRoute} />
                   <Route path="/account" component={AccountRoute} />
+                  <Route path="/r/:code" component={ReferralLandingRoute} />
                   <Route path="/:dir" component={DirectoryLayout}>
                     <Route path="/" component={SessionIndexRoute} />
                     <Route path="/session/:id?" component={SessionRoute} />

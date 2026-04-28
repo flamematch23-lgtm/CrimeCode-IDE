@@ -153,6 +153,8 @@ export class AuthService {
     password: string
     telegram?: string
     email?: string
+    /** Referral code from a /r/<CODE> link, optional. */
+    referral_code?: string
   }): Promise<
     { status: "ok"; token: string; exp: number; customer_id: string } | { status: "pending"; customer_id: string }
   > {

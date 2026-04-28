@@ -146,6 +146,45 @@ export function getSyncMe(): Promise<SyncMe> {
   return getJSON<SyncMe>("/sync/me")
 }
 
+export interface ReferralBonus {
+  referrer: number
+  referred: number
+  monthlyCap: number
+}
+
+export interface ReferralClaim {
+  referred_customer_id: string
+  claimed_at: number
+  referrer_bonus_days: number
+}
+
+export interface ReferralInfo {
+  code: string
+  shareUrl: string
+  bonus: ReferralBonus
+  eligibleToRedeem: boolean
+  claims: ReferralClaim[]
+}
+
+export function getReferralInfo(): Promise<ReferralInfo> {
+  return getJSON<ReferralInfo>("/account/me/referral")
+}
+
+/**
+ * Apply a referral code post-signup. Server-side eligibility rules:
+ *   - Caller signed up <24h ago.
+ *   - Caller hasn't already redeemed a code.
+ *   - Code exists, isn't your own, and the referrer hasn't hit the cap.
+ * Returns the bonus days awarded to each side.
+ */
+export function redeemReferralCode(code: string): Promise<{
+  ok: true
+  referrer_bonus_days: number
+  referred_bonus_days: number
+}> {
+  return postJSON("/account/me/redeem-referral", { code })
+}
+
 export interface SyncStatusSnapshot {
   configured: boolean
   lastPushAt: number | null

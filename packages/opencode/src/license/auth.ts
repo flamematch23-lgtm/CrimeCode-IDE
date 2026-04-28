@@ -3,6 +3,7 @@ import { Log } from "../util/log"
 import { getDb } from "./db"
 import { claimPendingInvitesForCustomer } from "./teams"
 import { notifyNewDeviceSignIn } from "./telegram-notify"
+import { claimAndApplyReferral, consumePendingReferralBonus } from "./referrals"
 
 const log = Log.create({ service: "license-auth" })
 
@@ -366,6 +367,13 @@ export interface SignUpInput {
   email?: string | null
   /** Device description shown in the sessions list. */
   device_label?: string | null
+  /**
+   * Optional referral code typed in the signup form (or pre-filled from
+   * the /r/<CODE> landing page). When present and valid we emit a
+   * referral_claims row + queue the bonus days for both sides; the
+   * referred user's bonus is consumed when the admin approves their trial.
+   */
+  referral_code?: string | null
 }
 
 export interface AuthenticatedSession {
@@ -448,6 +456,11 @@ export function listPendingCustomers(limit = 100): PendingCustomer[] {
  * Mark a customer as approved, record who approved them and the trial
  * length chosen at approval time. Returns the row values the caller
  * needs to kick off a trial + notify the user.
+ *
+ * If the customer has accumulated `pending_referral_days` (because they
+ * signed up via /r/<CODE>), those days are folded into the trial length
+ * before persisting — so the trial token they receive is already +N days
+ * longer than the admin-chosen baseline.
  */
 export function approveCustomer(
   customerId: string,
@@ -457,6 +470,10 @@ export function approveCustomer(
   telegram_user_id: number | null
   telegram: string | null
   was_already_approved: boolean
+  /** Effective trial length after folding in any queued referral bonus. */
+  trial_days_total: number
+  /** Days added on top of `opts.trialDays` from the referral pool. */
+  referral_bonus_days: number
 } | null {
   const db = getDb()
   const before = db
@@ -466,14 +483,25 @@ export function approveCustomer(
     .get(customerId)
   if (!before) return null
   const now = Math.floor(Date.now() / 1000)
+
+  // Pull any queued referral bonus and fold it into the trial length.
+  // Approving a customer who's already approved should not double-credit;
+  // consumePendingReferralBonus is a one-shot read-and-zero so even
+  // accidental re-approvals are safe.
+  const wasAlreadyApproved = before.approval_status === "approved"
+  const bonus = wasAlreadyApproved ? 0 : consumePendingReferralBonus(customerId)
+  const totalDays = opts.trialDays + bonus
+
   db.prepare(
     "UPDATE customers SET approval_status = 'approved', approved_at = ?, approved_by = ?, approved_trial_days = ?, rejected_reason = NULL WHERE id = ?",
-  ).run(now, opts.approvedBy, opts.trialDays, customerId)
+  ).run(now, opts.approvedBy, totalDays, customerId)
   return {
     id: customerId,
     telegram_user_id: before.telegram_user_id,
     telegram: before.telegram,
-    was_already_approved: before.approval_status === "approved",
+    was_already_approved: wasAlreadyApproved,
+    trial_days_total: totalDays,
+    referral_bonus_days: bonus,
   }
 }
 
@@ -551,6 +579,32 @@ export function signUpWithPassword(input: SignUpInput): SignUpResult {
       "INSERT INTO password_accounts (customer_id, username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?)",
     ).run(customerId, input.username, hash, salt, now)
   })()
+
+  // Apply a referral code if the form (or /r/<CODE> redirect) supplied one.
+  // Failures are non-fatal — a bad code shouldn't block signup; we just log
+  // it and continue. The bonus for the referred user lands as "queued" and
+  // gets folded into the trial when the admin approves; the referrer's
+  // bonus is applied to their license immediately if active.
+  const refCode = (input.referral_code ?? "").trim().toUpperCase()
+  if (refCode) {
+    try {
+      const r = claimAndApplyReferral({ code: refCode, referredCustomerId: customerId! })
+      if (r.ok) {
+        log.info("referral redeemed at signup", {
+          customer: customerId,
+          referrer: r.referrer_customer_id,
+          bonus_referrer: r.referrer_bonus_days,
+          bonus_referred: r.referred_bonus_days,
+        })
+      } else {
+        log.info("referral redeem skipped at signup", { reason: r.reason, code: refCode })
+      }
+    } catch (err) {
+      log.warn("referral redeem failed at signup", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
 
   // Read back the approval state — an existing customer row (matched via
   // telegram handle) may already be approved, in which case we skip

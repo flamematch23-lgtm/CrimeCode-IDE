@@ -142,6 +142,7 @@ export type ElectronAPI = {
       username: string
       password: string
       telegram?: string
+      referral_code?: string
     }) => Promise<
       { status: "ok"; token: string; exp: number; customer_id: string } | { status: "pending"; customer_id: string }
     >

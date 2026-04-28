@@ -37,6 +37,7 @@ import {
 } from "./store"
 import { CloudEventQueries } from "../sync/cloud-event-queries"
 import {
+  claimAndApplyReferral,
   claimReferral,
   getOrCreateReferralCode,
   listReferralsByCustomer,
@@ -422,6 +423,13 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
       await editOriginal(`🚫 Ordine \`${a1}\` cancellato`)
       return
     }
+    if (verb === "copyref" && a1) {
+      // Telegram doesn't expose a clipboard API to bots, so the best we
+      // can do is echo the code in a fresh message + show it in the toast
+      // alert so the user can long-press to copy from there.
+      await ack(`📋 ${a1} — long-press to copy`, true)
+      return
+    }
     return ack("Azione sconosciuta", true)
   }
 
@@ -567,11 +575,16 @@ async function handle(update: TgUpdate) {
       _newSignup = true
       const refCode = text.match(/^\/start\s+ref_([A-Z0-9]{4,32})\b/i)?.[1]
       if (refCode) {
-        const r = claimReferral({ code: refCode, referredCustomerId: customer.id })
+        // Use the combined claim-and-apply helper so the referrer's bonus
+        // lands on their license immediately and the referred user's bonus
+        // gets queued for trial approval.
+        const r = claimAndApplyReferral({ code: refCode.toUpperCase(), referredCustomerId: customer.id })
         if (r.ok) {
           log.info("referral claimed at signup", {
             customer: customer.id,
             referrer: r.referrer_customer_id,
+            bonus_referrer: r.referrer_bonus_days,
+            bonus_referred: r.referred_bonus_days,
           })
         } else {
           log.info("referral claim skipped", { reason: r.reason, code: refCode })
@@ -746,8 +759,55 @@ async function handle(update: TgUpdate) {
         `• earns *you* +${REFERRAL_BONUS.referrer} days\n` +
         `• gives *them* +${REFERRAL_BONUS.referred} days bonus trial\n\n` +
         `Claims: *${claims.length}* — total earned: *${earned}* days\n` +
-        `_(Cap: ${REFERRAL_BONUS.monthlyCap} bonus days per 30 rolling days.)_`
-      await send(chatId, body, "Markdown")
+        `_(Cap: ${REFERRAL_BONUS.monthlyCap} bonus days per 30 rolling days.)_\n\n` +
+        `_To redeem someone else's code, use_ \`/redeem CODE\``
+      await send(chatId, body, "Markdown", [
+        [
+          { text: "📋 Copy code", callback_data: `usr:copyref:${row.code}` },
+          { text: "✈️ Share link", url: `https://t.me/share/url?url=${encodeURIComponent(`https://crimecode.cc/r/${row.code}`)}&text=${encodeURIComponent("Try CrimeCode IDE — sign up via my link and we both get bonus trial days")}` },
+        ],
+      ])
+      return
+    }
+    case "redeem": {
+      // /redeem <CODE> — apply a friend's referral code to the calling user.
+      // Eligibility window is 24h post-signup, single redemption per account.
+      const customer = findCustomerByTelegram({ telegram_user_id: userId })
+      if (!customer) {
+        await send(chatId, "No CrimeCode account linked yet — open the desktop app first.")
+        return
+      }
+      const code = args.trim().toUpperCase()
+      if (!code || !/^[A-Z0-9]{4,32}$/.test(code)) {
+        await send(
+          chatId,
+          "Usage: `/redeem CODE`\n\nExample: `/redeem SHQX3J5X`\n\nGet a code from a friend's `/referral` message.",
+          "Markdown",
+        )
+        return
+      }
+      const r = claimAndApplyReferral({ code, referredCustomerId: customer.id })
+      if (r.ok) {
+        await send(
+          chatId,
+          `🎁 *Bonus applied!*\n\n` +
+            `+${r.referred_bonus_days} days have been queued onto your account. They'll show up the moment your trial is approved (or extend your active trial if it's already running).\n\n` +
+            `Your friend gets +${r.referrer_bonus_days} days too. 🤝`,
+          "Markdown",
+        )
+      } else {
+        const friendly =
+          r.reason === "self_referral"
+            ? "You can't redeem your own code."
+            : r.reason === "already_claimed" || r.reason === "ineligible"
+              ? "You've already redeemed a code (or your 24h window has passed)."
+              : r.reason === "monthly_cap"
+                ? "The referrer has hit their monthly cap. Try a different code."
+                : r.reason === "unknown_code"
+                  ? "That code doesn't exist."
+                  : r.reason
+        await send(chatId, `❌ Couldn't redeem: ${friendly}`)
+      }
       return
     }
     case "mylicense":

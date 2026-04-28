@@ -11,6 +11,10 @@ import { ServerConnection } from "./context/server"
 import { AuthGate, buildAuthHeader, readCredentials } from "./pages/auth-gate"
 import { LiveCursors } from "./components/teams/live-cursors"
 import { hydrateTeamSessionFromStorage } from "./utils/team-session"
+import { Router, Route } from "@solidjs/router"
+import { lazy as solidLazy } from "solid-js"
+
+const ReferralLandingRoute = solidLazy(() => import("@/pages/referral-landing"))
 
 // Re-attach to whatever team-session id was in localStorage before the
 // reload, restarting the heartbeat loop so we don't get reaped. Cheap and
@@ -167,36 +171,55 @@ const platform: Platform = {
   setDefaultServer: writeDefaultServerUrl,
 }
 
+// Pre-auth landing pages: /r/<CODE> for the referral share-link.
+// We render this OUTSIDE the AuthGate so unauthenticated visitors clicking
+// a friend's link see the welcome card immediately — without first being
+// kicked through the sign-in flow. The landing page stashes the code in
+// localStorage and then navigates to "/", at which point the AuthGate
+// takes over and the signup form auto-fills the bonus code.
+const isReferralPath = typeof window !== "undefined" && /^\/r\/[A-Za-z0-9]{4,32}\/?$/.test(window.location.pathname)
+
 if (root instanceof HTMLElement) {
-  render(
-    () => (
-      <AuthGate>
-        {(creds) => {
-          const server: ServerConnection.Http = {
-            type: "http",
-            http: { url: creds.url, username: creds.username, password: creds.password },
-          }
-          return (
-            <PlatformProvider value={platform}>
-              <AppBaseProviders>
-                <AppInterface
-                  defaultServer={ServerConnection.Key.make(creds.url)}
-                  servers={[server]}
-                  disableHealthCheck
-                />
-                <LiveCursors />
-                {/* WorkspaceSwitcher is now mounted directly inside the
-                    titlebar (see components/titlebar.tsx) so it lives in
-                    the chrome instead of a position:fixed overlay that
-                    used to collide with the session-header buttons.
-                    Self-hosted users still get the switcher — it'll just
-                    show "Sign in to create or join teams" in the popover. */}
-              </AppBaseProviders>
-            </PlatformProvider>
-          )
-        }}
-      </AuthGate>
-    ),
-    root,
-  )
+  if (isReferralPath) {
+    render(
+      () => (
+        <Router>
+          <Route path="/r/:code" component={ReferralLandingRoute} />
+        </Router>
+      ),
+      root,
+    )
+  } else {
+    render(
+      () => (
+        <AuthGate>
+          {(creds) => {
+            const server: ServerConnection.Http = {
+              type: "http",
+              http: { url: creds.url, username: creds.username, password: creds.password },
+            }
+            return (
+              <PlatformProvider value={platform}>
+                <AppBaseProviders>
+                  <AppInterface
+                    defaultServer={ServerConnection.Key.make(creds.url)}
+                    servers={[server]}
+                    disableHealthCheck
+                  />
+                  <LiveCursors />
+                  {/* WorkspaceSwitcher is now mounted directly inside the
+                      titlebar (see components/titlebar.tsx) so it lives in
+                      the chrome instead of a position:fixed overlay that
+                      used to collide with the session-header buttons.
+                      Self-hosted users still get the switcher — it'll just
+                      show "Sign in to create or join teams" in the popover. */}
+                </AppBaseProviders>
+              </PlatformProvider>
+            )
+          }}
+        </AuthGate>
+      ),
+      root,
+    )
+  }
 }

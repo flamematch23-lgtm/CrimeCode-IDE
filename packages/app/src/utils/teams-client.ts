@@ -108,6 +108,7 @@ export interface SignUpInput {
   telegram?: string
   email?: string
   device_label?: string
+  referral_code?: string
 }
 
 export interface SignInInput {
@@ -126,7 +127,12 @@ export interface SignInInput {
 export async function signUpWithAccount(input: SignUpInput): Promise<AccountResult> {
   if (hasDesktopApi()) {
     const api = (window as any).api.account
-    const result = await api.signUp({ username: input.username, password: input.password, telegram: input.telegram })
+    const result = await api.signUp({
+      username: input.username,
+      password: input.password,
+      telegram: input.telegram,
+      referral_code: input.referral_code,
+    })
     // Write session to Electron store so sync works across devices
     if (result.status === "ok") {
       await api.writeSession(result.token, result.customer_id, result.exp)

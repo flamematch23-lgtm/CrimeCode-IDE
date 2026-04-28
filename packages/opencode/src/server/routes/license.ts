@@ -589,6 +589,7 @@ export const LicenseRoutes = lazy(() => {
       telegram?: string
       email?: string
       device_label?: string
+      referral_code?: string
     } = {}
     try {
       body = (await c.req.json()) ?? {}
@@ -603,6 +604,7 @@ export const LicenseRoutes = lazy(() => {
         telegram: body.telegram ?? null,
         email: body.email ?? null,
         device_label: body.device_label ?? null,
+        referral_code: body.referral_code ?? null,
       })
       // Kick an admin notification when this produced a fresh pending
       // customer — so the admin sees the signup and can approve right
@@ -1190,9 +1192,16 @@ export const LicenseRoutes = lazy(() => {
     // desktop, wires up the trial locally.
     void notifyUserApproved({
       telegram_user_id: r.telegram_user_id,
-      trial_days: days,
+      trial_days: r.trial_days_total,
     }).catch(() => undefined)
-    return c.json({ ok: true, customer_id: customerId, trial_days: days, was_already_approved: r.was_already_approved })
+    return c.json({
+      ok: true,
+      customer_id: customerId,
+      trial_days: r.trial_days_total,
+      trial_days_base: days,
+      referral_bonus_days: r.referral_bonus_days,
+      was_already_approved: r.was_already_approved,
+    })
   })
 
   admin.post("/accounts/:customerId/reject", async (c) => {

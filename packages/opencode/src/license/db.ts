@@ -266,6 +266,30 @@ function runMigrations(db: Database): void {
       "v3.referral_claims_referrer_idx",
       "CREATE INDEX IF NOT EXISTS referral_claims_referrer_idx ON referral_claims(referrer_customer_id, claimed_at DESC)",
     ],
+    // v2.22.23: referral bonus accounting. When a referral is claimed at
+    // signup the bonus days can't always be applied immediately — the new
+    // customer is "pending" and has no active license/trial yet. We park
+    // the bonus on the customer row and consume it at approval time so
+    // the trial that gets handed out includes the bonus baked in.
+    // `referrer_bonus_days_credited` tracks how many days have already
+    // been pushed onto the referrer's active license (or queued as
+    // pending) — prevents double-credit on multiple replays.
+    [
+      "v3.customers.pending_referral_days",
+      "ALTER TABLE customers ADD COLUMN pending_referral_days INTEGER NOT NULL DEFAULT 0",
+    ],
+    [
+      "v3.customers.referral_code_used",
+      "ALTER TABLE customers ADD COLUMN referral_code_used TEXT",
+    ],
+    [
+      "v3.referral_claims.referrer_credited_at",
+      "ALTER TABLE referral_claims ADD COLUMN referrer_credited_at INTEGER",
+    ],
+    [
+      "v3.referral_claims.referred_credited_at",
+      "ALTER TABLE referral_claims ADD COLUMN referred_credited_at INTEGER",
+    ],
   ]
   for (const [name, sql] of ops) {
     try {

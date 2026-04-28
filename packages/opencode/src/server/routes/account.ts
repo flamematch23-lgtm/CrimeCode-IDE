@@ -15,7 +15,9 @@ import {
 } from "../../license/store"
 import { makeToken } from "../../license/token"
 import {
+  claimAndApplyReferral,
   getOrCreateReferralCode,
+  isEligibleForReferralClaim,
   listReferralsByCustomer,
   REFERRAL_BONUS,
   resolveReferralCode,
@@ -203,11 +205,71 @@ export const AccountRoutes = () =>
           code: row.code,
           shareUrl: `https://crimecode.cc/r/${row.code}`,
           bonus: REFERRAL_BONUS,
+          eligibleToRedeem: isEligibleForReferralClaim(customerId),
           claims: claims.map((c) => ({
             referred_customer_id: c.referred_customer_id,
             claimed_at: c.claimed_at,
             referrer_bonus_days: c.referrer_bonus_days,
           })),
+        })
+      },
+    )
+    // POST /account/me/redeem-referral — apply a referral code AFTER signup.
+    // Used by the dashboard's "Got a code from a friend? Redeem it" form.
+    // Eligibility is gated by isEligibleForReferralClaim (24h post-signup,
+    // single redemption per customer) — see the helper for the rules.
+    .post(
+      "/me/redeem-referral",
+      describeRoute({
+        summary: "Redeem a referral code post-signup",
+        operationId: "account.me.redeem.referral",
+        responses: {
+          200: { description: "Bonus applied" },
+          400: { description: "Bad code or ineligible" },
+        },
+      }),
+      async (c) => {
+        const customerId = requireCustomer(c)
+        const body = (await c.req.json().catch(() => ({}))) as { code?: string }
+        const code = (body.code ?? "").trim().toUpperCase()
+        if (!code || !/^[A-Z0-9]{4,32}$/.test(code)) {
+          return c.json({ error: "bad_code" }, 400)
+        }
+        const r = claimAndApplyReferral({ code, referredCustomerId: customerId })
+        if (!r.ok) return c.json({ error: r.reason }, 400)
+        log.info("referral redeemed via dashboard", {
+          customer: customerId,
+          referrer: r.referrer_customer_id,
+          bonus_referred: r.referred_bonus_days,
+        })
+        return c.json({
+          ok: true,
+          referrer_bonus_days: r.referrer_bonus_days,
+          referred_bonus_days: r.referred_bonus_days,
+        })
+      },
+    )
+    // GET /account/me/resolve-referral?code=ABC — peek at a code without
+    // committing. Used by the signup form to render "🎁 +3 day bonus from
+    // your friend's link!" the moment the code is typed in.
+    .get(
+      "/me/resolve-referral",
+      describeRoute({
+        summary: "Validate a referral code (read-only)",
+        operationId: "account.me.resolve.referral",
+        responses: { 200: { description: "Resolution result" } },
+      }),
+      async (c) => {
+        const code = (c.req.query("code") ?? "").trim().toUpperCase()
+        if (!code || !/^[A-Z0-9]{4,32}$/.test(code)) {
+          return c.json({ valid: false, reason: "bad_code" })
+        }
+        const owner = resolveReferralCode(code)
+        if (!owner) return c.json({ valid: false, reason: "unknown_code" })
+        return c.json({
+          valid: true,
+          bonus_for_you: REFERRAL_BONUS.referred,
+          bonus_for_them: REFERRAL_BONUS.referrer,
         })
       },
     )
