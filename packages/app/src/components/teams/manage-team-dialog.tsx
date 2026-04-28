@@ -64,7 +64,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     }
   }
 
-  async function onRoleChange(customerId: string, role: "admin" | "member") {
+  async function onRoleChange(customerId: string, role: "admin" | "member" | "viewer") {
     setBusy("role:" + customerId)
     setErr(null)
     try {
@@ -143,7 +143,9 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     >
       <div data-slot="backdrop" onClick={props.onClose} />
       <div data-slot="panel" data-wide="true">
-        <button data-slot="close" onClick={props.onClose} aria-label="Close">×</button>
+        <button data-slot="close" onClick={props.onClose} aria-label="Close">
+          ×
+        </button>
         <Show when={detail()} fallback={<div data-slot="loading">Loading…</div>}>
           {(d) => (
             <>
@@ -153,8 +155,8 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                 {d().self_role === "owner"
                   ? " can add, remove, re-role, and transfer ownership."
                   : d().self_role === "admin"
-                  ? " can add or remove members but not change roles."
-                  : " can only view."}
+                    ? " can add or remove members but not change roles."
+                    : " can only view."}
               </p>
 
               <Show when={d().self_role !== "member"}>
@@ -169,11 +171,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                         onInput={(e) => setIdentifier(e.currentTarget.value)}
                         disabled={busy() === "add"}
                       />
-                      <button
-                        data-kind="primary"
-                        type="submit"
-                        disabled={busy() === "add" || !identifier().trim()}
-                      >
+                      <button data-kind="primary" type="submit" disabled={busy() === "add" || !identifier().trim()}>
                         {busy() === "add" ? "…" : "Add"}
                       </button>
                     </div>
@@ -201,9 +199,16 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                           <Show
                             when={d().self_role === "owner" && m.role !== "owner"}
                             fallback={
-                              <span data-slot="member-role" data-role={m.role}>
-                                {m.role}
-                              </span>
+                              <div data-slot="member-role-display">
+                                <span data-slot="member-role" data-role={m.role}>
+                                  {m.role}
+                                </span>
+                                <Show when={m.role === "viewer"}>
+                                  <span data-slot="read-only-badge" title="Can view but not edit">
+                                    🔒 read-only
+                                  </span>
+                                </Show>
+                              </div>
                             }
                           >
                             <select
@@ -211,12 +216,13 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                               value={m.role}
                               disabled={busy() === "role:" + m.customer_id}
                               onChange={(e) =>
-                                onRoleChange(m.customer_id, e.currentTarget.value as "admin" | "member")
+                                onRoleChange(m.customer_id, e.currentTarget.value as "admin" | "member" | "viewer")
                               }
                               aria-label={`Role for ${label}`}
                             >
                               <option value="member">member</option>
                               <option value="admin">admin</option>
+                              <option value="viewer">viewer</option>
                             </select>
                           </Show>
                           <Show when={d().self_role === "owner" && m.role !== "owner"}>

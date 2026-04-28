@@ -530,13 +530,24 @@ export namespace LiveShare {
       connectRelay(relay, secret)
     }
 
-    // Forward all Bus events to participants and record replay history.
+    // Forward relevant Bus events to participants and record replay history.
     // High-frequency PartDelta events are coalesced over a short window.
+    // Only broadcast events that affect team collaboration (not internal details).
+    const BROADCAST_EVENTS = new Set([
+      "message.updated",
+      "message.part.delta",
+      "todo.updated",
+      "cursor.moved",
+      "presence.updated",
+    ])
     unsubs.push(
       Bus.subscribeAll((payload) => {
         record(payload)
         if (coalesce(payload)) return
-        broadcast({ type: "event", payload })
+        // Only broadcast events relevant to live collaboration
+        if (BROADCAST_EVENTS.has(payload?.type)) {
+          broadcast({ type: "event", payload })
+        }
       }),
     )
 

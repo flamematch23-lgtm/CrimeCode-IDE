@@ -10,7 +10,7 @@
  * or the other via getClient().
  */
 
-export type TeamRole = "owner" | "admin" | "member"
+export type TeamRole = "owner" | "admin" | "member" | "viewer"
 
 export interface TeamSummary {
   id: string
@@ -242,8 +242,12 @@ function desktopClient(): TeamsClient {
     publishSession: (id, title, state) => api().publishSession(id, title, state),
     heartbeatSession: (id, sid, state) => api().heartbeatSession(id, sid, state),
     endSession: (id, sid) => api().endSession(id, sid),
-    transferOwnership: (id, newOwnerCustomerId) => webClient().transferOwnership(id, newOwnerCustomerId),
-    publishCursor: (id, sid, x, y, label) => webClient().publishCursor(id, sid, x, y, label),
+    transferOwnership: (id, newOwnerCustomerId) =>
+      window.api
+        ? api().transferOwnership(id, newOwnerCustomerId)
+        : webClient().transferOwnership(id, newOwnerCustomerId),
+    publishCursor: (id, sid, x, y, label) =>
+      window.api ? api().publishCursor(id, sid, x, y, label) : webClient().publishCursor(id, sid, x, y, label),
     subscribe: (id, onEvent) => {
       // Desktop: EventSource works in renderer with the same origin, fall
       // through to the web impl but resolve the token via IPC so the secret

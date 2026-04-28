@@ -10,9 +10,26 @@
       "packages/opencode/migration/*": "deny",
     },
   },
-  "mcp": {},
+  "mcp": {
+    "vercel": {
+      "type": "local",
+      "command": ["npx", "--package", "@vercel/sdk", "mcp", "start", "--bearer-token", "REDACTED"],
+      "enabled": false,
+    },
+  },
   "tools": {
     "github-triage": false,
     "github-pr-search": false,
+  },
+  },
+  "tools": {
+    "github-triage": false,
+    "github-pr-search": false,
+    "vercel_*": false,
+    "vercel_projects-list": true,
+    "vercel_projects-get": true,
+    "vercel_deployments-list": true,
+    "vercel_deployments-get": true,
+    "vercel_domains-list": true,
   },
 }

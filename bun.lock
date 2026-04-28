@@ -226,7 +226,7 @@
     },
     "packages/desktop-electron": {
       "name": "@opencode-ai/desktop-electron",
-      "version": "2.22.8",
+      "version": "2.22.12",
       "dependencies": {
         "@opencode-ai/app": "workspace:*",
         "@opencode-ai/ui": "workspace:*",

@@ -1,0 +1,11 @@
+version: 2.21.8
+files:
+  - url: opencode-electron-mac-arm64.zip
+    sha512: WiJUns9lShVdKjkXVdH1wm6jZNkKGrm6DbvsxVZ1FEi0sJSsrqZGH4/AHScjtxavpTO+diEl4ZMiPQt6Vqz4Pw==
+    size: 195791321
+  - url: opencode-electron-mac-arm64.dmg
+    sha512: +PJIcJx4hYnLsNm6cHuDOJAsLkKqD0PchMZh2gK5zXGtH6eDUafIFDfvGCOkLuC4sDs0M0dhVGwdkkGie+9lFg==
+    size: 203221797
+path: opencode-electron-mac-arm64.zip
+sha512: WiJUns9lShVdKjkXVdH1wm6jZNkKGrm6DbvsxVZ1FEi0sJSsrqZGH4/AHScjtxavpTO+diEl4ZMiPQt6Vqz4Pw==
+releaseDate: '2026-04-25T09:19:15.940Z'

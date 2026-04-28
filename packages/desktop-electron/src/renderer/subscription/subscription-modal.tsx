@@ -102,12 +102,13 @@ export function SubscriptionModal(props: { open: boolean; onClose: () => void })
             <For each={INTERVALS}>
               {(opt) => (
                 <div data-slot="plan-row" data-interval={opt.id}>
-                  <div data-slot="plan-meta">
+                  <div data-slot="plan-row">
                     <span data-slot="label">{t(opt.labelKey)}</span>
                     <Show when={!opt.noTrial}>
                       <span data-slot="badge">{t("subscription.trialBadge")}</span>
                     </Show>
                   </div>
+                  <p data-slot="plan-note">{t("subscription.modal.payNote")}</p>
                   <div data-slot="contact-picker">
                     <span data-slot="contact-label">{t("checkout.contact.subtitle")}</span>
                     <button

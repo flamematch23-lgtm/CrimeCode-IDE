@@ -127,19 +127,18 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
             <header>
               <div data-slot="brand-row" aria-hidden="true">
                 <div data-slot="brand-tile">CC</div>
-                <div data-slot="logo" data-text="CRIMECODE">CRIMECODE</div>
+                <div data-slot="logo" data-text="CRIMECODE">
+                  CRIMECODE
+                </div>
               </div>
               <h1 id="gate-title">
-                <span data-slot="h1-pre">Unlock</span>{" "}
-                <span data-slot="h1-emph">CrimeCode Pro</span>
+                <span data-slot="h1-pre">Unlock</span> <span data-slot="h1-emph">CrimeCode Pro</span>
               </h1>
               <p data-slot="tagline">{t("gate.tagline")}</p>
               <p data-slot="subtitle">
                 <Switch>
                   <Match when={license()?.effectiveStatus === "free"}>{t("gate.status.free")}</Match>
-                  <Match when={license()?.effectiveStatus === "trial_expired"}>
-                    {t("gate.status.trialExpired")}
-                  </Match>
+                  <Match when={license()?.effectiveStatus === "trial_expired"}>{t("gate.status.trialExpired")}</Match>
                   <Match when={license()?.effectiveStatus === "expired"}>{t("gate.status.expired")}</Match>
                   <Match when={license()?.effectiveStatus === "revoked"}>{t("gate.status.revoked")}</Match>
                 </Switch>
@@ -157,13 +156,14 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
               <For each={PLANS}>
                 {(plan) => (
                   <div data-slot="plan-card" data-interval={plan.id}>
-                    <Show when={plan.badgeKey}>
-                      {(key) => <span data-slot="plan-badge">{t(key())}</span>}
-                    </Show>
-                    <div data-slot="plan-emoji" aria-hidden="true">{plan.emoji}</div>
+                    <Show when={plan.badgeKey}>{(key) => <span data-slot="plan-badge">{t(key())}</span>}</Show>
+                    <div data-slot="plan-emoji" aria-hidden="true">
+                      {plan.emoji}
+                    </div>
                     <div data-slot="plan-title">{t(plan.titleKey)}</div>
                     <div data-slot="plan-price">{t(plan.priceKey)}</div>
                     <div data-slot="plan-desc">{t(plan.descKey)}</div>
+                    <p data-slot="plan-note">{t("gate.payNote")}</p>
                     <button
                       data-slot="pay-btn"
                       data-interval={plan.id}
@@ -171,7 +171,9 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
                       onClick={() => openBot(plan.id)}
                     >
                       <span data-slot="btn-label">{t("gate.payButton")}</span>
-                      <span data-slot="btn-arrow" aria-hidden="true">→</span>
+                      <span data-slot="btn-arrow" aria-hidden="true">
+                        →
+                      </span>
                     </button>
                   </div>
                 )}
@@ -203,7 +205,9 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
                 }
               >
                 <form onSubmit={onActivateToken} aria-label="Activate license token">
-                  <label class="sr-only" for="gate-token-interval">Plan</label>
+                  <label class="sr-only" for="gate-token-interval">
+                    Plan
+                  </label>
                   <select
                     id="gate-token-interval"
                     value={tokenInterval()}
@@ -212,7 +216,9 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
                   >
                     <For each={PLANS}>{(plan) => <option value={plan.id}>{t(plan.titleKey)}</option>}</For>
                   </select>
-                  <label class="sr-only" for="gate-token-input">License token</label>
+                  <label class="sr-only" for="gate-token-input">
+                    License token
+                  </label>
                   <input
                     id="gate-token-input"
                     type="text"
