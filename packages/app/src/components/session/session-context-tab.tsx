@@ -1,4 +1,4 @@
-import { createMemo, createEffect, on, onCleanup, For, Show } from "solid-js"
+import { createMemo, createEffect, on, onCleanup, For, Show, createSignal } from "solid-js"
 import type { JSX } from "solid-js"
 import { useSync } from "@/context/sync"
 import { checksum } from "@opencode-ai/util/encode"
@@ -97,6 +97,7 @@ export function SessionContextTab() {
   const { params, view } = useSessionLayout()
 
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
+  const showContent = createMemo(() => !!info())
 
   const messages = createMemo(
     () => {
@@ -268,7 +269,8 @@ export function SessionContextTab() {
   })
 
   return (
-    <ScrollView
+    <Show when={showContent()} fallback={<div class="p-4 text-center text-sm text-muted">Caricamento sessione...</div>}>
+      <ScrollView
       class="@container h-full"
       viewportRef={(el) => {
         scroll = el
@@ -336,6 +338,7 @@ export function SessionContextTab() {
           </Accordion>
         </div>
       </div>
-    </ScrollView>
+      </ScrollView>
+    </Show>
   )
 }
