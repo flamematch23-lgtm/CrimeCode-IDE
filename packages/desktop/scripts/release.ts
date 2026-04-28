@@ -18,6 +18,7 @@ const { values } = parseArgs({
     "run-id": { type: "string" },
     "skip-clean": { type: "boolean", default: false },
     "skip-cli": { type: "boolean", default: false },
+    "no-sign": { type: "boolean", default: false },
   },
 })
 
@@ -34,6 +35,43 @@ const bundle = path.join(rel, "bundle")
 const file = path.resolve(dir, binaryPath(target))
 
 process.chdir(dir)
+
+// NO_SIGN: allow local development without signing artifacts
+async function ensureSigningKeys() {
+  const keyEnv = process.env.TAURI_SIGNING_PRIVATE_KEY
+  if (keyEnv && keyEnv.trim().length > 0) {
+    console.log("[signing] TAURI_SIGNING_PRIVATE_KEY provided via env");
+    return
+  }
+
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const candidates = [
+    path.join(home, ".tauri", "crimecode.key"),
+    path.join("C:\\Users\\mango", ".tauri", "crimecode.key"),
+  ];
+
+  for (const p of candidates) {
+    try {
+      await fs.access(p)
+      const key = await fs.readFile(p, "utf8")
+      process.env.TAURI_SIGNING_PRIVATE_KEY = key
+      console.log(`[signing] loaded private key from ${p}`)
+      return
+    } catch {
+      // ignore
+    }
+  }
+
+  console.warn(
+    "[signing] TAURI_SIGNING_PRIVATE_KEY not set; signing may fail for prod config. To enable signing locally, provide a private key and its password via TAURI_SIGNING_PRIVATE_KEY/TAURI_SIGNING_PRIVATE_KEY_PASSWORD."
+  )
+}
+
+if (values["no-sign"]) {
+  console.log("[release] NO_SIGN enabled: skipping signing keys load");
+} else {
+  await ensureSigningKeys()
+}
 
 console.log(`[release] mode=${mode} channel=${chan} target=${target}`)
 console.log(`[release] sidecar=${sidecarPath(target)}`)
