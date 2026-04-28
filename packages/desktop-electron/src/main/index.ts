@@ -299,6 +299,22 @@ async function initialize() {
     return
   }
 
+  // Tell the splash we're "done" BEFORE resolving serverReady. The
+  // awaitInitialization IPC handler removes its `init-step` listener as
+  // soon as serverReady resolves (in its `finally`); if we emitted
+  // "done" after that point the message would be dispatched but the
+  // renderer-side listener could be torn down before delivery — and the
+  // splash never sees `phase: "done"`, never starts its 1s
+  // "All done"-then-close timer, never calls `loadingWindowComplete()`,
+  // never lets us reach `overlay?.close()`. End result was a splash
+  // that visually said "All done" and then sat there forever next to
+  // the main window.
+  //
+  // Emitting it here, while the listener is still attached, makes the
+  // ordering deterministic: the IPC message is queued first, the
+  // serverReady microtask runs second, the listener is removed third.
+  setInitStep({ phase: "done" })
+
   serverReady.resolve({
     url,
     username: "opencode",
@@ -336,7 +352,6 @@ async function initialize() {
     }
   })
 
-  setInitStep({ phase: "done" })
   await loadingComplete.promise
 
   perf.mark("main_window_created_start")

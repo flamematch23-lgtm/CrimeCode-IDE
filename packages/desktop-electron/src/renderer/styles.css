@@ -1941,3 +1941,264 @@
     transition-duration: 0s !important;
   }
 }
+
+/* ===== Subscription Modal — opened via "Upgrade now" banner / menu ===== */
+/* Without these styles the modal renders as an unstyled stack of <div>s
+   that the OS window chrome happily lays out across the title bar — the
+   bug the user hit in v2.22.18 ("Upgrade now" → tiny ribbon at top).
+   Mirror the subscription-gate aesthetic but at modal scale (480px),
+   backdrop-blurred, click-outside-to-close. */
+
+[data-component="subscription-modal"] {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99998; /* above app, below the gate which uses 99999 */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  -webkit-app-region: no-drag;
+  padding: 24px;
+}
+
+[data-component="subscription-modal"] [data-slot="backdrop"] {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 7, 10, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  animation: subscription-modal-backdrop-in 0.18s ease-out both;
+}
+
+@keyframes subscription-modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+[data-component="subscription-modal"] [data-slot="panel"] {
+  position: relative;
+  z-index: 1;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: rgba(15, 15, 20, 0.96);
+  border: 1px solid rgba(255, 87, 34, 0.3);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: #f5f5f5;
+  outline: none;
+  animation: subscription-modal-panel-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+@keyframes subscription-modal-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+[data-component="subscription-modal"] header {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 15, 20, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  z-index: 2;
+}
+
+[data-component="subscription-modal"] header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+[data-component="subscription-modal"] [data-slot="close"] {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(245, 245, 245, 0.7);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+[data-component="subscription-modal"] [data-slot="close"]:hover {
+  background: rgba(255, 87, 34, 0.18);
+  border-color: rgba(255, 87, 34, 0.4);
+  color: #ff8a5c;
+}
+
+[data-component="subscription-modal"] [data-slot="status"] {
+  padding: 16px 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+[data-component="subscription-modal"] [data-slot="status"] p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(245, 245, 245, 0.85);
+  line-height: 1.45;
+}
+
+[data-component="subscription-modal"] [data-slot="plans"] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 22px;
+}
+
+[data-component="subscription-modal"] [data-slot="plan-row"] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+[data-component="subscription-modal"] [data-slot="plan-row"]:hover {
+  border-color: rgba(255, 87, 34, 0.4);
+  background: rgba(255, 87, 34, 0.06);
+}
+
+[data-component="subscription-modal"] [data-slot="plan-row"] [data-slot="plan-row"] {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+[data-component="subscription-modal"] [data-slot="label"] {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  text-transform: capitalize;
+  letter-spacing: -0.005em;
+}
+
+[data-component="subscription-modal"] [data-slot="badge"] {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #ff8a5c;
+  background: rgba(255, 87, 34, 0.14);
+  border: 1px solid rgba(255, 87, 34, 0.4);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+[data-component="subscription-modal"] [data-slot="plan-note"] {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(245, 245, 245, 0.55);
+  line-height: 1.45;
+}
+
+[data-component="subscription-modal"] [data-slot="contact-picker"] {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+[data-component="subscription-modal"] [data-slot="contact-label"] {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(245, 245, 245, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+
+[data-component="subscription-modal"] [data-slot="contact-picker"] button {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 87, 34, 0.4);
+  background: rgba(255, 87, 34, 0.1);
+  color: #ff8a5c;
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.12s ease, border-color 0.12s ease;
+}
+
+[data-component="subscription-modal"] [data-slot="contact-picker"] button:hover:not(:disabled) {
+  background: rgba(255, 87, 34, 0.2);
+  border-color: #ff5722;
+  transform: translateY(-1px);
+}
+
+[data-component="subscription-modal"] [data-slot="contact-picker"] button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+[data-component="subscription-modal"] [data-slot="trial-cta"] {
+  padding: 0 22px 18px;
+}
+
+[data-component="subscription-modal"] [data-slot="trial-cta"] button {
+  width: 100%;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 11px 14px;
+  border-radius: 9px;
+  border: 1px solid #ff5722;
+  background: linear-gradient(135deg, #ff5722, #f4511e);
+  color: #07070a;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+[data-component="subscription-modal"] [data-slot="trial-cta"] button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255, 87, 34, 0.4);
+}
+
+[data-component="subscription-modal"] [data-slot="trial-cta"] button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+[data-component="subscription-modal"] [data-slot="error"] {
+  margin: 0;
+  padding: 12px 22px 18px;
+  font-size: 12px;
+  color: #ff6b6b;
+  border-top: 1px solid rgba(255, 107, 107, 0.2);
+  background: rgba(255, 107, 107, 0.05);
+}
+
+[data-component="subscription-modal"] :focus-visible {
+  outline: 2px solid #ff5722;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="subscription-modal"],
+  [data-component="subscription-modal"] * {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
