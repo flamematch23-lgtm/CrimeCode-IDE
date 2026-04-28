@@ -527,6 +527,54 @@ export namespace Project {
     return r != null
   }
 
+  /**
+   * The single chokepoint that the request middleware calls right after
+   * Instance.provide resolves a project. Returns one of three outcomes:
+   *
+   *   - "tagged"    — the project was unowned (NULL); we just stamped it
+   *                   with `customerId` and propagated the same id onto
+   *                   any pre-existing sessions of this project that were
+   *                   still NULL (legacy data).
+   *   - "owner"     — the project's customer_id already matches the caller.
+   *   - "forbidden" — the project belongs to someone else; the caller
+   *                   should be served a 403.
+   *
+   * All three branches are read-only after the first INSERT/UPDATE, so this
+   * is safe to call on every authenticated request.
+   */
+  export function assertOrTagOwnership(
+    projectId: ProjectID,
+    customerId: string,
+  ): "tagged" | "owner" | "forbidden" {
+    if (!customerId) return "owner" // unauthenticated callers fall through
+    return Database.use((db) => {
+      const row = db
+        .select({ customer_id: ProjectTable.customer_id })
+        .from(ProjectTable)
+        .where(eq(ProjectTable.id, projectId))
+        .get()
+      // Row missing: project hasn't been persisted yet (rare race during
+      // first-touch). Treat as "owner" — let the request continue and the
+      // tag will land on the next call.
+      if (!row) return "owner"
+      const current = row.customer_id
+      if (current == null) {
+        db.update(ProjectTable).set({ customer_id: customerId }).where(eq(ProjectTable.id, projectId)).run()
+        // Backfill: any session rows already attached to this project that
+        // were created before scoping existed should inherit the same owner,
+        // otherwise they'd remain visible to every authenticated caller.
+        // The trigger only fires on INSERT; this UPDATE handles the legacy
+        // population pass exactly once per project.
+        db.update(SessionTable)
+          .set({ customer_id: customerId })
+          .where(and(eq(SessionTable.project_id, projectId), isNull(SessionTable.customer_id)))
+          .run()
+        return "tagged"
+      }
+      return current === customerId ? "owner" : "forbidden"
+    })
+  }
+
   export function get(id: ProjectID): Info | undefined {
     const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) return undefined

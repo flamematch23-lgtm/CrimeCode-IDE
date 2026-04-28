@@ -13,6 +13,7 @@ import { LSP } from "../lsp"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
 import { Instance } from "../project/instance"
+import { Project } from "../project/project"
 import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
@@ -280,6 +281,18 @@ export namespace Server {
           directory,
           init: InstanceBootstrap,
           async fn() {
+            // Multi-tenant tag-on-touch + ownership enforcement. Runs only
+            // for Bearer-authenticated callers; Basic-auth (local sidecar)
+            // callers don't have a customer_id and fall through unchanged.
+            const customerId = c.get("customer_id" as never) as string | undefined
+            if (customerId) {
+              const outcome = Project.assertOrTagOwnership(Instance.project.id, customerId)
+              if (outcome === "forbidden") {
+                throw new HTTPException(403, {
+                  message: "this project belongs to a different account",
+                })
+              }
+            }
             return next()
           },
         })
