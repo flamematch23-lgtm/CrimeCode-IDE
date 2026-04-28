@@ -69,7 +69,8 @@ export function clearCredentials(): void {
 
 export function buildAuthHeader(creds: Credentials): string {
   if (creds.kind === "bearer") return `Bearer ${creds.password}`
-  return "Basic " + btoa(`${creds.username}:${creds.password}`)
+  const { base64Encode } = await import("../utils/base64")
+  return "Basic " + base64Encode(`${creds.username}:${creds.password}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
 async function verifyCredentials(creds: Credentials): Promise<{ ok: boolean; message?: string }> {
@@ -232,11 +233,6 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             setPinState(null)
           }
           if (r.status === "awaiting_approval") {
-            // The user clicked the bot link, the customer row exists,
-            // but the admin hasn't approved them yet. Switch to the
-            // pending screen — keep polling /auth/status so the moment
-            // approval lands we can re-poll the PIN one last time and
-            // pick up the freshly-issued token.
             stopPoll()
             setPinState(null)
             setPendingApproval({

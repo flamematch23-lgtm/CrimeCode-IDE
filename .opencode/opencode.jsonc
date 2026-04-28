@@ -2,25 +2,20 @@
   "$schema": "https://opencode.ai/config.json",
   "provider": {
     "opencode": {
-      "options": {},
-    },
+      "options": {}
+    }
   },
   "permission": {
     "edit": {
-      "packages/opencode/migration/*": "deny",
-    },
+      "packages/opencode/migration/*": "deny"
+    }
   },
   "mcp": {
     "vercel": {
       "type": "local",
       "command": ["npx", "--package", "@vercel/sdk", "mcp", "start", "--bearer-token", "REDACTED"],
-      "enabled": false,
-    },
-  },
-  "tools": {
-    "github-triage": false,
-    "github-pr-search": false,
-  },
+      "enabled": false
+    }
   },
   "tools": {
     "github-triage": false,
@@ -30,6 +25,6 @@
     "vercel_projects-get": true,
     "vercel_deployments-list": true,
     "vercel_deployments-get": true,
-    "vercel_domains-list": true,
-  },
+    "vercel_domains-list": true
+  }
 }

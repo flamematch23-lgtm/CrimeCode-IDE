@@ -19,7 +19,15 @@ export function buildAuthHeader(http: HttpCreds | null | undefined): string | nu
   // in `password` and the marker username is literally "bearer".
   if (http.username === "bearer") return `Bearer ${http.password}`
   // Legacy Self-hosted basic auth.
-  return `Basic ${btoa(`${http.username ?? "opencode"}:${http.password}`)}`
+  // Use proper base64 encoding that works in both browser and Node.js
+  const credentials = `${http.username ?? "opencode"}:${http.password}`
+  let encoded: string
+  if (typeof btoa === "function") {
+    encoded = btoa(credentials)
+  } else {
+    encoded = Buffer.from(credentials).toString("base64")
+  }
+  return `Basic ${encoded}`
 }
 
 export function withAuthHeaders(http: HttpCreds | null | undefined, init?: RequestInit): RequestInit {

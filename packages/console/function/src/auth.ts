@@ -6,6 +6,7 @@ import { createSubjects } from "@openauthjs/openauth/subject"
 import { THEME_OPENAUTH } from "@openauthjs/openauth/ui/theme"
 import { GithubProvider } from "@openauthjs/openauth/provider/github"
 import { GoogleOidcProvider } from "@openauthjs/openauth/provider/google"
+import { TelegramProvider } from "@opencode-ai/opencode/telegram-provider"
 import { CloudflareStorage } from "@openauthjs/openauth/storage/cloudflare"
 import { Account } from "@opencode-ai/console-core/account.js"
 import { Workspace } from "@opencode-ai/console-core/workspace.js"
@@ -51,6 +52,10 @@ export default {
         google: GoogleOidcProvider({
           clientID: Resource.GOOGLE_CLIENT_ID.value,
           scopes: ["openid", "email"],
+        }),
+        telegram: TelegramProvider({
+          botToken: Resource.TELEGRAM_BOT_TOKEN.value,
+          botUsername: Resource.TELEGRAM_BOT_USERNAME.value,
         }),
         //        email: CodeProvider({
         //          async request(req, state, form, error) {

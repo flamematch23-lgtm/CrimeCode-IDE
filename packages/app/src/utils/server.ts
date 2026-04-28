@@ -15,9 +15,17 @@ export function createSdkForServer({
     if (server.username === "bearer") {
       return { Authorization: `Bearer ${server.password}` }
     }
-    return {
-      Authorization: `Basic ${btoa(`${server.username ?? "opencode"}:${server.password}`)}`,
-    }
+        // Use proper base64 encoding
+        const credentials = `${server.username ?? "opencode"}:${server.password}`
+        let encoded: string
+        if (typeof btoa === "function") {
+          encoded = btoa(credentials)
+        } else {
+          encoded = Buffer.from(credentials).toString("base64")
+        }
+        return {
+          Authorization: `Basic ${encoded}`,
+        }
   })()
 
   return createOpencodeClient({
