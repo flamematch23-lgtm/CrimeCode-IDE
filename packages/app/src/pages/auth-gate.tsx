@@ -69,8 +69,15 @@ export function clearCredentials(): void {
 
 export function buildAuthHeader(creds: Credentials): string {
   if (creds.kind === "bearer") return `Bearer ${creds.password}`
-  const { base64Encode } = await import("../utils/base64")
-  return "Basic " + base64Encode(`${creds.username}:${creds.password}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+  // Use proper base64 encoding that works in both browser and Node.js/Bun
+  const credentials = `${creds.username}:${creds.password}`
+  let encoded: string
+  if (typeof btoa === "function") {
+    encoded = btoa(credentials)
+  } else {
+    encoded = Buffer.from(credentials).toString("base64")
+  }
+  return "Basic " + encoded.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
 async function verifyCredentials(creds: Credentials): Promise<{ ok: boolean; message?: string }> {
