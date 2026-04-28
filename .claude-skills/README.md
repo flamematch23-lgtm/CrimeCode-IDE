@@ -34,6 +34,9 @@ where to call them from.
 | **context-pruning** | Long sessions. Compress stale Reads, drop dead tool output, periodic state checkpoints. |
 | **resume-after-crash** | Re-entry after an interruption. Reconstructs working state from git status + uncommitted diff + TodoWrite. |
 | **redteam-replay** | Authorised security replay. Mandatory consent + scope + audit guardrails. |
+| **web-research** | Look up current docs / CVEs / "is this a known issue" via live web search. Pairs with `web-search` + `fetch-url` + `docs-extract`. |
+| **stack-trace-triage** | User pastes a stack trace. Resolve frames to source, show ±2 line excerpts, propose minimal fix. |
+| **dependency-update-safety** | Bumping a dep version. Baseline → changelog → upgrade → targeted tests → flake detection → re-audit → PR. |
 
 ## Tool helpers (in `packages/opencode/script/agent-tools/`)
 
@@ -50,6 +53,12 @@ git + ripgrep where noted.
 | **find-symbol.ts** | LSP-lite `def` / `refs` / `both` over the TS codebase. Word-boundary, definition-pattern aware. |
 | **diff-summary.ts** | Single-page summary of branch state vs base: files, +/-, new/deleted, untracked, anti-pattern grep (secrets, console.log, TODOs). |
 | **redteam-replay.ts** | Authorised payload replay runner. **READ THE redteam-replay.md SKILL FIRST.** Engagement file required, sandboxed by default. |
+| **web-search.ts** | Live web search. Backends: Brave Search API (preferred, set `BRAVE_SEARCH_API_KEY`), SearXNG (`SEARXNG_URL`), DuckDuckGo HTML fallback. `--site=`, `--limit`, `--json`. |
+| **fetch-url.ts** | Fetch a URL and emit a clean markdown excerpt — drops scripts/nav/footer, isolates `<article>` / `<main>`, transforms HTML → MD. Caps at 32 KB by default to protect context. |
+| **dep-audit.ts** | CVE audit via OSV.dev. Auto-detects npm/Cargo/Go/Python manifests + lockfiles; severity filter; JSON output for chaining. |
+| **stack-trace-resolve.ts** | Parse stack traces (Node/Bun, Deno, Python, Go, Rust, Java) and emit per-frame source excerpts with `>>>` markers on the offending line. |
+| **flaky-test-detect.ts** | Run a test command N× and flag tests that pass-and-fail across runs. Auto-detects Bun/Vitest/Jest/cargo/pytest/go-test. |
+| **docs-extract.ts** | Pull homepage + repository URLs for every dependency in the project (npm via registry, others derivable). Chains into web-search / fetch-url. |
 
 ## Calling the tools from a skill
 

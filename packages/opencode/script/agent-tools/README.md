@@ -38,6 +38,27 @@ bun packages/opencode/script/agent-tools/redteam-replay.ts \
   --target staging-api \
   --corpus payloads/xss.jsonl \
   --confirm "I have explicit authorisation to test internal-2026-04"
+
+# Live web search (Brave Search API, SearXNG, or DDG fallback)
+bun packages/opencode/script/agent-tools/web-search.ts \
+  --site=github.com '"useMenuItemContext" kobalte'
+
+# Read a URL as clean markdown (chains after web-search)
+bun packages/opencode/script/agent-tools/fetch-url.ts \
+  https://docs.solidjs.com/reference/components/show \
+  --max-bytes=16000
+
+# CVE audit on the project's deps via OSV.dev
+bun packages/opencode/script/agent-tools/dep-audit.ts --severity=high
+
+# Parse a stack trace + show source context for each frame
+echo "$trace" | bun packages/opencode/script/agent-tools/stack-trace-resolve.ts
+
+# Run a test command 5× and detect flakes
+bun packages/opencode/script/agent-tools/flaky-test-detect.ts -n 5
+
+# Pull homepage / repo URLs for every dep (chains into web-search / fetch-url)
+bun packages/opencode/script/agent-tools/docs-extract.ts --filter solid
 ```
 
 ## Conventions
