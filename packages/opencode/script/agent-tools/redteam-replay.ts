@@ -83,7 +83,30 @@ const confirmation = flag("confirm", true)!
 const allowMutatingFlag = args.includes("--allow-mutating")
 
 // 1. Engagement file
-const eng: Engagement = JSON.parse(readFileSync(engagementPath, "utf8"))
+let engRaw: string
+try {
+  engRaw = readFileSync(engagementPath, "utf8")
+} catch (e) {
+  const err = e as { code?: string; message?: string }
+  if (err.code === "ENOENT") {
+    console.error(`✗ engagement file not found: ${engagementPath}`)
+    console.error(`  Create one first — see .claude-skills/redteam-replay.md for the schema.`)
+  } else {
+    console.error(`✗ failed to read engagement file: ${err.message ?? String(e)}`)
+  }
+  process.exit(1)
+}
+let eng: Engagement
+try {
+  eng = JSON.parse(engRaw) as Engagement
+} catch (e) {
+  console.error(`✗ engagement file is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  process.exit(1)
+}
+if (!eng.engagement_id || !eng.valid_until || !eng.scope?.targets?.length) {
+  console.error(`✗ engagement file missing required fields (engagement_id, valid_until, scope.targets[])`)
+  process.exit(1)
+}
 if (Date.parse(eng.valid_until) <= Date.now()) {
   console.error(`✗ engagement expired: valid_until=${eng.valid_until}`)
   process.exit(1)

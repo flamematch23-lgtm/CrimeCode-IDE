@@ -33,9 +33,23 @@ if (!mode || !symbol || !["def", "refs", "both"].includes(mode)) {
 
 function rg(pattern: string): string[] {
   try {
+    // ripgrep's built-in `ts` type matches *.ts but NOT *.tsx — we add .tsx
+    // (and .mts/.cts for completeness) via a custom --type-add definition,
+    // because passing `--type tsx` directly errors with "unrecognized file
+    // type". This mirrors what `rg --type-list` shows: tsx isn't built in.
     const out = execFileSync(
       "rg",
-      ["--no-heading", "--with-filename", "--line-number", "--type", "ts", "--type", "tsx", "-e", pattern],
+      [
+        "--no-heading",
+        "--with-filename",
+        "--line-number",
+        "--type-add",
+        "tsall:*.{ts,tsx,mts,cts}",
+        "--type",
+        "tsall",
+        "-e",
+        pattern,
+      ],
       { encoding: "utf8" },
     )
     return out.split("\n").filter(Boolean)
