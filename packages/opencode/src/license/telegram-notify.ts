@@ -227,6 +227,70 @@ function escapeMd(s: string): string {
   return s.replaceAll(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1")
 }
 
+/**
+ * Fire the "🔔 Payment received — awaiting N confirmations" message the
+ * moment the poller spots an incoming tx that matches the offer's
+ * expected amount, EVEN IF that tx has 0 confirmations. Bridges the
+ * silent gap between "click pay" and "license issued" — without this,
+ * users see no progress for 5–60 minutes on slow chains and start
+ * pinging support.
+ *
+ * Idempotency is enforced upstream via `notified_seen_at`; this
+ * function unconditionally sends, on the assumption the caller has
+ * already gated.
+ */
+export async function notifyPaymentSeen(opts: {
+  telegram_user_id: number
+  order_id: string
+  currency: Currency
+  tx: string
+  current_confirmations: number
+  required_confirmations: number
+  /** Estimated minutes to N confirmations — coarse, just for UX. */
+  eta_minutes?: number
+}): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  if (!token) return
+  const lang = recallLang(opts.telegram_user_id)
+  const explorer = EXPLORERS[opts.currency](opts.tx)
+  const orderEsc = escapeMd(opts.order_id)
+  const txEsc = escapeMd(opts.tx)
+  const eta = opts.eta_minutes != null && opts.eta_minutes > 0 ? ` (~${opts.eta_minutes} min)` : ""
+  const body =
+    lang === "it"
+      ? `🔔 *Pagamento ricevuto!*\n\n` +
+        `Ordine: \`${orderEsc}\`\n` +
+        `Valuta: *${opts.currency}*\n\n` +
+        `In attesa di *${opts.required_confirmations}* conferme dalla blockchain` +
+        `${eta} — attualmente *${opts.current_confirmations}/${opts.required_confirmations}*.\n\n` +
+        `Riceverai il token della licenza qui in automatico appena la transazione viene confermata. ⚡\n\n` +
+        `Tx: [${txEsc.slice(0, 16)}…](${explorer})`
+      : `🔔 *Payment received!*\n\n` +
+        `Order: \`${orderEsc}\`\n` +
+        `Currency: *${opts.currency}*\n\n` +
+        `Awaiting *${opts.required_confirmations}* on-chain confirmations` +
+        `${eta} — currently *${opts.current_confirmations}/${opts.required_confirmations}*.\n\n` +
+        `You'll receive your license token here automatically once the transaction is confirmed. ⚡\n\n` +
+        `Tx: [${txEsc.slice(0, 16)}…](${explorer})`
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: opts.telegram_user_id,
+        text: body,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔍 View on explorer", url: explorer }]],
+        },
+      }),
+    })
+  } catch (err) {
+    log.warn("notifyPaymentSeen failed", { error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
 export async function sendCustomerToken(opts: SendOpts): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) return

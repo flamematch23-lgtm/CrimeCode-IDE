@@ -10,6 +10,7 @@ import {
   confirmOrderAndIssue,
   createOrder,
   findOrCreateCustomerByTelegram,
+  getOffersForOrder,
   getOrder,
   listAudit,
   listLicenses,
@@ -18,6 +19,7 @@ import {
   statsCounts,
   validateBySig,
 } from "../../license/store"
+import { getWallets } from "../../license/wallets"
 import { backupOnce } from "../../license/backup"
 import { checkRateLimit } from "../../license/rate-limit"
 import {
@@ -676,6 +678,60 @@ export const LicenseRoutes = lazy(() => {
     const s = getApprovalStatus(cid)
     if (!s) return c.json({ error: "unknown_customer" }, 404)
     return c.json(s)
+  })
+
+  /**
+   * Public order-status polling endpoint. Used by the desktop subscription
+   * dialog to live-update the UI from "pending" → "payment received,
+   * awaiting confirmations (X/Y)" → "confirmed, license issued" without
+   * the user needing to refresh. No auth required because the order id
+   * itself is the bearer token (250-bit entropy in `ord_<random>`).
+   *
+   * Returns the order row + the active payment offer's `seen_*` snapshot
+   * so the UI can render exactly the same progress info as `/status` in
+   * the bot. License token is INCLUDED only when status === "confirmed",
+   * so polling is the canonical "did my payment land" flow.
+   */
+  app.get("/order/:id/status", (c) => {
+    const id = c.req.param("id")
+    if (!/^ord_[A-Za-z0-9_-]{4,40}$/.test(id)) return c.json({ error: "invalid_order_id" }, 400)
+    const o = getOrder(id)
+    if (!o) return c.json({ error: "unknown_order" }, 404)
+    const offers = getOffersForOrder(id)
+    const matched = offers.find((x) => x.matched_tx_hash != null)
+    const seen = offers.find((x) => x.seen_tx_hash != null && x.matched_tx_hash == null)
+    const wallet = matched
+      ? getWallets().find((w) => w.currency === matched.currency)
+      : seen
+        ? getWallets().find((w) => w.currency === seen.currency)
+        : null
+    const required = wallet?.minConfirmations ?? null
+    return c.json({
+      id: o.id,
+      status: o.status,
+      interval: o.interval,
+      created_at: o.created_at,
+      confirmed_at: o.confirmed_at,
+      tx_hash: o.tx_hash,
+      license_id: o.license_id,
+      payment: matched
+        ? {
+            stage: "confirmed" as const,
+            currency: matched.currency,
+            tx: matched.matched_tx_hash,
+            confirmations: required,
+            required,
+          }
+        : seen
+          ? {
+              stage: "seen" as const,
+              currency: seen.currency,
+              tx: seen.seen_tx_hash,
+              confirmations: seen.seen_confirmations ?? 0,
+              required,
+            }
+          : { stage: "awaiting_payment" as const },
+    })
   })
 
   // 3. Authenticated endpoints: any client with a valid session token.

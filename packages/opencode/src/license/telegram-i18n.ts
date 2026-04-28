@@ -108,7 +108,11 @@ const ORDER_CREATED_EN = (orderId: string, interval: string, usd: number, wallet
   `Status: *pending payment*\n\n` +
   `💸 *Pay with ANY of these wallets* — use the EXACT amount shown so the bot can match it back to your order:\n\n` +
   walletLines +
-  `\n\n⏱ This order expires in *${windowMin} minutes*. As soon as the transaction is confirmed on-chain you'll receive your license token *here automatically*.\n\n` +
+  `\n\n📡 *What happens next* (fully automatic):\n` +
+  `  1. Send the EXACT amount to one wallet above.\n` +
+  `  2. Within ~30 seconds you'll get a 🔔 *"payment received, awaiting confirmations"* message here.\n` +
+  `  3. As soon as the network confirms the tx (varies by chain) you'll receive your 🎉 *license token* here automatically.\n\n` +
+  `⏱ This order expires in *${windowMin} minutes*. Run \`/status ${orderId}\` any time to check progress.\n\n` +
   `Need help? Contact @OpCrime1312 or @JollyFraud and quote order \`${orderId}\`.`
 
 const ORDER_CREATED_IT = (orderId: string, interval: string, usd: number, walletLines: string, windowMin: number) =>
@@ -118,7 +122,11 @@ const ORDER_CREATED_IT = (orderId: string, interval: string, usd: number, wallet
   `Stato: *in attesa di pagamento*\n\n` +
   `💸 *Paga con UNO qualsiasi di questi wallet* — usa l'importo ESATTO qui sotto così il bot riesce ad abbinarlo al tuo ordine:\n\n` +
   walletLines +
-  `\n\n⏱ L'ordine scade tra *${windowMin} minuti*. Appena la transazione è confermata on-chain ricevi il token della licenza *qui in automatico*.\n\n` +
+  `\n\n📡 *Cosa succede dopo* (tutto in automatico):\n` +
+  `  1. Invia l'importo ESATTO a uno dei wallet sopra.\n` +
+  `  2. Entro ~30 secondi ricevi qui un 🔔 *"pagamento ricevuto, in attesa di conferme"*.\n` +
+  `  3. Appena la transazione è confermata sulla blockchain (varia per chain) ricevi qui il tuo 🎉 *token della licenza* in automatico.\n\n` +
+  `⏱ L'ordine scade tra *${windowMin} minuti*. Esegui \`/status ${orderId}\` in qualsiasi momento per controllare lo stato.\n\n` +
   `Hai bisogno di aiuto? Contatta @OpCrime1312 o @JollyFraud e cita l'ordine \`${orderId}\`.`
 
 const TOKEN_DELIVERY_EN = (licenseId: string, interval: string, expLine: string, token: string) =>

@@ -425,6 +425,56 @@ export function markOfferMatched(id: string, txHash: string): void {
   audit("payment.match", { offer_id: id, tx_hash: txHash })
 }
 
+/**
+ * Record that the poller has spotted a tx matching the offer's expected
+ * amount, even if it doesn't yet have enough confirmations to be issued.
+ * Called on every poll cycle for the same offer until it's matched —
+ * the WHERE clause guards against demoting an already-issued offer
+ * (matched_tx_hash IS NOT NULL) and against changing the seen_tx_hash
+ * once it's been recorded (the first sighting wins so confirmations
+ * monotonically increase).
+ */
+export function markOfferSeen(opts: {
+  id: string
+  txHash: string
+  confirmations: number
+}): void {
+  getDb()
+    .prepare(
+      `UPDATE payment_offers
+          SET seen_tx_hash = COALESCE(seen_tx_hash, ?),
+              seen_at = COALESCE(seen_at, ?),
+              seen_confirmations = ?
+        WHERE id = ?
+          AND matched_tx_hash IS NULL`,
+    )
+    .run(opts.txHash, now(), opts.confirmations, opts.id)
+}
+
+/**
+ * Stamp `notified_seen_at` so the "payment received, awaiting confirmations"
+ * Telegram message fires exactly once per offer. Returns `true` if this
+ * call was the one that did the stamping (i.e. the caller should send the
+ * notification), `false` if the stamp was already there.
+ */
+export function markOfferNotifiedSeen(id: string): boolean {
+  const r = getDb()
+    .prepare(
+      `UPDATE payment_offers
+          SET notified_seen_at = ?
+        WHERE id = ?
+          AND notified_seen_at IS NULL
+          AND matched_tx_hash IS NULL`,
+    )
+    .run(now(), id)
+  // Bun's Database.prepare().run() returns { changes, lastInsertRowid }
+  // on better-sqlite, plain undefined on others. Treat any non-zero
+  // changes count as success; defensively fall back to a re-read.
+  const changes = (r as unknown as { changes?: number })?.changes ?? 0
+  if (changes > 0) return true
+  return false
+}
+
 export function getOffersForOrder(orderId: string): PaymentOfferRow[] {
   return getDb()
     .prepare<PaymentOfferRow, [string]>("SELECT * FROM payment_offers WHERE order_id = ? ORDER BY currency")

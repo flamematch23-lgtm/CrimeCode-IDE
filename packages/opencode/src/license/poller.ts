@@ -4,15 +4,42 @@ import { fetchIncomingTxs } from "./payments"
 import {
   confirmOrderAndIssue,
   getOffersForOrder,
+  getOrder,
   listOpenOffers,
   markOfferMatched,
+  markOfferNotifiedSeen,
+  markOfferSeen,
 } from "./store"
 import { getWallets } from "./wallets"
-import { sendCustomerToken } from "./telegram-notify"
+import { notifyPaymentSeen, sendCustomerToken } from "./telegram-notify"
 
 const log = Log.create({ service: "license-poller" })
 
-const POLL_INTERVAL_MS = 60_000
+// 30s is the sweet spot — 60s feels laggy when a user is staring at
+// "/order" waiting for the "payment received" toast; 15s starts to
+// hammer mempool.space rate limits when many offers are open.
+const POLL_INTERVAL_MS = 30_000
+
+/**
+ * Coarse ETA in minutes for `remaining` blocks on `currency`. We use the
+ * average inter-block time per chain — Bitcoin ≈ 10 min, Litecoin ≈ 2.5
+ * min, Ethereum ≈ 12 sec. This is just for the "awaiting N confirmations
+ * (~M minutes)" label in the notification; under-estimating is worse
+ * than over-estimating because users will start asking "where's my
+ * license?" — so we round up generously.
+ */
+function estimateConfirmationEta(currency: "BTC" | "LTC" | "ETH", remaining: number): number {
+  if (remaining <= 0) return 0
+  const avgMinutesPerBlock: Record<string, number> = {
+    BTC: 10,
+    LTC: 2.5,
+    ETH: 0.2, // 12s/block, rounded
+  }
+  const perBlock = avgMinutesPerBlock[currency] ?? 5
+  // +20% slack: blocks are exponentially distributed, so the expected
+  // wait is variance-heavy and "average × N" is a lower bound.
+  return Math.ceil(remaining * perBlock * 1.2)
+}
 
 let stopped = false
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -44,10 +71,54 @@ async function pollOnce(): Promise<void> {
       log.warn("fetchIncomingTxs failed", { currency, error: err instanceof Error ? err.message : String(err) })
       continue
     }
+    // Index offers by expected amount once per group so both the
+    // in-progress (seen but not enough confirmations) and the
+    // confirmed branches share the same lookup.
+    const expectedSet = new Map<string, (typeof openOffers)[number]>()
+    for (const o of openOffers) expectedSet.set(o.expected_units, o)
+
     for (const tx of txs) {
+      const seenMatch = expectedSet.get(tx.amountUnits.toString())
+
+      // Branch 1: tx with confirmations < minConfirmations — record + notify
+      // ONCE per offer, then skip (the next poll cycle will re-evaluate
+      // and either move it to issued state or update the conf count).
+      if (seenMatch && tx.confirmations < wallet.minConfirmations) {
+        markOfferSeen({
+          id: seenMatch.id,
+          txHash: tx.txid,
+          confirmations: tx.confirmations,
+        })
+        // First-time sighting → fire the "payment received, awaiting
+        // confirmations" notification so the user isn't left in the dark.
+        const isFirstSighting = markOfferNotifiedSeen(seenMatch.id)
+        if (isFirstSighting) {
+          const order = getOrder(seenMatch.order_id)
+          if (order?.customer_user_id) {
+            await notifyPaymentSeen({
+              telegram_user_id: order.customer_user_id,
+              order_id: order.id,
+              currency: seenMatch.currency,
+              tx: tx.txid,
+              current_confirmations: tx.confirmations,
+              required_confirmations: wallet.minConfirmations,
+              eta_minutes: estimateConfirmationEta(seenMatch.currency, wallet.minConfirmations - tx.confirmations),
+            }).catch((err) =>
+              log.warn("notifyPaymentSeen failed", { error: err instanceof Error ? err.message : String(err) }),
+            )
+            log.info("payment seen, awaiting confirmations", {
+              offer_id: seenMatch.id,
+              order_id: order.id,
+              tx: tx.txid,
+              conf: `${tx.confirmations}/${wallet.minConfirmations}`,
+            })
+          }
+        }
+        continue
+      }
+
+      // Branch 2: confirmations met — proceed to issuance.
       if (tx.confirmations < wallet.minConfirmations) continue
-      const expectedSet = new Map<string, (typeof openOffers)[number]>()
-      for (const o of openOffers) expectedSet.set(o.expected_units, o)
       const match = expectedSet.get(tx.amountUnits.toString())
       if (!match) continue
       // Atomic-ish: mark offer matched. The DB unique constraint via matched_tx_hash

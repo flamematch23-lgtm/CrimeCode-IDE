@@ -430,6 +430,26 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
       await ack(`📋 ${a1} — long-press to copy`, true)
       return
     }
+    if (verb === "orderstatus" && a1) {
+      // Live status pull from the same payment_offers table the bot
+      // displays via /status. Cheaper than re-issuing the order msg
+      // because we only update the toast — no new chat noise.
+      const o = getOrder(a1)
+      if (!o || (o.customer_user_id && o.customer_user_id !== fromId)) {
+        return ack("Ordine non trovato o non tuo", true)
+      }
+      const offers = getOffersForOrder(a1)
+      const matched = offers.find((x) => x.matched_tx_hash != null)
+      const seen = offers.find((x) => x.seen_tx_hash != null && x.matched_tx_hash == null)
+      if (matched) return ack(`✅ Pagamento confermato — licenza emessa`, true)
+      if (seen) {
+        return ack(
+          `🔔 Pagamento ricevuto, ${seen.seen_confirmations ?? 0} conferme. Il token arriverà in automatico.`,
+          true,
+        )
+      }
+      return ack("⏳ In attesa di pagamento — invia l'importo esatto a uno dei wallet sopra.", true)
+    }
     return ack("Azione sconosciuta", true)
   }
 
@@ -681,7 +701,17 @@ async function handle(update: TgUpdate) {
         customer_user_id: userId,
         interval: interval as "monthly" | "annual" | "lifetime",
       })
-      await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang), "Markdown")
+      await send(
+        chatId,
+        await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang),
+        "Markdown",
+        [
+          [
+            { text: "🔄 Check status", callback_data: `usr:orderstatus:${o.id}` },
+            { text: "🚫 Cancel order", callback_data: `usr:cancelmyord:${o.id}` },
+          ],
+        ],
+      )
       return
     }
     case "status": {
@@ -692,10 +722,26 @@ async function handle(update: TgUpdate) {
         await send(chatId, "You are not the owner of this order.")
         return
       }
+      // Surface payment-seen progress so the user can self-verify the
+      // confirmation count without DMing support. Pulls every offer for
+      // the order; the matched one wins, otherwise the seen one wins.
+      const offers = getOffersForOrder(o.id)
+      const matched = offers.find((x) => x.matched_tx_hash != null)
+      const seen = offers.find((x) => x.seen_tx_hash != null && x.matched_tx_hash == null)
       let body = `Order *${o.id}*\nPlan: *${o.interval}*\nStatus: *${o.status}*`
-      if (o.tx_hash) body += `\ntx: \`${escapeMd(o.tx_hash)}\``
+      if (o.tx_hash) body += `\nTx: \`${escapeMd(o.tx_hash)}\``
       if (o.license_id) body += `\nLicense: \`${o.license_id}\``
-      await send(chatId, body, "Markdown")
+      if (!matched && seen) {
+        // We have an in-progress payment — show conf count.
+        body +=
+          `\n\n🔔 *Payment received — awaiting confirmations*\n` +
+          `Currency: *${seen.currency}*\n` +
+          `Tx: \`${escapeMd((seen.seen_tx_hash ?? "").slice(0, 16))}…\`\n` +
+          `Confirmations: *${seen.seen_confirmations ?? 0}* — license auto-issues when network confirms.`
+      }
+      const kb: TgKeyboard | undefined =
+        o.status === "pending" ? [[{ text: "🚫 Cancel order", callback_data: `usr:cancelmyord:${o.id}` }]] : undefined
+      await send(chatId, body, "Markdown", kb)
       return
     }
     case "teams": {
