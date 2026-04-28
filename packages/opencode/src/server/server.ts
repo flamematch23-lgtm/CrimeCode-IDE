@@ -46,6 +46,7 @@ import { GlobalRoutes } from "./routes/global"
 import { LiveShareRoutes } from "./routes/liveshare"
 import { InviteRoutes } from "./routes/invite"
 import { LicenseRoutes } from "./routes/license"
+import { SyncRoutes } from "./routes/sync"
 import { startTelegramBot } from "../license/telegram"
 import { startPaymentPoller } from "../license/poller"
 import { startBackupScheduler } from "../license/backup"
@@ -162,6 +163,10 @@ export namespace Server {
           const v = verifySessionToken(auth.slice(7))
           if (v.ok) {
             touchSession(v.payload.sid)
+            // Expose verified identity to downstream handlers (e.g. /sync/*)
+            // so they can scope writes/reads to this customer.
+            c.set("customer_id" as never, v.payload.sub as never)
+            c.set("telegram_user_id" as never, v.payload.tg as never)
             return next()
           }
         }
@@ -192,6 +197,10 @@ export namespace Server {
       .route("/global", GlobalRoutes())
       .route("/security", SecurityRoutes())
       .route("/license", LicenseRoutes())
+      // /sync/* is auth-gated (Bearer token, customer-scoped) but does NOT
+      // require a local project Instance — must be mounted BEFORE the
+      // Instance.provide middleware below.
+      .route("/sync", SyncRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({
