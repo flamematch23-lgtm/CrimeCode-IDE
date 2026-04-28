@@ -26,46 +26,57 @@ export interface TelegramUser {
 export const TelegramProvider = (config: TelegramAuthConfig) => {
   return {
     type: "telegram" as const,
-    async validateAuthData(initData: string): Promise<TelegramUser | null> {
-      const params = new URLSearchParams(initData)
-      const hash = params.get("hash")
-      if (!hash) return null
-
-      const dataCheckString = Array.from(params.entries())
-        .filter(([key]) => key !== "hash")
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => `${key}=${value}`)
-        .join("\n")
-
-      const encoder = new TextEncoder()
-      const key = await crypto.subtle.importKey(
-        "raw",
-        encoder.encode(config.botToken),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"]
-      )
-      const signature = await crypto.subtle.sign(
-        "HMAC",
-        key,
-        encoder.encode(dataCheckString)
-      )
-      const expectedHash = Array.from(new Uint8Array(signature))
-        .map(b => b.toString(16).padStart(2, "0"))
-        .join("")
-
-      if (expectedHash !== hash) return null
-
+    init: async (initData: string) => {
+      const user = await validateAuthData(initData)
+      if (!user) throw new Error("Invalid Telegram auth data")
       return {
-        id: Number(params.get("id")),
-        first_name: params.get("first_name") || undefined,
-        last_name: params.get("last_name") || undefined,
-        username: params.get("username") || undefined,
-        photo_url: params.get("photo_url") || undefined,
-        auth_date: Number(params.get("auth_date")),
-        hash,
+        id: user.id.toString(),
+        email: `${user.username}@telegram.user`,
+        name: [user.first_name, user.last_name].filter(Boolean).join(" "),
       }
     },
+    validateAuthData,
+  }
+}
+
+async function validateAuthData(initData: string): Promise<TelegramUser | null> {
+  const params = new URLSearchParams(initData)
+  const hash = params.get("hash")
+  if (!hash) return null
+
+  const dataCheckString = Array.from(params.entries())
+    .filter(([key]) => key !== "hash")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n")
+
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(config.botToken),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(dataCheckString)
+  )
+  const expectedHash = Array.from(new Uint8Array(signature))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  if (expectedHash !== hash) return null
+
+  return {
+    id: Number(params.get("id")),
+    first_name: params.get("first_name") || undefined,
+    last_name: params.get("last_name") || undefined,
+    username: params.get("username") || undefined,
+    photo_url: params.get("photo_url") || undefined,
+    auth_date: Number(params.get("auth_date")),
+    hash,
   }
 }
 
