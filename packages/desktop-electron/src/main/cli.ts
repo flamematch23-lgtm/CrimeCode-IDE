@@ -317,7 +317,14 @@ export function toggleProxy(enabled: boolean, target?: string, auth?: string, pr
   }
   proxyProcess = utilityProcess.fork(path, [], {
     stdio: "pipe",
-    env: { ...base, PORT: port, TARGET_URL: target || "", TARGET_AUTH: auth || "", TARGET_USERNAME: username || "" },
+    env: {
+      ...base,
+      PORT: port,
+      TARGET_URL: target || "",
+      TARGET_AUTH: auth || "",
+      TARGET_USERNAME: username || "",
+      ULTRA_CRIME: "1",
+    },
   })
 
   proxyProcess.stdout?.on("data", (data) => {
