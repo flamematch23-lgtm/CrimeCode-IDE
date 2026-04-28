@@ -99,6 +99,8 @@ export function SessionContextTab() {
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
   const showContent = createMemo(() => !!info())
   const [loadTimedOut, setLoadTimedOut] = createSignal(false)
+  const [backoffMs, setBackoffMs] = createSignal(2000)
+  let autoReloadTimer: number | undefined
 
   onMount(() => {
     const t = window.setTimeout(() => {
@@ -108,6 +110,17 @@ export function SessionContextTab() {
     }, 1000)
     // cleanup
     onCleanup(() => window.clearTimeout(t))
+  })
+
+  // Advanced auto-retry with exponential backoff (client-side)
+  createEffect(() => {
+    if (loadTimedOut()) {
+      autoReloadTimer = window.setTimeout(() => {
+        location.reload()
+      }, backoffMs())
+      // prepare next potential retry (backoff doubles, capped)
+      setBackoffMs((ms) => Math.min(ms * 2, 60000))
+    }
   })
 
   const messages = createMemo(
@@ -275,6 +288,7 @@ export function SessionContextTab() {
   )
 
   onCleanup(() => {
+    if (autoReloadTimer !== undefined) clearTimeout(autoReloadTimer)
     if (frame === undefined) return
     cancelAnimationFrame(frame)
   })
@@ -284,7 +298,7 @@ export function SessionContextTab() {
       loadTimedOut() ? (
         <div class="p-4 text-center text-sm text-muted">
           Errore nel caricamento delle sessioni.
-          <button class="ml-2 px-2 py-1 rounded" onClick={() => location.reload()}>
+          <button class="ml-2 px-2 py-1 rounded" title="Riprova ricarica le sessioni" onClick={() => location.reload()}>
             Riprova
           </button>
         </div>
