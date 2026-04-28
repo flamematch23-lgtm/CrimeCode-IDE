@@ -241,100 +241,12 @@ export namespace LiveShare {
     return hub
   }
 
-  // Start a local WebSocket server (LAN mode)
-  async function startLocal(opts: { port?: number; hostname?: string; secret: string }): Promise<{ port: number }> {
-    const { secret } = opts
-    const hostname = opts.hostname ?? "0.0.0.0"
-
-    const server = Bun.serve<{ code: string; name: string }>({
-      hostname,
-      port: opts.port ?? 0,
-      fetch(req, srv) {
-        const url = new URL(req.url)
-        if (url.pathname === "/health") return new Response("ok")
-        const ok = srv.upgrade(req, {
-          data: {
-            code: url.searchParams.get("code") ?? "",
-            name: url.searchParams.get("name") ?? "",
-          },
-        })
-        if (ok) return undefined
-        return new Response("upgrade failed", { status: 400 })
-      },
-      websocket: {
-        open(ws) {
-          if (!codeValid(secret, ws.data.code)) {
-            ws.send(JSON.stringify({ type: "kicked", reason: "invalid or expired code" }))
-            ws.close(4001, "invalid code")
-            return
-          }
-          const id = crypto.randomBytes(4).toString("hex")
-          const raw = (ws.data.name || "")
-            .trim()
-            .replace(/[^a-zA-Z0-9_\- ]/g, "")
-            .slice(0, 32)
-          const name = raw || `user-${id.slice(0, 4)}`
-          ;(ws as any).__id = id
-          ;(ws as any).__name = name
-          const role = hub!.roles.get(name) ?? "viewer"
-          hub!.clients.set(id, { id, name, joined: Date.now(), ws: ws as unknown as WebSocket, role })
-          ws.send(JSON.stringify({ type: "hello", id, name, code: secret }))
-          ws.send(JSON.stringify(snapshot()))
-          broadcast({ type: "joined", id, name })
-          broadcast({ type: "participants", list: participants() })
-          log.info("participant joined", { id, name })
-        },
-        message(ws, msg) {
-          if (typeof msg !== "string") return
-          const id = (ws as any).__id as string
-          const name = (ws as any).__name as string
-          try {
-            const parsed = JSON.parse(msg) as Msg
-            const c = hub!.clients.get(id)
-            if (c && c.role !== "editor" && !VIEWER_ALLOWED.has(parsed.type)) {
-              log.info("dropped message from viewer", { id, type: parsed.type })
-              return
-            }
-            if (parsed.type === "chat") {
-              const relay: Msg = { type: "chat", from: id, name, text: (parsed as any).text ?? "", ts: Date.now() }
-              broadcast(relay)
-              return
-            }
-            if (parsed.type === "presence") {
-              if (c) c.session = ((parsed as any).session as string | null) ?? null
-              broadcast({ type: "participants", list: participants() })
-              return
-            }
-            if (SIGNAL.has(parsed.type)) {
-              const to = (parsed as any).__to as string | undefined
-              const out = { ...(parsed as any), from: id } as unknown as Msg
-              delete (out as any).__to
-              if (to) {
-                broadcastTo(to, out)
-              } else {
-                broadcast(out, id)
-              }
-              return
-            }
-            broadcast(parsed, id)
-          } catch {}
-        },
-        close(ws) {
-          const id = (ws as any).__id as string
-          const name = (ws as any).__name as string
-          if (id) {
-            hub!.clients.delete(id)
-            broadcast({ type: "left", id, name })
-            broadcast({ type: "participants", list: participants() })
-            log.info("participant left", { id, name })
-          }
-        },
-      },
-    })
-
-    hub!.server = server
-    return { port: server.port ?? 0 }
-  }
+  // LAN mode (a local Bun.serve WebSocket bound to 0.0.0.0) was removed
+  // for security: the open handler validated the public code but never
+  // checked the host's `token`, so anyone on the LAN who knew the
+  // 8-character code could join even on a "locked" session. Relay mode
+  // (below) is now the only supported transport — it enforces both the
+  // code and the per-host token in `relay.ts`'s join handler.
 
   // Connect to relay as host (with reconnect support)
   const MAX_RETRIES = 5
@@ -490,16 +402,24 @@ export namespace LiveShare {
   }
 
   export async function start(opts: {
-    port?: number
-    hostname?: string
     relay?: string
     token?: string
-  }): Promise<{ code: string; port: number; hostname: string; relay: string | null; locked: boolean }> {
+  }): Promise<{ code: string; port: number; hostname: string; relay: string; locked: boolean }> {
     if (hub) throw new Error("Live share session already active")
 
+    // Relay is mandatory — LAN mode was removed because it had no token
+    // verification on the WebSocket open handler (anyone on the LAN who
+    // knew the 8-char code could join, even when the host configured a
+    // token). The relay path enforces token + hostKey end-to-end and is
+    // the only supported transport.
+    const relay = opts.relay ?? process.env.CRIMECODE_RELAY_URL
+    if (!relay) {
+      throw new Error(
+        "live share requires a relay URL — set CRIMECODE_RELAY_URL or pass `relay` in the request body",
+      )
+    }
+
     const secret = makeCode()
-    const relay = opts.relay ?? process.env.CRIMECODE_RELAY_URL ?? null
-    const hostname = opts.hostname ?? "0.0.0.0"
     const unsubs: (() => void)[] = []
     const key = b62(24) // 24 char base62 key for relay auth/resume
     const token = opts.token ?? ""
@@ -507,7 +427,7 @@ export namespace LiveShare {
     hub = {
       code: secret,
       port: 0,
-      hostname,
+      hostname: "",
       relay,
       token,
       key,
@@ -521,14 +441,8 @@ export namespace LiveShare {
       roles: new Map(),
     }
 
-    let port = 0
-    if (!relay) {
-      const result = await startLocal({ port: opts.port, hostname, secret })
-      port = result.port
-      hub.port = port
-    } else {
-      connectRelay(relay, secret)
-    }
+    connectRelay(relay, secret)
+    const port = 0
 
     // Forward relevant Bus events to participants and record replay history.
     // High-frequency PartDelta events are coalesced over a short window.
@@ -563,8 +477,8 @@ export namespace LiveShare {
       }),
     )
 
-    log.info("live share started", { code: secret.slice(0, 6), port, hostname, relay, locked: !!token })
-    return { code: secret, port, hostname, relay, locked: !!token }
+    log.info("live share started", { code: secret.slice(0, 6), relay, locked: !!token })
+    return { code: secret, port, hostname: "", relay, locked: !!token }
   }
 
   export function kick(id: string, reason?: string) {
@@ -643,8 +557,6 @@ export namespace LiveShare {
   }
 
   export function join(opts: {
-    host?: string
-    port?: number
     relay?: string
     code: string
     name?: string
@@ -658,21 +570,19 @@ export namespace LiveShare {
         return
       }
 
-      const relay = opts.relay ?? process.env.CRIMECODE_RELAY_URL ?? null
+      // Relay-only join: LAN mode was removed (see startLocal removal note
+      // earlier in this file). Both env-var and per-call relay URLs are
+      // accepted, in that order.
+      const relay = opts.relay ?? process.env.CRIMECODE_RELAY_URL
+      if (!relay) {
+        reject(new Error("relay URL required — set CRIMECODE_RELAY_URL or pass `relay`"))
+        return
+      }
       const nameParam = opts.name ? `&name=${encodeURIComponent(opts.name)}` : ""
       const tokenParam = opts.token ? `&token=${encodeURIComponent(opts.token)}` : ""
-      const isRelay = !!relay
+      const isRelay = true
 
-      let url: string
-      if (relay) {
-        url = `${relay}/?role=client&code=${opts.code}${nameParam}${tokenParam}`
-      } else {
-        if (!opts.host || !opts.port) {
-          reject(new Error("host and port required for LAN mode"))
-          return
-        }
-        url = `ws://${opts.host}:${opts.port}/?code=${opts.code}${nameParam}`
-      }
+      const url = `${relay}/?role=client&code=${opts.code}${nameParam}${tokenParam}`
 
       const ws = new WebSocket(url)
       const handlers = new Map<string, Set<(msg: Msg) => void>>()

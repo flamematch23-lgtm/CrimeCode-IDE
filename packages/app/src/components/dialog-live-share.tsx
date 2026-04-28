@@ -258,6 +258,21 @@ export function DialogLiveShare() {
         token = crypto.randomUUID().replace(/-/g, "").slice(0, 12)
         setTokenInput(token)
       }
+      // Cleanup before re-start: if a previous session is still active
+      // (e.g. user changed the relay URL and clicked Start again), tear it
+      // down first so the relay doesn't keep an orphan invite around.
+      // Without this the old code remains valid on the relay even though
+      // the host has rotated to a new one.
+      const cur = status()
+      if (cur?.active) {
+        try {
+          await apiPost(base(), "/liveshare/stop")
+        } catch {
+          /* best-effort — proceed even if stop reports an error */
+        }
+        sock()?.close()
+        setSock(null)
+      }
       const body: Record<string, unknown> = { token }
       if (relay) body.relay = relay
       const d = await apiPost(base(), "/liveshare/start", body)

@@ -10,6 +10,8 @@
  * or the other via getClient().
  */
 
+import { sseFetch } from "./sse-fetch"
+
 export type TeamRole = "owner" | "admin" | "member" | "viewer"
 
 export interface TeamSummary {
@@ -368,41 +370,44 @@ function webClient(): TeamsClient {
       }).catch(() => undefined)
     },
     subscribe: (id, onEvent) => {
-      if (typeof EventSource === "undefined") return () => undefined
       const s = readWebSession()
       if (!s) return () => undefined
-      const url = `${API_BASE}/license/teams/${encodeURIComponent(id)}/events?access_token=${encodeURIComponent(s.token)}`
-      const es = new EventSource(url)
-      const listener = (ev: MessageEvent) => {
-        try {
-          onEvent(JSON.parse(ev.data) as TeamEvent)
-        } catch {
-          // ignore malformed events
-        }
-      }
-      // Subscribe to all known event types.
-      const types = [
-        "hello",
-        "ping",
-        "session_started",
-        "session_heartbeat",
-        "session_ended",
-        "member_added",
-        "member_removed",
-        "member_role_changed",
-        "team_renamed",
-        "team_deleted",
-        "cursor_moved",
-      ]
-      for (const t of types) es.addEventListener(t, listener as EventListener)
-      es.addEventListener("error", () => {
-        // EventSource auto-retries on its own, we just surface a synthetic
-        // "ping"-like tick so the UI knows the channel is still warming up.
+      // POST + Authorization header instead of EventSource + `?access_token=`.
+      // The token used to leak into server logs, browser history and proxy
+      // referrers; sse-fetch wraps a fetch ReadableStream so the JWT stays
+      // strictly inside the request header.
+      const handle = sseFetch({
+        url: `${API_BASE}/license/teams/${encodeURIComponent(id)}/events-stream`,
+        method: "POST",
+        body: "{}",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${s.token}`,
+        },
+        onEvent: (e) => {
+          // Filter heartbeats — the server emits `event: ping` every 25s
+          // to keep idle proxies from closing the connection. Hello frames
+          // are also book-keeping; nobody upstream cares.
+          if (e.event === "ping" || e.event === "hello") return
+          try {
+            const ev = JSON.parse(e.data) as TeamEvent
+            // Defence-in-depth: drop events whose `team_id` doesn't match
+            // the subscription. Server already scopes via subscribeTeam,
+            // but we double-check on the client to avoid cross-team leaks
+            // if a future bug surfaces upstream.
+            if ((ev as { team_id?: string }).team_id && (ev as { team_id?: string }).team_id !== id) return
+            onEvent(ev)
+          } catch {
+            /* ignore malformed events */
+          }
+        },
+        onError: (err) => {
+          // Auth failures land here. We don't surface them to the caller
+          // (the .subscribe contract is fire-and-forget) — just stop.
+          console.warn("[teams-client] subscribe stream ended", err.message)
+        },
       })
-      return () => {
-        for (const t of types) es.removeEventListener(t, listener as EventListener)
-        es.close()
-      }
+      return () => handle.close()
     },
   }
 }

@@ -50,6 +50,7 @@ import { LicenseRoutes } from "./routes/license"
 import { SyncRoutes } from "./routes/sync"
 import { AccountRoutes } from "./routes/account"
 import { startTelegramBot } from "../license/telegram"
+import { startTeamReaper } from "../license/team-reaper"
 import { startPaymentPoller } from "../license/poller"
 import { startBackupScheduler } from "../license/backup"
 import { startRenewalReminders } from "../license/reminders"
@@ -693,6 +694,16 @@ export namespace Server {
     } catch (err) {
       log.warn("failed to start backup scheduler", { error: err instanceof Error ? err.message : String(err) })
       captureException(err, { tags: { surface: "backup-init" } })
+    }
+    // Team-session reaper — sweeps every 30s for sessions that haven't
+    // heartbeated in 60s and marks them ended (with `session_ended` event).
+    // Without this a host crash leaves a session "active" for up to 90s,
+    // blocking new sessions on the same team and lying to subscribers.
+    try {
+      startTeamReaper()
+    } catch (err) {
+      log.warn("failed to start team reaper", { error: err instanceof Error ? err.message : String(err) })
+      captureException(err, { tags: { surface: "team-reaper-init" } })
     }
     // Renewal reminders — DM customers ~7 days before their monthly/annual
     // license expires.

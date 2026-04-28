@@ -944,7 +944,17 @@ export const LicenseRoutes = lazy(() => {
     const sess = sessionGuard(c as never)
     if (!sess) return c.json({ error: "unauthorized" }, 401)
     const teamId = c.req.param("id")
+    const sid = c.req.param("sid")
     if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    // Cross-team leak guard: reject the publish if this session_id isn't
+    // an active session of the given team. Without this, a buggy client
+    // (or attacker) could spray cursor packets at any team's SSE channel
+    // by passing a session id from a totally unrelated team — the server
+    // would happily fan it out.
+    const { isActiveSessionInTeam } = await import("../../license/teams")
+    if (!isActiveSessionInTeam(teamId, sid)) {
+      return c.json({ error: "session_not_in_team" }, 404)
+    }
     const body = (await c.req.json().catch(() => ({}))) as { x?: number; y?: number; label?: string }
     const x = typeof body.x === "number" ? Math.max(0, Math.min(1, body.x)) : null
     const y = typeof body.y === "number" ? Math.max(0, Math.min(1, body.y)) : null
@@ -953,7 +963,7 @@ export const LicenseRoutes = lazy(() => {
     emitTeamEvent({
       type: "cursor_moved",
       team_id: teamId,
-      session_id: c.req.param("sid"),
+      session_id: sid,
       customer_id: sess.sub,
       x,
       y,
@@ -963,15 +973,15 @@ export const LicenseRoutes = lazy(() => {
   })
 
   // SSE stream: live push of team events (sessions, member changes, renames).
-  // EventSource can't send Authorization headers, so the browser client passes
-  // the session token as `?access_token=` — we verify it the same way as the
-  // Bearer header.
-  app.get("/teams/:id/events", async (c) => {
+  // POST so the renderer can attach the Bearer JWT in the Authorization
+  // header (fetch + ReadableStream is the new transport — see
+  // `packages/app/src/utils/sse-fetch.ts`). The legacy GET endpoint with
+  // `?access_token=` was removed because it leaked tokens into server logs,
+  // browser history and proxy referrer headers.
+  app.post("/teams/:id/events-stream", async (c) => {
     const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/, "")
-    const qToken = c.req.query("access_token")
-    const token = bearer || qToken
-    if (!token) return c.json({ error: "unauthorized" }, 401)
-    const verified = verifySessionToken(token)
+    if (!bearer) return c.json({ error: "unauthorized" }, 401)
+    const verified = verifySessionToken(bearer)
     if (!verified.ok) return c.json({ error: "unauthorized" }, 401)
     const teamId = c.req.param("id")
     if (!getMemberRole(teamId, verified.payload.sub)) return c.json({ error: "forbidden" }, 403)

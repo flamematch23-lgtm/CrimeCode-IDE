@@ -58,6 +58,13 @@ const BASE = 500
 const PING = 15_000
 const CAP = 30_000
 const EVT_MAX = 200
+// Host-gone watchdog: if we don't receive a `participants` snapshot
+// containing the host (or any host-only event) within this window, we
+// assume the host has crashed without sending `stopped` and we close the
+// socket. The relay's own pong-timeout is between us and the relay, not
+// us and the host — without this watchdog a host crash leaves us stuck
+// with a "connected" socket forever.
+const HOST_QUIET_THRESHOLD_MS = 60_000
 
 export function createLiveShareSocket(opts: Opts): Handle {
   const max = opts.maxRetries ?? MAX
@@ -79,8 +86,13 @@ export function createLiveShareSocket(opts: Opts): Handle {
   let ws: WebSocket | null = null
   let pingTimer: ReturnType<typeof setInterval> | null = null
   let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let watchdogTimer: ReturnType<typeof setInterval> | null = null
   let stopped = false
   let lastPong = Date.now()
+  // Tracks the last time we saw evidence the host is still alive: a fresh
+  // event from them, a `participants` list including their id, or a
+  // `relay_*` greeting. Reset by the watchdog after each verified beat.
+  let lastHostBeat = Date.now()
 
   function go(s: State) {
     set("state", s)
@@ -99,6 +111,32 @@ export function createLiveShareSocket(opts: Opts): Handle {
       clearTimeout(retryTimer)
       retryTimer = null
     }
+  }
+
+  function clearWatchdog() {
+    if (watchdogTimer) {
+      clearInterval(watchdogTimer)
+      watchdogTimer = null
+    }
+  }
+
+  function startWatchdog() {
+    clearWatchdog()
+    lastHostBeat = Date.now()
+    watchdogTimer = setInterval(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      if (Date.now() - lastHostBeat > HOST_QUIET_THRESHOLD_MS) {
+        // Host gone: surface to the user, then close gracefully so the
+        // reconnect loop kicks in. If the host comes back the next
+        // `joined` / `participants` message will reset lastHostBeat.
+        set("error", "host appears offline (no activity for 60s)")
+        try {
+          ws.close(1000, "host gone")
+        } catch {
+          /* ignore */
+        }
+      }
+    }, HOST_QUIET_THRESHOLD_MS / 4)
   }
 
   function startPing() {
@@ -183,8 +221,10 @@ export function createLiveShareSocket(opts: Opts): Handle {
     sock.onopen = () => {
       set({ retries: 0 })
       lastPong = Date.now()
+      lastHostBeat = Date.now()
       go("connected")
       startPing()
+      startWatchdog()
     }
 
     sock.onmessage = (evt) => {
@@ -194,6 +234,14 @@ export function createLiveShareSocket(opts: Opts): Handle {
         msg = JSON.parse(evt.data as string) as Msg
       } catch {
         return
+      }
+
+      // Any message from the host counts as proof of life for the watchdog.
+      // The relay's own pings are filtered (they originate from the relay,
+      // not the host) so a relay-up + host-down state still trips the
+      // watchdog after the threshold.
+      if (msg.type !== "ping" && msg.type !== "pong") {
+        lastHostBeat = Date.now()
       }
 
       if (msg.type === "pong") return
@@ -247,6 +295,7 @@ export function createLiveShareSocket(opts: Opts): Handle {
 
     sock.onclose = (evt) => {
       clearPing()
+      clearWatchdog()
       ws = null
       if (stopped || evt.code === 1000 || evt.code === 4001 || evt.code === 4002) {
         go("closed")
@@ -293,6 +342,7 @@ export function createLiveShareSocket(opts: Opts): Handle {
       stopped = true
       clearPing()
       clearRetry()
+      clearWatchdog()
       if (ws) {
         try {
           ws.close(1000, "client closed")

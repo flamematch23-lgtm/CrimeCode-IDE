@@ -31,9 +31,9 @@ const ShareStartCommand = cmd({
   handler: async (args) => {
     await bootstrap(process.cwd(), async () => {
       const relay = args.relay ?? process.env.CRIMECODE_RELAY_URL
+      // LAN mode was removed — port/hostname args are accepted by the CLI
+      // for backwards-compat but ignored here. Relay is required.
       const result = await LiveShare.start({
-        port: args.port,
-        hostname: args.hostname,
         relay,
         token: args.token,
       })
@@ -121,8 +121,6 @@ const ShareJoinCommand = cmd({
 
       result = await LiveShare.join({
         relay,
-        host: args.host,
-        port: args.port,
         code: args.code,
         name: args.name,
         token: args.token,

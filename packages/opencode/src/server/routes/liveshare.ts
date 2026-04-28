@@ -15,6 +15,8 @@ const ParticipantSchema = z.object({
 
 const HubSchema = z.object({
   code: z.string(),
+  // `port` and `hostname` are kept for backward-compat with older clients
+  // but are always 0 / "" since LAN mode was removed — relay is required.
   port: z.number(),
   hostname: z.string(),
   relay: z.string().nullable(),
@@ -92,9 +94,11 @@ export const LiveShareRoutes = lazy(() =>
         "json",
         z
           .object({
-            port: z.number().optional(),
-            hostname: z.string().optional(),
+            // Optional override for the relay URL — falls back to
+            // CRIMECODE_RELAY_URL on the server. LAN mode was removed.
             relay: z.string().optional(),
+            // Optional join token (lock the session); clients must echo
+            // it on join or the relay rejects them.
             token: z.string().optional(),
           })
           .optional(),
@@ -103,8 +107,6 @@ export const LiveShareRoutes = lazy(() =>
         try {
           const body = c.req.valid("json")
           const result = await LiveShare.start({
-            port: body?.port,
-            hostname: body?.hostname,
             relay: body?.relay,
             token: body?.token,
           })

@@ -352,6 +352,27 @@ export function createTeamSession(opts: { team_id: string; host: string; title: 
   return db.prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?").get(id)!
 }
 
+/**
+ * Verify that `sessionId` is an active session belonging to `teamId`.
+ * Returns true only if the row exists, is in the named team, and hasn't
+ * been ended. Used by the cursor-broadcast endpoint to make sure a stale
+ * session_id from another team can't be used to leak cursor packets across
+ * teams via /sessions/:sid/cursor.
+ */
+export function isActiveSessionInTeam(teamId: string, sessionId: string): boolean {
+  const cutoff = now() - 90
+  const row = getDb()
+    .prepare<{ id: string }, [string, string, number]>(
+      `SELECT id FROM team_sessions
+        WHERE id = ?
+          AND team_id = ?
+          AND ended_at IS NULL
+          AND last_heartbeat_at >= ?`,
+    )
+    .get(sessionId, teamId, cutoff)
+  return !!row
+}
+
 export function listActiveSessions(teamId: string, viewer: string): TeamSessionRow[] {
   if (!getMemberRole(teamId, viewer)) return []
   // Sessions that haven't heartbeated in >90s are considered stale.
@@ -373,11 +394,52 @@ export function heartbeatSession(sessionId: string, actor: string, state?: unkno
     .prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?")
     .get(sessionId)
   if (!row || row.host_customer_id !== actor) return null
-  db.prepare(
-    "UPDATE team_sessions SET last_heartbeat_at = ?, state = COALESCE(?, state) WHERE id = ?",
-  ).run(now(), state !== undefined ? JSON.stringify(state).slice(0, 16_000) : null, sessionId)
+  // Refuse to refresh a session that's already been ended. Without this
+  // guard a heartbeat that races endSession() can clobber the row's
+  // last_heartbeat_at timestamp on a "dead" session, leaving stale state
+  // in the DB and confusing downstream tooling that expects ended rows
+  // to stop changing.
+  if (row.ended_at !== null) return null
+  const r = db
+    .prepare(
+      "UPDATE team_sessions SET last_heartbeat_at = ?, state = COALESCE(?, state) WHERE id = ? AND ended_at IS NULL",
+    )
+    .run(now(), state !== undefined ? JSON.stringify(state).slice(0, 16_000) : null, sessionId)
+  if (r.changes === 0) return null
   emitTeamEvent({ type: "session_heartbeat", team_id: row.team_id, session_id: sessionId })
   return db.prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?").get(sessionId) ?? null
+}
+
+/**
+ * Sweep team_sessions: any row that hasn't heartbeated in `staleSec`
+ * seconds and is still missing `ended_at` gets stamped as ended (with
+ * `ended_at = now`). Emits `session_ended` for each so subscribers
+ * (web app live-sessions list, telegram bot, …) tear down their UI.
+ *
+ * Called by the background reaper started in `startSessionReaper()`.
+ * Safe to call concurrently — every UPDATE filters on `ended_at IS NULL`
+ * so a second sweeper is a no-op.
+ */
+export function reapStaleSessions(staleSec: number = 60): number {
+  const db = getDb()
+  const cutoff = now() - staleSec
+  const stale = db
+    .prepare<{ id: string; team_id: string }, [number]>(
+      "SELECT id, team_id FROM team_sessions WHERE ended_at IS NULL AND last_heartbeat_at < ?",
+    )
+    .all(cutoff)
+  if (stale.length === 0) return 0
+  let reaped = 0
+  for (const s of stale) {
+    const r = db
+      .prepare("UPDATE team_sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL")
+      .run(now(), s.id)
+    if (r.changes > 0) {
+      emitTeamEvent({ type: "session_ended", team_id: s.team_id, session_id: s.id })
+      reaped += 1
+    }
+  }
+  return reaped
 }
 
 export function endSession(sessionId: string, actor: string): boolean {
