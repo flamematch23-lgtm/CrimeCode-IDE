@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception"
 import z from "zod"
 import { Database, eq, and, gt, sql } from "../../storage/db"
 import { CloudEventTable } from "../../sync/cloud-event.sql"
+import { CloudEventQueries } from "../../sync/cloud-event-queries"
 import { Log } from "../../util/log"
 import { CloudClient } from "../../sync/cloud-client"
 
@@ -165,16 +166,46 @@ export const SyncRoutes = () =>
         return c.json(result)
       },
     )
-    // GET /sync/status — observability for the renderer.
+    // GET /sync/status — observability for the local sidecar's CloudClient
+    // (push cursor, pull cursor, last error). Useful in the desktop app
+    // for "is my sync alive" indicators.
     .get(
       "/status",
       describeRoute({
-        summary: "Cloud sync status",
+        summary: "Local CloudClient runtime status",
         operationId: "sync.status",
         responses: { 200: { description: "Status" } },
       }),
       async (c) => {
         return c.json(CloudClient.getStatus())
+      },
+    )
+    // GET /sync/me — server-side aggregate stats for the calling customer.
+    // Different from /sync/status: this hits the cloud_event log (the
+    // central API server's record of what's been pushed for this customer)
+    // and returns totals + most-recently-active aggregates. Powers the
+    // "Cloud sync" panel of the customer dashboard.
+    .get(
+      "/me",
+      describeRoute({
+        summary: "Server-side cloud-event stats for the calling customer",
+        operationId: "sync.me",
+        responses: {
+          200: { description: "Customer sync stats" },
+          401: { description: "Bearer token required" },
+        },
+      }),
+      async (c) => {
+        const customerId = requireCustomer(c)
+        const stats = CloudEventQueries.statsForCustomer(customerId)
+        const top = CloudEventQueries.topAggregatesForCustomer(customerId, 5)
+        return c.json({
+          totalEvents: stats.totalEvents,
+          uniqueAggregates: stats.uniqueAggregates,
+          firstPushedAt: stats.firstPushedAt,
+          lastPushedAt: stats.lastPushedAt,
+          topAggregates: top,
+        })
       },
     )
 

@@ -48,6 +48,7 @@ import { LiveShareRoutes } from "./routes/liveshare"
 import { InviteRoutes } from "./routes/invite"
 import { LicenseRoutes } from "./routes/license"
 import { SyncRoutes } from "./routes/sync"
+import { AccountRoutes } from "./routes/account"
 import { startTelegramBot } from "../license/telegram"
 import { startPaymentPoller } from "../license/poller"
 import { startBackupScheduler } from "../license/backup"
@@ -202,6 +203,9 @@ export namespace Server {
       // require a local project Instance — must be mounted BEFORE the
       // Instance.provide middleware below.
       .route("/sync", SyncRoutes())
+      // /account/* — same idea: customer-scoped self-service endpoints
+      // (identity, devices, logout) that don't need a project context.
+      .route("/account", AccountRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({

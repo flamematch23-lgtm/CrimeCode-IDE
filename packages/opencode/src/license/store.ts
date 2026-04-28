@@ -94,11 +94,12 @@ export function findCustomerByIdOrTelegram(needle: string): CustomerRow | null {
   const db = getDb()
   const trimmed = needle.trim()
   if (!trimmed) return null
-  // 1) cus_… id
-  if (trimmed.startsWith("cus_")) {
-    const r = db.prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE id = ?").get(trimmed)
-    if (r) return r
-  }
+  // 1) Direct customer_id lookup. Tried first regardless of prefix because
+  // session tokens encode the canonical id in `sub`, and we want this
+  // helper to resolve them even if the id format ever drifts from the
+  // historical `cus_…` shape.
+  const byId = db.prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE id = ?").get(trimmed)
+  if (byId) return byId
   // 2) numeric Telegram user id
   const numeric = Number(trimmed)
   if (Number.isFinite(numeric) && Number.isInteger(numeric)) {
