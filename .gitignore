@@ -43,3 +43,6 @@ packages/relay/relay.exe
 *.pfx
 *.pem
 *.key
+
+# Claude Code scratch directory (lock files etc.)
+.claude/scheduled_tasks.lock
