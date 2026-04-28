@@ -3,11 +3,12 @@ import { captureException } from "./sentry"
 import {
   approveCustomer,
   claimPinForCustomer,
+  listPendingCustomers,
   listSessionsForCustomer,
   rejectCustomer,
   revokeAllSessionsForCustomer,
 } from "./auth"
-import { notifyUserApproved, notifyUserRejected } from "./telegram-notify"
+import { notifyAdminNewPendingUser, notifyUserApproved, notifyUserRejected } from "./telegram-notify"
 import { listTeamsForCustomer } from "./teams"
 import { helpUser, orderCreatedMessage, pickLang, rememberLang, type Lang } from "./telegram-i18n"
 import {
@@ -16,6 +17,7 @@ import {
   confirmOrderAndIssue,
   createOrder,
   findCustomerByIdOrTelegram,
+  findCustomerByTelegram,
   findOrCreateCustomerByTelegram,
   getLicense,
   getOffersForOrder,
@@ -137,6 +139,13 @@ We store only your Telegram handle, your order, and the license token signature.
 🆘 *Need a human?* Message @OpCrime1312 or @JollyFraud — quote your order ID.`
 
 const HELP_ADMIN = `🛠️ *Admin commands* (you only)
+
+*Approvals*
+\`/pendingusers\` — list customers awaiting approval
+\`/approve <cus_id|@telegram|user_id> [days=2]\` — approve + start trial
+\`/reject <cus_id|@telegram|user_id> [reason]\` — reject the request
+   _Tip: when a new user signs up, the bot DMs you a card with inline_
+   _approve/reject buttons. These commands cover the same flow on demand._
 
 *Orders & licenses*
 \`/confirm <order_id> [tx_hash]\` — confirm payment + auto-deliver token
@@ -346,9 +355,27 @@ async function handle(update: TgUpdate) {
   const cmd = cmdMatch[1].toLowerCase()
   const args = (cmdMatch[2] ?? "").trim()
 
-  // Make sure this user is in the customers table (idempotent).
+  // Make sure this user is in the customers table. If they're brand new
+  // (no row yet for either telegram_user_id or telegram handle), fire a
+  // one-time admin notification with inline approve/reject buttons —
+  // this used to never happen for Telegram-only signups, leaving the
+  // dashboard's "Pending approvals" tab as the only way to see them.
   if (username || userId) {
-    findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+    const existed = findCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+    const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+    if (!existed) {
+      void notifyAdminNewPendingUser({
+        customer_id: customer.id,
+        username: null,
+        telegram: username ?? null,
+        telegram_user_id: userId ?? null,
+        email: customer.email,
+        method: "telegram",
+        created_at: customer.created_at,
+      }).catch((err) =>
+        log.warn("notifyAdminNewPendingUser failed", { error: err instanceof Error ? err.message : String(err) }),
+      )
+    }
   }
 
   switch (cmd) {
@@ -602,6 +629,75 @@ async function handle(update: TgUpdate) {
       await send(
         chatId,
         Object.entries(s).map(([k, v]) => `${k}: *${v}*`).join("\n"),
+        "Markdown",
+      )
+      return
+    }
+    // ── Pending-approval flow (Telegram-side admin tools) ──
+    // The dashboard at /license/admin already exposes the same data
+    // through HTML — these mirror it for admins who live in Telegram.
+    case "pendingusers":
+    case "pending_users": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      const list = listPendingCustomers(50)
+      if (list.length === 0) {
+        await send(chatId, "✨ No pending users — the queue is empty.")
+        return
+      }
+      const lines = list.map((c) => {
+        const tg = c.telegram ? "@" + escapeMd(c.telegram) : "_no telegram_"
+        const tgId = c.telegram_user_id ? ` (\`${c.telegram_user_id}\`)` : ""
+        const when = new Date(c.created_at * 1000).toISOString().replace("T", " ").slice(0, 16)
+        const name = c.username ? ` · ${escapeMd(c.username)}` : ""
+        return `• \`${c.id}\` — ${tg}${tgId}${name} — ${when}`
+      })
+      await send(
+        chatId,
+        `⏳ *Pending approvals* (${list.length})\n\n${lines.join("\n")}\n\n` +
+          "Approve: `/approve <cus_id> [days=2]`\nReject: `/reject <cus_id> [reason]`",
+        "Markdown",
+      )
+      return
+    }
+    case "approve": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      const parts = args.split(/\s+/).filter(Boolean)
+      const id = parts[0]
+      const days = Number.parseInt(parts[1] ?? "2", 10)
+      if (!id) { await send(chatId, "Usage: `/approve <cus_id|@telegram|user_id> [days=2]`", "Markdown"); return }
+      if (!Number.isFinite(days) || days < 1 || days > 365) {
+        await send(chatId, "Trial days must be a number between 1 and 365.")
+        return
+      }
+      const customer = findCustomerByIdOrTelegram(id)
+      if (!customer) { await send(chatId, "Customer not found."); return }
+      const r = approveCustomer(customer.id, { trialDays: days, approvedBy: `tg:${userId}` })
+      if (!r) { await send(chatId, "Approval failed — customer row vanished mid-flight."); return }
+      // Best-effort DM the customer in their preferred language.
+      void notifyUserApproved({ telegram_user_id: r.telegram_user_id, trial_days: days }).catch(() => undefined)
+      await send(
+        chatId,
+        `✅ Approved \`${customer.id}\` with a *${days}-day* trial.${
+          r.telegram_user_id ? "\n\nUser DM'd in their preferred language." : ""
+        }`,
+        "Markdown",
+      )
+      return
+    }
+    case "reject": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      const parts = args.split(/\s+/).filter(Boolean)
+      const id = parts[0]
+      const reason = parts.slice(1).join(" ").trim() || null
+      if (!id) { await send(chatId, "Usage: `/reject <cus_id|@telegram|user_id> [reason]`", "Markdown"); return }
+      const customer = findCustomerByIdOrTelegram(id)
+      if (!customer) { await send(chatId, "Customer not found."); return }
+      const r = rejectCustomer(customer.id, { reason, rejectedBy: `tg:${userId}` })
+      if (!r) { await send(chatId, "Reject failed — customer row not found."); return }
+      void notifyUserRejected({ telegram_user_id: r.telegram_user_id, reason }).catch(() => undefined)
+      await send(
+        chatId,
+        `🚫 Rejected \`${customer.id}\`${reason ? `\nReason: _${escapeMd(reason)}_` : ""}`,
         "Markdown",
       )
       return

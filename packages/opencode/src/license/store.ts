@@ -54,6 +54,36 @@ function audit(action: string, details: unknown): void {
   )
 }
 
+/**
+ * Read-only counterpart of findOrCreateCustomerByTelegram. Returns the
+ * existing row matching either `telegram_user_id` (preferred) or
+ * `telegram` handle, or null. Used by the bot's deep-link handler so it
+ * can detect a brand-new signup BEFORE the row is inserted, and only
+ * then ping the admin with notifyAdminNewPendingUser. Without this
+ * pre-check the bot has no way to tell "first contact" from "returning
+ * user", so the admin would either be spammed on every /start or never
+ * pinged at all (the latter was the v2.22.18 reality).
+ */
+export function findCustomerByTelegram(opts: {
+  telegram?: string | null
+  telegram_user_id?: number | null
+}): CustomerRow | null {
+  const db = getDb()
+  if (opts.telegram_user_id != null) {
+    const row = db
+      .prepare<CustomerRow, [number]>("SELECT * FROM customers WHERE telegram_user_id = ? LIMIT 1")
+      .get(opts.telegram_user_id)
+    if (row) return row
+  }
+  if (opts.telegram) {
+    const row = db
+      .prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE telegram = ? LIMIT 1")
+      .get(opts.telegram)
+    if (row) return row
+  }
+  return null
+}
+
 export function findOrCreateCustomerByTelegram(opts: {
   telegram?: string | null
   telegram_user_id?: number | null
