@@ -150,9 +150,7 @@ export function SortableTab(props: { tab: string; onTabClose: (tab: string) => v
           <Show when={isDesktop()}>
             <ContextMenu.Separator />
             <ContextMenu.Sub>
-              <ContextMenu.SubTrigger>
-                <ContextMenu.ItemLabel>{language.t("editor.menu.openIn")}</ContextMenu.ItemLabel>
-              </ContextMenu.SubTrigger>
+              <ContextMenu.SubTrigger>{language.t("editor.menu.openIn")}</ContextMenu.SubTrigger>
               <ContextMenu.Portal>
                 <ContextMenu.SubContent>
                   <ContextMenu.Item onSelect={onOpenInVSCode}>
