@@ -329,6 +329,7 @@ export namespace File {
     readonly init: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<File.Info[]>
     readonly read: (file: string) => Effect.Effect<File.Content>
+    readonly write: (file: string, content: string) => Effect.Effect<{ ok: true }>
     readonly list: (dir?: string) => Effect.Effect<File.Node[]>
     readonly search: (input: {
       query: string
@@ -592,6 +593,22 @@ export namespace File {
         })
       })
 
+      const write = Effect.fn("File.write")(function* (file: string, content: string) {
+        return yield* Effect.promise(async (): Promise<{ ok: true }> => {
+          using _ = log.time("write", { file, bytes: content.length })
+          const full = path.join(Instance.directory, file)
+          if (!Instance.containsPath(full)) {
+            throw new Error("Access denied: path escapes project directory")
+          }
+          // Refuse binary by extension — UI shouldn't be sending bytes here.
+          if (isBinaryByExtension(file) && !isTextByExtension(file) && !isTextByName(file)) {
+            throw new Error("Refusing to write binary file via text editor")
+          }
+          await Filesystem.write(full, content)
+          return { ok: true }
+        })
+      })
+
       const list = Effect.fn("File.list")(function* (dir?: string) {
         return yield* Effect.promise(async () => {
           const exclude = [".git", ".DS_Store"]
@@ -672,7 +689,7 @@ export namespace File {
       })
 
       log.info("init")
-      return Service.of({ init, status, read, list, search })
+      return Service.of({ init, status, read, write, list, search })
     }),
   )
 
@@ -688,6 +705,10 @@ export namespace File {
 
   export async function read(file: string): Promise<Content> {
     return runPromise((svc) => svc.read(file))
+  }
+
+  export async function write(file: string, content: string): Promise<{ ok: true }> {
+    return runPromise((svc) => svc.write(file, content))
   }
 
   export async function list(dir?: string) {

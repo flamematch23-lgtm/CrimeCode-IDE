@@ -1,4 +1,4 @@
-import { createEffect, createMemo, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode-ai/ui/file"
@@ -85,6 +85,17 @@ export function FileTabContent(props: { tab: string }) {
     return file.get(p)
   })
   const contents = createMemo(() => state()?.content?.content ?? "")
+
+  // Defensively kick off a load whenever the active path changes.
+  // Without this, switching to a tab that was opened in a previous
+  // session (rehydrated from localStorage) shows an empty viewer
+  // because nothing else triggers `file.load(path)` for it.
+  // `load` is idempotent — it short-circuits if already loaded.
+  createEffect(() => {
+    const p = path()
+    if (!p) return
+    void file.load(p)
+  })
   const cacheKey = createMemo(() => sampledChecksum(contents()))
   const selectedLines = createMemo<SelectedLineRange | null>(() => {
     const p = path()
@@ -387,8 +398,110 @@ export function FileTabContent(props: { tab: string }) {
     if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame)
   })
 
+  // Edit mode: toggled via the "Modifica" button in the file viewer toolbar.
+  // Shows a textarea with the current content, Save persists via file.save()
+  // (which hits PUT /file/content on the sidecar), Cancel discards.
+  // Read-only / no-editor when:
+  //   - sdk has no base url (web build pointing at a server that doesn't
+  //     expose /file/content)
+  //   - the file is binary (state.content.type === "binary")
+  const [editing, setEditing] = createSignal(false)
+  const [draft, setDraft] = createSignal("")
+  const [saving, setSaving] = createSignal(false)
+
+  const canEdit = createMemo(() => {
+    const s = state()
+    if (!s?.loaded) return false
+    if (s.content?.type !== "text") return false
+    if (s.content?.encoding === "base64") return false // image / binary served as text
+    return true
+  })
+
+  function startEditing() {
+    setDraft(contents())
+    setEditing(true)
+  }
+  function cancelEditing() {
+    setEditing(false)
+    setDraft("")
+  }
+  async function saveEditing() {
+    const p = path()
+    if (!p) return
+    setSaving(true)
+    try {
+      await file.save(p, draft())
+      showToast({ variant: "success", title: language.t("editor.save.success") || "File saved" })
+      setEditing(false)
+      setDraft("")
+    } catch (err) {
+      showToast({
+        variant: "error",
+        title: language.t("editor.save.failed") || "Save failed",
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const renderEditor = () => (
+    <div class="relative h-full flex flex-col">
+      <div class="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-surface-raised-base border-b border-border-base">
+        <span class="text-12-medium text-text-strong">
+          {language.t("editor.editing") || "Editing"} {path() ?? ""}
+        </span>
+        <span class="flex-1" />
+        <button
+          type="button"
+          class="px-3 py-1 text-12-medium rounded border border-border-base bg-surface-base text-text-strong hover:bg-surface-base-hover disabled:opacity-50"
+          onClick={cancelEditing}
+          disabled={saving()}
+        >
+          {language.t("common.cancel") || "Cancel"}
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1 text-12-medium rounded bg-icon-action-base text-white hover:bg-icon-action-strong disabled:opacity-50"
+          onClick={() => void saveEditing()}
+          disabled={saving() || draft() === contents()}
+        >
+          {saving() ? language.t("common.saving") || "Saving…" : language.t("common.save") || "Save"}
+        </button>
+      </div>
+      <textarea
+        class="flex-1 w-full px-4 py-3 bg-background-base text-text-strong font-mono text-13-regular outline-none resize-none"
+        spellcheck={false}
+        value={draft()}
+        onInput={(e) => setDraft(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          // Ctrl/Cmd+S to save without leaving the textarea.
+          if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+            e.preventDefault()
+            void saveEditing()
+          }
+          if (e.key === "Escape") {
+            e.preventDefault()
+            cancelEditing()
+          }
+        }}
+      />
+    </div>
+  )
+
   const renderFile = (source: string) => (
     <div class="relative overflow-hidden pb-40">
+      <Show when={canEdit()}>
+        <div class="sticky top-0 z-10 flex justify-end px-4 py-2 bg-background-base/80 backdrop-blur-sm">
+          <button
+            type="button"
+            class="px-3 py-1 text-12-medium rounded border border-border-base bg-surface-raised-base text-text-strong hover:bg-surface-raised-base-hover"
+            onClick={startEditing}
+          >
+            ✏️ {language.t("common.edit") || "Edit"}
+          </button>
+        </div>
+      </Show>
       <Dynamic
         component={fileComponent}
         mode="text"
@@ -444,11 +557,19 @@ export function FileTabContent(props: { tab: string }) {
         onScroll={handleScroll as any}
       >
         <Switch>
+          <Match when={editing()}>{renderEditor()}</Match>
           <Match when={state()?.loaded}>{renderFile(contents())}</Match>
           <Match when={state()?.loading}>
             <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
           </Match>
           <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+          {/* Fallback for the brief window between tab open + load resolution,
+             AND for tabs that somehow ended up without a load triggered. The
+             createEffect above guarantees we *will* load — this just keeps
+             the panel from rendering blank. */}
+          <Match when={!state() || (!state()?.loaded && !state()?.loading && !state()?.error)}>
+            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
+          </Match>
         </Switch>
       </ScrollView>
     </Tabs.Content>

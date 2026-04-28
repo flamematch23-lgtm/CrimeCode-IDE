@@ -200,6 +200,55 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         () => [],
       )
 
+    /**
+     * Persist new content for a file. Calls the sidecar's PUT
+     * /file/content endpoint directly via fetch (the generated SDK
+     * doesn't yet expose this verb), and on success refreshes the
+     * cached content + diff so the viewer + diff view stay in sync.
+     *
+     * Throws on backend failure (rejected by Filesystem.write, path
+     * outside project dir, binary file, etc.) so the caller can show
+     * the error message to the user.
+     */
+    const save = async (input: string, content: string): Promise<void> => {
+      const file = path.normalize(input)
+      if (!file) throw new Error("invalid path")
+      const directory = scope()
+
+      // Synthesize the auth header / URL from the underlying SDK config.
+      // The SDK was created by createSdkForServer with a configured fetch,
+      // so we can call the same baseUrl + headers it uses.
+      const config = (sdk.client as unknown as {
+        client?: { config?: { baseUrl?: string; headers?: Record<string, string> } }
+      }).client?.config
+      const baseUrl = config?.baseUrl
+      if (!baseUrl) throw new Error("sdk base url missing")
+
+      const url = new URL(baseUrl.replace(/\/+$/, "") + "/file/content")
+      url.searchParams.set("path", file)
+      url.searchParams.set("directory", directory)
+
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(config?.headers ?? {}) },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) {
+        let msg = `write failed (${res.status})`
+        try {
+          const j = (await res.json()) as { error?: string }
+          if (j.error) msg = j.error
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg)
+      }
+
+      // Force-refresh the cached content so the viewer reflects the
+      // saved bytes (and any diff metadata) on next read.
+      await load(file, { force: true })
+    }
+
     const stop = sdk.event.listen((e) => {
       invalidateFromWatcher(e.details, {
         normalize: path.normalize,
@@ -267,6 +316,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       },
       get,
       load,
+      save,
       scrollTop,
       scrollLeft,
       setScrollTop,
