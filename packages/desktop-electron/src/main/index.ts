@@ -59,6 +59,7 @@ let initStep: InitStep = { phase: "server_waiting" }
 
 let mainWindow: BrowserWindow | null = null
 let sidecar: CommandChild | null = null
+let sidecarKilledIntentionally = false
 const loadingComplete = defer<void>()
 
 const pendingDeepLinks: string[] = []
@@ -304,6 +305,37 @@ async function initialize() {
     password,
   })
 
+  // Watch for post-startup sidecar crashes and offer recovery.
+  // sidecarKilledIntentionally is set to true before any planned kill so that
+  // the normal app shutdown path does not trigger the crash dialog.
+  sidecarKilledIntentionally = false
+  events.once("terminated", async (payload: { code: number | null; signal: number | null }) => {
+    if (sidecarKilledIntentionally) return
+    logger.error("sidecar crashed after startup", { code: payload.code, signal: payload.signal, stderr: stderrLines })
+    const detail = stderrLines.length
+      ? stderrLines.slice(-20).join("\n")
+      : "No output captured from the sidecar process."
+    const response = await dialog.showMessageBox({
+      type: "error",
+      title: "OpenCode — Server Crashed",
+      message: "The local server stopped unexpectedly.",
+      detail: `Exit code: ${payload.code ?? "unknown"}\nSignal: ${payload.signal ?? "none"}\n\nLast output:\n${detail}`,
+      buttons: ["Restart", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response.response === 0) {
+      logger.log("user chose restart after crash")
+      killSidecar()
+      app.relaunch()
+      app.exit(0)
+    } else {
+      logger.log("user chose quit after crash")
+      killSidecar()
+      app.exit(1)
+    }
+  })
+
   setInitStep({ phase: "done" })
   await loadingComplete.promise
 
@@ -386,6 +418,7 @@ registerIpcHandlers({
 
 function killSidecar() {
   if (!sidecar) return
+  sidecarKilledIntentionally = true
   const pid = sidecar.pid
   sidecar.kill()
   sidecar = null
