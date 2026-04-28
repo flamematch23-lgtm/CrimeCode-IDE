@@ -1,7 +1,8 @@
 import { Effect, Layer } from "effect"
 import { makeRuntime } from "@/effect/run-service"
-import { Database, eq } from "../storage/db"
-import { EventTable, EventSequenceTable } from "./event.sql"
+import type { Database } from "../storage/db"
+import { eq } from "../storage/db"
+import { EventTable } from "./event.sql"
 import { SyncEvent } from "./index"
 
 export namespace CloudSync {
@@ -17,8 +18,11 @@ export namespace CloudSync {
 
       const push = Effect.fn("sync.push")(function* (aggregateID: string) {
         if (!cfg) return
-        const rows = yield* Database.use((db) =>
-          db.select().from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all(),
+        const db = yield* Effect.promise(() => import("../storage/db"))
+        const rows = yield* Effect.promise(() =>
+          db.Database.use((d: Database) =>
+            d.select().from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all()
+          )
         )
         yield* Effect.tryPromise({
           try: () =>
@@ -30,10 +34,10 @@ export namespace CloudSync {
               },
               body: JSON.stringify({
                 aggregateID,
-                events: rows.map((r) => ({ id: r.id, seq: r.seq, type: r.type, data: r.data })),
+                events: rows.map((r: any) => ({ id: r.id, seq: r.seq, type: r.type, data: r.data })),
               }),
             }),
-          catch: (e) => new Error(`Push failed: ${e}`),
+          catch: (e: unknown) => new Error(`Push failed: ${e}`),
         })
       })
 
@@ -41,11 +45,11 @@ export namespace CloudSync {
         if (!cfg) return
         const res = yield* Effect.tryPromise({
           try: () => fetch(`${cfg.api}/sync/pull/${aggregateID}`, { headers: { Authorization: `Bearer ${cfg.token}` } }),
-          catch: (e) => new Error(`Pull failed: ${e}`),
+          catch: (e: unknown) => new Error(`Pull failed: ${e}`),
         })
-        const data = yield* Effect.tryPromise(() => res.json())
+        const data = yield* Effect.promise(() => res.json())
         if (data.events) {
-          for (const evt of data.events) {
+          for (const evt of data.events as any[]) {
             SyncEvent.replay(evt)
           }
         }
@@ -62,14 +66,14 @@ export namespace CloudSync {
   const { runPromise } = makeRuntime("CloudSync", Service)
 
   export function setConfig(cfg: Config | undefined) {
-    return runPromise((s) => s.setConfig(cfg))
+    return runPromise((s: any) => s.setConfig(cfg))
   }
 
   export function push(aggregateID: string) {
-    return runPromise((s) => s.push(aggregateID))
+    return runPromise((s: any) => s.push(aggregateID))
   }
 
   export function pull(aggregateID: string) {
-    return runPromise((s) => s.pull(aggregateID))
+    return runPromise((s: any) => s.pull(aggregateID))
   }
 }
