@@ -151,6 +151,14 @@ export namespace Server {
         // Allow CORS preflight requests to succeed without auth.
         // Browser clients sending Authorization headers will preflight with OPTIONS.
         if (c.req.method === "OPTIONS") return next()
+        // /global/health must be reachable without auth — it's the standard
+        // liveness/readiness probe used by:
+        //   - The desktop client's ConnectionGate at app startup (often
+        //     before the Bearer JWT is hydrated from localStorage).
+        //   - Fly.io / load balancer health checks.
+        //   - Anyone wanting to see the deployed version + commit hash.
+        // Returns only {healthy, version, commit} — no PII, no secrets.
+        if (c.req.path === "/global/health") return next()
         // The license sub-app has its own auth layer (Bearer JWT for user
         // endpoints, admin Basic Auth for admin endpoints). Let it through
         // unconditionally — it enforces its own authz downstream.
