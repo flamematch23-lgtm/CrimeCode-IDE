@@ -1,46 +1,40 @@
-import { Component, createMemo, createResource, Show } from "solid-js"
+import { Component, createResource, createSignal, onMount, onCleanup, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
-import { useServer } from "@/context/server"
-import { getAccountMe, type AccountMe } from "@/utils/account-client"
+import { getAccountMe, hasAccountSession, type AccountMe } from "@/utils/account-client"
 
 /**
- * "Account" tab inside the settings dialog. Pulls /account/me to show a
- * compact identity card (customer id, telegram, status, member-since) and
- * funnels the user toward the full dashboard at /account for the heavier
- * actions (device list, cloud-sync stats, sign-out-everywhere).
- *
- * The full dashboard owns the destructive operations on purpose — keeping
- * them out of a small dialog tab avoids accidental clicks while a user is
- * "just changing a setting".
+ * "Account" tab inside the settings dialog. Talks directly to the cloud
+ * API — the customer record lives there, not on the local Electron
+ * sidecar. The previous version of this tab read `useServer().current`
+ * which on desktop after a Telegram login is still the local sidecar
+ * (Basic auth) — the sidecar can't identify the customer from Basic
+ * auth, so /account/me 401'd and the tab erroneously showed
+ * "not signed in" even when the workspace switcher right next to it
+ * displayed the user's customer id correctly.
  */
 export const SettingsAccount: Component = () => {
-  const server = useServer()
   const navigate = useNavigate()
-
-  const httpCreds = createMemo(() => {
-    const c = server.current
-    if (!c || !("http" in c)) return null
-    return { url: c.http.url, username: c.http.username, password: c.http.password }
+  // Reactive flag so the tab re-renders when the user logs in / out
+  // without us having to wire a per-tab subscription. We poll storage on
+  // a 1.5s timer (cheap — read of a single localStorage key) which is
+  // plenty for a UI surface that only opens manually.
+  const [signedIn, setSignedIn] = createSignal(hasAccountSession())
+  onMount(() => {
+    const t = setInterval(() => setSignedIn(hasAccountSession()), 1500)
+    onCleanup(() => clearInterval(t))
   })
 
-  const [me] = createResource(httpCreds, async (creds) => {
-    if (!creds) return null
+  const [me] = createResource(signedIn, async (yes) => {
+    if (!yes) return null
     try {
-      return await getAccountMe(creds)
+      return await getAccountMe()
     } catch {
-      // The /account endpoints require a Bearer session. On a Basic-auth
-      // self-hosted sidecar this resource just resolves to null, and we
-      // render the "not signed in" branch.
+      // Bearer rejected (expired? revoked?) — treat as not signed in for
+      // the UI; the dashboard route will surface the actual error.
       return null
     }
   })
-
-  function openDashboard() {
-    navigate("/account")
-    // The settings dialog closes itself when the route changes — no extra
-    // wiring needed beyond the navigate() call.
-  }
 
   return (
     <div class="flex flex-col gap-6 p-4">
@@ -52,21 +46,35 @@ export const SettingsAccount: Component = () => {
       </header>
 
       <Show
-        when={me()}
-        fallback={<NotSignedIn loading={me.loading} />}
+        when={signedIn() && me()}
+        fallback={<NotSignedIn signedIn={signedIn()} loading={me.loading} />}
       >
-        {(meRes) => <IdentityCard me={meRes()} onOpenDashboard={openDashboard} />}
+        {(meRes) => <IdentityCard me={meRes()} onOpenDashboard={() => navigate("/account")} />}
       </Show>
     </div>
   )
 }
 
-function NotSignedIn(props: { loading: boolean }) {
+function NotSignedIn(props: { signedIn: boolean; loading: boolean }) {
   return (
     <div class="rounded-md border border-border-base p-4 text-12-regular text-text-subtle">
-      <Show when={!props.loading} fallback={<span>Loading…</span>}>
-        You're not signed in to a CrimeCode account on this server. Account
-        features are available after a Telegram or username sign-in.
+      <Show
+        when={!props.loading}
+        fallback={<span>Loading…</span>}
+      >
+        <Show
+          when={props.signedIn}
+          fallback={
+            <>
+              You're not signed in to a CrimeCode account. Use the workspace
+              switcher in the top-right to sign in with Telegram or your
+              username — your account will then appear here.
+            </>
+          }
+        >
+          We couldn't load your account info just now. The session may have
+          expired — try signing in again from the workspace switcher.
+        </Show>
       </Show>
     </div>
   )

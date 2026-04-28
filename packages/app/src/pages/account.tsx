@@ -7,6 +7,7 @@ import {
   getAccountMe,
   getAccountDevices,
   getSyncMe,
+  hasAccountSession,
   revokeDevice,
   logoutAllDevices,
   triggerSyncNow,
@@ -15,45 +16,44 @@ import {
   type SyncMe,
 } from "@/utils/account-client"
 import { clearCredentials } from "@/pages/auth-gate"
+import { writeWebSession } from "@/utils/teams-client"
 
 /**
- * Customer dashboard. Renders three independent panels (identity, devices,
- * cloud sync) backed by the /account/* and /sync/me endpoints. Every panel
- * has its own refresh button so a user can poke a single section without
- * round-tripping the whole page.
+ * Customer dashboard. Identity and devices come from the central API
+ * server (api.crimecode.cc) since the customer record + auth_sessions
+ * table live there — the local sidecar can't speak Bearer for the
+ * cloud's HMAC-signed JWTs. Sync-now, on the other hand, runs the
+ * push/pull on the LOCAL CloudClient (because that's what holds the
+ * unsynced events), so its credentials come from `useServer().current`
+ * — i.e. whatever the user is locally pointed at.
  */
 export default function AccountPage() {
   const server = useServer()
   const navigate = useNavigate()
 
-  // The active server is the one the user is authenticated against — for a
-  // bearer login that's api.crimecode.cc; for a self-hosted Basic-auth
-  // sidecar it's localhost. Every connection variant carries an `http`
-  // sub-object with url + creds, so we just lift that out.
-  const httpCreds = createMemo(() => {
+  const localCreds = createMemo(() => {
     const c = server.current
-    if (!c) return null
-    if (!("http" in c)) return null
+    if (!c || !("http" in c)) return null
     return { url: c.http.url, username: c.http.username, password: c.http.password }
   })
 
-  const [me, meActions] = createResource(httpCreds, async (creds) => {
-    if (!creds) return null
-    return getAccountMe(creds)
+  const [signedIn] = createSignal(hasAccountSession())
+
+  const [me, meActions] = createResource(signedIn, async (yes) => {
+    if (!yes) return null
+    return getAccountMe()
   })
 
-  const [devices, devicesActions] = createResource(httpCreds, async (creds) => {
-    if (!creds) return { devices: [] as AccountDevice[] }
-    return getAccountDevices(creds)
+  const [devices, devicesActions] = createResource(signedIn, async (yes) => {
+    if (!yes) return { devices: [] as AccountDevice[] }
+    return getAccountDevices()
   })
 
-  const [sync, syncActions] = createResource(httpCreds, async (creds) => {
-    if (!creds) return null
+  const [sync, syncActions] = createResource(signedIn, async (yes) => {
+    if (!yes) return null
     try {
-      return await getSyncMe(creds)
+      return await getSyncMe()
     } catch {
-      // /sync/me may 401 if the caller isn't on a Bearer token; that's a
-      // soft failure for the panel.
       return null
     }
   })
@@ -67,11 +67,9 @@ export default function AccountPage() {
   }
 
   async function onRevokeDevice(sid: string) {
-    const creds = httpCreds()
-    if (!creds) return
     setBusy("revoke:" + sid)
     try {
-      await revokeDevice(creds, sid)
+      await revokeDevice(sid)
       devicesActions.refetch()
       flash("Device signed out.")
     } catch (err) {
@@ -82,14 +80,14 @@ export default function AccountPage() {
   }
 
   async function onLogoutAll() {
-    const creds = httpCreds()
-    if (!creds) return
     if (!window.confirm("Sign out every device for this account, including this one?")) return
     setBusy("logout-all")
     try {
-      const r = await logoutAllDevices(creds)
+      const r = await logoutAllDevices()
       flash(`Signed out ${r.revoked} device${r.revoked === 1 ? "" : "s"}.`)
-      // Our own session was just revoked — clear creds and bounce to login.
+      // Our own session was just revoked — drop both creds and the
+      // web session and bounce to login.
+      writeWebSession(null)
       clearCredentials()
       navigate("/", { replace: true })
       window.location.reload()
@@ -100,8 +98,11 @@ export default function AccountPage() {
   }
 
   async function onSyncNow() {
-    const creds = httpCreds()
-    if (!creds) return
+    const creds = localCreds()
+    if (!creds) {
+      flash("No local server connected — sync-now needs the local sidecar.")
+      return
+    }
     setBusy("sync-now")
     try {
       const r = await triggerSyncNow(creds)
@@ -128,67 +129,69 @@ export default function AccountPage() {
           </Button>
         </div>
 
-        {/* ───────── Identity ───────── */}
-        <Section
-          title="Identity"
-          onRefresh={() => meActions.refetch()}
-          loading={me.loading}
-        >
-          <Show when={me()} fallback={<Empty>Loading…</Empty>}>
-            {(meRes) => <IdentityCard me={meRes()} />}
-          </Show>
-        </Section>
+        <Show when={!signedIn()}>
+          <div class="rounded-lg border border-border-base bg-surface-raised-base p-6 text-center">
+            <p class="text-14-medium text-text-strong mb-2">Not signed in</p>
+            <p class="text-12-regular text-text-subtle">
+              Use the workspace switcher in the top-right to sign in with Telegram
+              or your username, then come back here.
+            </p>
+          </div>
+        </Show>
 
-        {/* ───────── Devices ───────── */}
-        <Section
-          title="Active devices"
-          onRefresh={() => devicesActions.refetch()}
-          loading={devices.loading}
-          right={
-            <Button
-              variant="primary"
-              disabled={busy() === "logout-all"}
-              onClick={onLogoutAll}
-            >
-              {busy() === "logout-all" ? "Signing out…" : "Sign out everywhere"}
-            </Button>
-          }
-        >
-          <Show when={(devices()?.devices ?? []).filter((d) => d.active).length > 0}
-                fallback={<Empty>No active devices.</Empty>}>
-            <ul class="divide-y divide-border-base">
-              <For each={(devices()?.devices ?? []).filter((d) => d.active)}>
-                {(d) => (
-                  <DeviceRow
-                    device={d}
-                    busy={busy() === "revoke:" + d.id}
-                    onRevoke={() => onRevokeDevice(d.id)}
-                  />
-                )}
-              </For>
-            </ul>
-          </Show>
-        </Section>
+        <Show when={signedIn()}>
+          {/* ───────── Identity ───────── */}
+          <Section title="Identity" onRefresh={() => meActions.refetch()} loading={me.loading}>
+            <Show when={me()} fallback={<Empty>Loading…</Empty>}>
+              {(meRes) => <IdentityCard me={meRes()} />}
+            </Show>
+          </Section>
 
-        {/* ───────── Cloud sync ───────── */}
-        <Section
-          title="Cloud sync"
-          onRefresh={() => syncActions.refetch()}
-          loading={sync.loading}
-          right={
-            <Button
-              variant="secondary"
-              disabled={busy() === "sync-now"}
-              onClick={onSyncNow}
+          {/* ───────── Devices ───────── */}
+          <Section
+            title="Active devices"
+            onRefresh={() => devicesActions.refetch()}
+            loading={devices.loading}
+            right={
+              <Button variant="primary" disabled={busy() === "logout-all"} onClick={onLogoutAll}>
+                {busy() === "logout-all" ? "Signing out…" : "Sign out everywhere"}
+              </Button>
+            }
+          >
+            <Show
+              when={(devices()?.devices ?? []).filter((d) => d.active).length > 0}
+              fallback={<Empty>No active devices.</Empty>}
             >
-              {busy() === "sync-now" ? "Syncing…" : "Sync now"}
-            </Button>
-          }
-        >
-          <Show when={sync()} fallback={<Empty>No cloud-sync data yet for this account.</Empty>}>
-            {(s) => <SyncCard stats={s()} />}
-          </Show>
-        </Section>
+              <ul class="divide-y divide-border-base">
+                <For each={(devices()?.devices ?? []).filter((d) => d.active)}>
+                  {(d) => (
+                    <DeviceRow
+                      device={d}
+                      busy={busy() === "revoke:" + d.id}
+                      onRevoke={() => onRevokeDevice(d.id)}
+                    />
+                  )}
+                </For>
+              </ul>
+            </Show>
+          </Section>
+
+          {/* ───────── Cloud sync ───────── */}
+          <Section
+            title="Cloud sync"
+            onRefresh={() => syncActions.refetch()}
+            loading={sync.loading}
+            right={
+              <Button variant="secondary" disabled={busy() === "sync-now"} onClick={onSyncNow}>
+                {busy() === "sync-now" ? "Syncing…" : "Sync now"}
+              </Button>
+            }
+          >
+            <Show when={sync()} fallback={<Empty>No cloud-sync data yet for this account.</Empty>}>
+              {(s) => <SyncCard stats={s()} />}
+            </Show>
+          </Section>
+        </Show>
       </div>
 
       <Show when={toast()}>

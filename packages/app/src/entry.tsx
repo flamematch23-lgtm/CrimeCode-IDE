@@ -15,7 +15,19 @@ import { hydrateTeamSessionFromStorage } from "./utils/team-session"
 // Re-attach to whatever team-session id was in localStorage before the
 // reload, restarting the heartbeat loop so we don't get reaped. Cheap and
 // idempotent — safe to run unconditionally on every entry boot.
-hydrateTeamSessionFromStorage()
+//
+// Wrapped in try/catch + an env-guard because this runs at module top
+// level: any synchronous throw here (storage access denied, broken
+// localStorage shim during SSR, getTeamsClient() init quirk, …) would
+// abort the entire entry script and the user would see a blank screen
+// instead of the IDE.
+try {
+  if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+    hydrateTeamSessionFromStorage()
+  }
+} catch (err) {
+  console.warn("[entry] hydrateTeamSessionFromStorage failed; continuing", err)
+}
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 

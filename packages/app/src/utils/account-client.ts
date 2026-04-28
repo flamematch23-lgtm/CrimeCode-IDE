@@ -1,12 +1,21 @@
 /**
  * Typed client for the customer dashboard endpoints (/account/* and /sync/me).
  *
- * Every call is scoped server-side to the verified Bearer token's customer_id,
- * so the renderer never has to pass a customer id explicitly — the
- * Authorization header is the identity.
+ * IMPORTANT — these endpoints live on the CENTRAL API server (api.crimecode.cc)
+ * because the customer record + cloud_event log live there, not on the local
+ * Electron sidecar. Earlier versions of this module accepted whatever
+ * `useServer().current` was set to, which on desktop after a Telegram login
+ * is the local sidecar (Basic auth) — the local sidecar can't identify the
+ * customer (`/account/me` requires a Bearer token verified against the
+ * cloud's HMAC secret), so every call returned 401 and the Settings → Account
+ * tab showed "not signed in" even when the user was clearly signed in.
+ *
+ * The client now reads the JWT from the web session (`readWebSession()`),
+ * targets the cloud API directly, and returns null when the user isn't
+ * signed in at all — no more conflating "no Bearer here" with "not signed in".
  */
 
-import { withAuthHeaders, type HttpCreds } from "./auth-fetch"
+import { readWebSession } from "./teams-client"
 
 export interface AccountMe {
   customer_id: string
@@ -40,64 +49,105 @@ export interface SyncMe {
   }>
 }
 
-function url(server: HttpCreds, path: string): string {
-  const base = (server.url ?? "").replace(/\/+$/, "")
-  return base + path
+const CLOUD_BASE = (() => {
+  const meta = import.meta as unknown as { env?: Record<string, string | undefined> }
+  const explicit = meta?.env?.VITE_LICENSE_API_URL ?? meta?.env?.VITE_API_URL
+  if (explicit) return String(explicit).replace(/\/+$/, "")
+  return "https://api.crimecode.cc"
+})()
+
+class NotSignedInError extends Error {
+  constructor() {
+    super("not signed in")
+    this.name = "NotSignedInError"
+  }
 }
 
-async function getJSON<T>(server: HttpCreds, path: string): Promise<T> {
-  const res = await fetch(url(server, path), withAuthHeaders(server))
+/** True iff a Bearer token is present in localStorage. */
+export function hasAccountSession(): boolean {
+  return readWebSession() !== null
+}
+
+function bearer(): string {
+  const s = readWebSession()
+  if (!s) throw new NotSignedInError()
+  return s.token
+}
+
+async function getJSON<T>(path: string): Promise<T> {
+  const res = await fetch(CLOUD_BASE + path, {
+    headers: { Authorization: `Bearer ${bearer()}` },
+  })
   if (!res.ok) throw new Error(`${path} ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   return (await res.json()) as T
 }
 
-async function postJSON<T>(server: HttpCreds, path: string, body?: unknown): Promise<T> {
-  const init = withAuthHeaders(server, {
+async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(CLOUD_BASE + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${bearer()}`,
+    },
     body: body == null ? undefined : JSON.stringify(body),
   })
-  const res = await fetch(url(server, path), init)
   if (!res.ok) throw new Error(`${path} ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   return (await res.json()) as T
 }
 
-async function deleteJSON<T>(server: HttpCreds, path: string): Promise<T> {
-  const init = withAuthHeaders(server, { method: "DELETE" })
-  const res = await fetch(url(server, path), init)
+async function deleteJSON<T>(path: string): Promise<T> {
+  const res = await fetch(CLOUD_BASE + path, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${bearer()}` },
+  })
   if (!res.ok) throw new Error(`${path} ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   return (await res.json()) as T
 }
 
-export function getAccountMe(server: HttpCreds): Promise<AccountMe> {
-  return getJSON<AccountMe>(server, "/account/me")
+export function getAccountMe(): Promise<AccountMe> {
+  return getJSON<AccountMe>("/account/me")
 }
 
-export function getAccountDevices(server: HttpCreds): Promise<{ devices: AccountDevice[] }> {
-  return getJSON<{ devices: AccountDevice[] }>(server, "/account/me/devices")
+export function getAccountDevices(): Promise<{ devices: AccountDevice[] }> {
+  return getJSON<{ devices: AccountDevice[] }>("/account/me/devices")
 }
 
-export function revokeDevice(server: HttpCreds, sid: string): Promise<{ revoked: boolean }> {
-  return deleteJSON<{ revoked: boolean }>(server, `/account/me/devices/${encodeURIComponent(sid)}`)
+export function revokeDevice(sid: string): Promise<{ revoked: boolean }> {
+  return deleteJSON<{ revoked: boolean }>(`/account/me/devices/${encodeURIComponent(sid)}`)
 }
 
-export function logoutAllDevices(server: HttpCreds): Promise<{ revoked: number }> {
-  return postJSON<{ revoked: number }>(server, "/account/me/devices/logout-all")
+export function logoutAllDevices(): Promise<{ revoked: number }> {
+  return postJSON<{ revoked: number }>("/account/me/devices/logout-all")
 }
 
-export function getSyncMe(server: HttpCreds): Promise<SyncMe> {
-  return getJSON<SyncMe>(server, "/sync/me")
+export function getSyncMe(): Promise<SyncMe> {
+  return getJSON<SyncMe>("/sync/me")
 }
 
 /**
- * Trigger an immediate sync round-trip on the local sidecar (push pending +
- * pull new). Only meaningful in the desktop app where the CloudClient runs;
- * on the web app this hits api.crimecode.cc which has no local CloudClient
- * to drive — the call still succeeds (returning a "not configured" status)
- * but is effectively a no-op.
+ * Trigger an immediate sync round-trip on the LOCAL sidecar's CloudClient
+ * (not the cloud — it's the local that pushes/pulls). Falls through to
+ * /sync/sync-now on whatever HTTP creds the caller hands us. The Account
+ * dashboard routes this to the local sidecar credentials it already has,
+ * because the cloud doesn't run a CloudClient.
  */
 export function triggerSyncNow(
-  server: HttpCreds,
+  server: { url: string; username?: string; password?: string },
 ): Promise<{ ok: boolean; pushed: number; pulled: number; error?: string }> {
-  return postJSON<{ ok: boolean; pushed: number; pulled: number; error?: string }>(server, "/sync/sync-now")
+  const auth =
+    server.username === "bearer"
+      ? `Bearer ${server.password ?? ""}`
+      : `Basic ${
+          typeof btoa === "function"
+            ? btoa(`${server.username ?? "opencode"}:${server.password ?? ""}`)
+            : Buffer.from(`${server.username ?? "opencode"}:${server.password ?? ""}`).toString("base64")
+        }`
+  return fetch(`${server.url.replace(/\/+$/, "")}/sync/sync-now`, {
+    method: "POST",
+    headers: { Authorization: auth, "Content-Type": "application/json" },
+  })
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`sync-now ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`)
+      return r.json() as Promise<{ ok: boolean; pushed: number; pulled: number; error?: string }>
+    })
 }
