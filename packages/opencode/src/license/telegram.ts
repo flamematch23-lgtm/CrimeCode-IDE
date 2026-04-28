@@ -7,10 +7,11 @@ import {
   listSessionsForCustomer,
   rejectCustomer,
   revokeAllSessionsForCustomer,
+  revokeSession,
 } from "./auth"
 import { notifyAdminNewPendingUser, notifyUserApproved, notifyUserRejected } from "./telegram-notify"
 import { listTeamsForCustomer } from "./teams"
-import { helpUser, orderCreatedMessage, pickLang, rememberLang, type Lang } from "./telegram-i18n"
+import { helpUser, orderCreatedMessage, pickLang, recallLang, rememberLang, type Lang } from "./telegram-i18n"
 import {
   attachPaymentOffer,
   cancelOrder,
@@ -92,7 +93,20 @@ async function tgFetch<T>(token: string, method: string, body?: object): Promise
   return (await res.json()) as TgResponse<T>
 }
 
-async function send(chatId: number, text: string, parseMode: "Markdown" | "MarkdownV2" | undefined = undefined) {
+// Inline-keyboard primitive used by every command that wants buttons.
+// Telegram's `reply_markup.inline_keyboard` is a 2D array of buttons; each
+// button has either `callback_data` (handled in handleCallbackQuery) or
+// `url` (just opens the link). Keep callback_data ≤ 64 bytes — the
+// Telegram API rejects longer values silently.
+type TgButton = { text: string; callback_data?: string; url?: string }
+type TgKeyboard = TgButton[][]
+
+async function send(
+  chatId: number,
+  text: string,
+  parseMode: "Markdown" | "MarkdownV2" | undefined = undefined,
+  keyboard?: TgKeyboard,
+) {
   const token = getToken()
   if (!token) return
   const r = await tgFetch<unknown>(token, "sendMessage", {
@@ -100,6 +114,7 @@ async function send(chatId: number, text: string, parseMode: "Markdown" | "Markd
     text,
     parse_mode: parseMode,
     disable_web_page_preview: true,
+    ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
   })
   if (!r.ok) log.warn("sendMessage failed", { description: r.description })
 }
@@ -264,70 +279,158 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
   if (!cb || !cb.data) return
   const token = getToken()
   const fromId = cb.from.id
+  const fromUsername = cb.from.username ? `@${cb.from.username}` : null
 
-  // Only the admin(s) can approve/reject users.
-  const isAdmin = getAdminUserIds().has(fromId)
-  if (!isAdmin) {
-    if (token) {
-      await tgFetch<unknown>(token, "answerCallbackQuery", {
-        callback_query_id: cb.id,
-        text: "Non autorizzato",
-        show_alert: true,
-      })
-    }
-    return
+  // Three callback-data namespaces:
+  //   adm:<verb>[:args…]  — admin-only actions (approve, reject, confirm…)
+  //   usr:<verb>[:args…]  — actions on the caller's own data
+  //   menu:<verb>[:args…] — show another command's output as a fresh msg
+  // Plus the legacy `approve:<cid>:<days>` / `reject:<cid>` patterns from
+  // notifications still in flight at deploy time — kept for ~7 days.
+  const data = cb.data
+  const ack = async (text: string, alert = false) => {
+    if (!token) return
+    await tgFetch<unknown>(token, "answerCallbackQuery", {
+      callback_query_id: cb.id,
+      text: text.slice(0, 200),
+      show_alert: alert,
+    })
   }
-
-  // approve:<cid>:<days>   reject:<cid>
-  const approveMatch = cb.data.match(/^approve:(cus_[A-Za-z0-9_-]{4,32}):(\d{1,3})$/)
-  const rejectMatch = cb.data.match(/^reject:(cus_[A-Za-z0-9_-]{4,32})$/)
-
-  let outcomeText: string | null = null
-  if (approveMatch) {
-    const [, cid, daysStr] = approveMatch
-    const days = Number.parseInt(daysStr, 10)
-    const r = approveCustomer(cid, { trialDays: days, approvedBy: `bot:${fromId}` })
-    if (!r) {
-      outcomeText = "Customer non trovato"
-    } else {
-      outcomeText = `✅ Approvato con ${days}gg di prova` + (r.was_already_approved ? " (era già approvato)" : "")
-      void notifyUserApproved({ telegram_user_id: r.telegram_user_id, trial_days: days }).catch(() => undefined)
-    }
-  } else if (rejectMatch) {
-    const [, cid] = rejectMatch
-    const r = rejectCustomer(cid, { rejectedBy: `bot:${fromId}`, reason: null })
-    if (!r) {
-      outcomeText = "Customer non trovato"
-    } else {
-      outcomeText = "❌ Rifiutato"
-      void notifyUserRejected({ telegram_user_id: r.telegram_user_id, reason: null }).catch(() => undefined)
-    }
-  } else {
-    outcomeText = "Azione sconosciuta"
-  }
-
-  if (!token) return
-
-  // 1. Acknowledge the button press with a toast notification.
-  await tgFetch<unknown>(token, "answerCallbackQuery", {
-    callback_query_id: cb.id,
-    text: outcomeText,
-  })
-
-  // 2. Edit the original message so the chat history shows the final
-  //    outcome instead of the now-consumed buttons.
-  if (cb.message) {
-    const original = cb.message.text ?? ""
+  const editOriginal = async (suffix: string) => {
+    if (!token || !cb.message) return
     const stamp = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC"
-    const adminHandle = cb.from.username ? "@" + cb.from.username : String(fromId)
-    const newText = `${original}\n\n— ${outcomeText} (${adminHandle}, ${stamp})`
+    const who = fromUsername ?? String(fromId)
     await tgFetch<unknown>(token, "editMessageText", {
       chat_id: cb.message.chat.id,
       message_id: cb.message.message_id,
-      text: newText,
+      text: `${cb.message.text ?? ""}\n\n— ${suffix} (${who}, ${stamp})`,
       parse_mode: "Markdown",
     })
   }
+  const sendNew = async (chatId: number, text: string, kb?: TgKeyboard) => {
+    await send(chatId, text, "Markdown", kb)
+  }
+
+  const isAdmin = getAdminUserIds().has(fromId)
+
+  // ─── Admin actions ───────────────────────────────────────────────────
+  // Both the new `adm:` prefix and the legacy bareword commands route here.
+  const isAdminAction =
+    data.startsWith("adm:") ||
+    data.startsWith("approve:") ||
+    data.startsWith("reject:")
+  if (isAdminAction) {
+    if (!isAdmin) {
+      await ack("Non autorizzato", true)
+      return
+    }
+    const stripped = data.startsWith("adm:") ? data.slice(4) : data
+    const [verb, a1, a2] = stripped.split(":")
+
+    if (verb === "approve" && a1 && a2) {
+      const days = Number.parseInt(a2, 10)
+      const r = approveCustomer(a1, { trialDays: days, approvedBy: `bot:${fromId}` })
+      if (!r) return ack("Customer non trovato", true)
+      const outcome =
+        `✅ Approvato con ${days}gg di prova` + (r.was_already_approved ? " (era già approvato)" : "")
+      void notifyUserApproved({ telegram_user_id: r.telegram_user_id, trial_days: days }).catch(() => undefined)
+      await ack(outcome)
+      await editOriginal(outcome)
+      return
+    }
+    if (verb === "reject" && a1) {
+      const r = rejectCustomer(a1, { rejectedBy: `bot:${fromId}`, reason: null })
+      if (!r) return ack("Customer non trovato", true)
+      void notifyUserRejected({ telegram_user_id: r.telegram_user_id, reason: null }).catch(() => undefined)
+      await ack("❌ Rifiutato")
+      await editOriginal("❌ Rifiutato")
+      return
+    }
+    if (verb === "ordconf" && a1) {
+      const r = confirmOrderAndIssue({ order_id: a1, tx_hash: null })
+      if ("error" in r) return ack("Error: " + r.error, true)
+      if (r.customer.telegram_user_id) {
+        await send(
+          r.customer.telegram_user_id,
+          tokenDeliveryMessage(r.license.id, r.license.interval, r.license.expires_at, r.token),
+          "Markdown",
+        )
+      }
+      await ack(`✅ Confermato → ${r.license.id}`)
+      await editOriginal(`✅ Confermato → license \`${r.license.id}\``)
+      return
+    }
+    if (verb === "ordcancel" && a1) {
+      const o = cancelOrder(a1)
+      if (!o) return ack("Order not found / not pending", true)
+      await ack("Cancelled")
+      await editOriginal(`🚫 Cancelled \`${o.id}\``)
+      return
+    }
+    if (verb === "licrevoke" && a1) {
+      const r = revokeLicense(a1, "via bot button")
+      if (!r) return ack("License not found", true)
+      await ack("License revoked")
+      await editOriginal(`🚫 Revoked \`${r.id}\``)
+      return
+    }
+    return ack("Azione sconosciuta", true)
+  }
+
+  // ─── User actions on their own data ──────────────────────────────────
+  if (data.startsWith("usr:")) {
+    const [, verb, a1] = data.split(":")
+    const customer = findCustomerByTelegram({ telegram_user_id: fromId })
+    if (!customer) return ack("Account non trovato — riavvia con /start", true)
+    if (verb === "logoutall") {
+      const n = revokeAllSessionsForCustomer(customer.id)
+      await ack(`✅ Disconnessi ${n} dispositivi`)
+      await editOriginal(`✅ Disconnessi *${n}* dispositivi`)
+      return
+    }
+    if (verb === "logoutdev" && a1) {
+      const sessions = listSessionsForCustomer(customer.id)
+      const own = sessions.find((s) => s.id === a1 && s.revoked_at == null)
+      if (!own) return ack("Sessione non trovata o già chiusa", true)
+      revokeSession(a1)
+      await ack("✅ Sessione chiusa")
+      await editOriginal(`✅ Sessione \`${a1.slice(0, 12)}…\` chiusa`)
+      return
+    }
+    if (verb === "cancelmyord" && a1) {
+      const o = getOrder(a1)
+      if (!o || (o.customer_user_id && o.customer_user_id !== fromId)) {
+        return ack("Ordine non trovato o non tuo", true)
+      }
+      const cancelled = cancelOrder(a1)
+      if (!cancelled) return ack("Ordine non in pending — non si può cancellare", true)
+      await ack("Ordine cancellato")
+      await editOriginal(`🚫 Ordine \`${a1}\` cancellato`)
+      return
+    }
+    return ack("Azione sconosciuta", true)
+  }
+
+  // ─── Menu shortcuts (open a command's output as a new message) ───────
+  if (data.startsWith("menu:")) {
+    const [, verb, a1] = data.split(":")
+    if (!cb.message) return ack("ok")
+    if (verb === "order" && (a1 === "monthly" || a1 === "annual" || a1 === "lifetime")) {
+      const customer = findCustomerByTelegram({ telegram_user_id: fromId })
+      const lang = recallLang(fromId)
+      const o = createOrder({
+        customer_telegram: customer?.telegram ?? fromUsername?.replace(/^@/, "") ?? null,
+        customer_user_id: fromId,
+        interval: a1,
+      })
+      await sendNew(cb.message.chat.id, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang))
+      await ack("Ordine creato")
+      return
+    }
+    return ack("ok")
+  }
+
+  await ack("Azione sconosciuta", true)
 }
 
 async function handle(update: TgUpdate) {
@@ -414,7 +517,16 @@ async function handle(update: TgUpdate) {
         }
         return
       }
-      await send(chatId, helpUser(lang) + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown")
+      // Main menu — quick access to the most-used flows. Buttons fire
+      // `menu:*` callback patterns handled in handleCallbackQuery.
+      const menu: TgKeyboard = [
+        [
+          { text: "⚡ Monthly $20", callback_data: "menu:order:monthly" },
+          { text: "🔥 Annual $200", callback_data: "menu:order:annual" },
+        ],
+        [{ text: "💎 Lifetime $500", callback_data: "menu:order:lifetime" }],
+      ]
+      await send(chatId, helpUser(lang) + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown", menu)
       return
     }
     case "order": {
@@ -464,9 +576,24 @@ async function handle(update: TgUpdate) {
     }
     case "myorders": {
       const orders = listOrdersForUser(userId, 10)
-      if (orders.length === 0) { await send(chatId, "You have no orders yet. Try `/order monthly`.", "Markdown"); return }
-      const lines = orders.map((o) => `• \`${o.id}\` — ${o.interval} — *${o.status}*`)
-      await send(chatId, "Your last orders:\n" + lines.join("\n"), "Markdown")
+      if (orders.length === 0) {
+        await send(chatId, "You have no orders yet. Try `/order monthly`.", "Markdown", [
+          [
+            { text: "⚡ Monthly", callback_data: "menu:order:monthly" },
+            { text: "🔥 Annual", callback_data: "menu:order:annual" },
+            { text: "💎 Lifetime", callback_data: "menu:order:lifetime" },
+          ],
+        ])
+        return
+      }
+      await send(chatId, `📋 *Your last orders* (${orders.length})`, "Markdown")
+      for (const o of orders) {
+        const created = new Date(o.created_at * 1000).toISOString().replace("T", " ").slice(0, 16)
+        const body = `*${o.id}*\nPlan: *${o.interval}*\nStatus: *${o.status}*\nCreated: ${created} UTC`
+        const kb: TgKeyboard | undefined =
+          o.status === "pending" ? [[{ text: "🚫 Cancel order", callback_data: `usr:cancelmyord:${o.id}` }]] : undefined
+        await send(chatId, body, "Markdown", kb)
+      }
       return
     }
 
@@ -479,16 +606,21 @@ async function handle(update: TgUpdate) {
         await send(chatId, "You have no active sessions. Sign in from the desktop or web app to get started.")
         return
       }
-      const lines = active.map((s) => {
+      await send(chatId, `🔐 *Active devices* (${active.length})`, "Markdown")
+      for (const s of active) {
         const last = new Date(s.last_seen_at * 1000).toISOString().replace("T", " ").slice(0, 16)
         const id = s.id.length > 18 ? s.id.slice(0, 8) + "…" + s.id.slice(-6) : s.id
-        return `• \`${id}\` — ${escapeMd(s.device_label ?? "unknown device")} — last seen *${last}* UTC`
-      })
-      await send(
-        chatId,
-        `🔐 *Active devices* (${active.length})\n\n${lines.join("\n")}\n\nUse \`/logout\` to sign out everywhere.`,
-        "Markdown",
-      )
+        const body =
+          `*${escapeMd(s.device_label ?? "unknown device")}*\n` +
+          `Session: \`${id}\`\n` +
+          `Last seen: ${last} UTC`
+        const kb: TgKeyboard = [[{ text: "🚪 Logout this device", callback_data: `usr:logoutdev:${s.id}` }]]
+        await send(chatId, body, "Markdown", kb)
+      }
+      // Footer with the nuclear option.
+      await send(chatId, "_Logout from every device at once:_", "Markdown", [
+        [{ text: "🔌 Logout everywhere", callback_data: "usr:logoutall" }],
+      ])
       return
     }
     case "logout": {
@@ -579,18 +711,36 @@ async function handle(update: TgUpdate) {
       if (!isAdmin) { await send(chatId, "Not authorized."); return }
       const orders = listPendingOrders(20)
       if (orders.length === 0) { await send(chatId, "No pending orders."); return }
-      const lines = orders.map((o) => `• \`${o.id}\` — ${o.interval} — ${o.customer_telegram ?? "?"}`)
-      await send(chatId, "Pending orders:\n" + lines.join("\n"), "Markdown")
+      await send(chatId, `📬 *Pending orders* (${orders.length})`, "Markdown")
+      for (const o of orders) {
+        const who = o.customer_telegram ? "@" + escapeMd(o.customer_telegram) : "_unknown_"
+        const created = new Date(o.created_at * 1000).toISOString().replace("T", " ").slice(0, 16)
+        const body = `*${o.id}*\nPlan: *${o.interval}*\nCustomer: ${who}\nCreated: ${created} UTC`
+        const kb: TgKeyboard = [
+          [
+            { text: "✅ Confirm", callback_data: `adm:ordconf:${o.id}` },
+            { text: "🚫 Cancel", callback_data: `adm:ordcancel:${o.id}` },
+          ],
+        ]
+        await send(chatId, body, "Markdown", kb)
+      }
       return
     }
     case "list": {
       if (!isAdmin) { await send(chatId, "Not authorized."); return }
       const ls = listLicenses(20)
       if (ls.length === 0) { await send(chatId, "No licenses yet."); return }
-      const lines = ls.map(
-        (l) => `• \`${l.id}\` — ${l.interval} — ${l.customer_telegram ?? l.customer_id} — ${l.revoked_at ? "revoked" : "active"}`,
-      )
-      await send(chatId, "Last licenses:\n" + lines.join("\n"), "Markdown")
+      await send(chatId, `📜 *Last licenses* (${ls.length})`, "Markdown")
+      for (const l of ls) {
+        const status = l.revoked_at ? "🚫 *revoked*" : "✅ active"
+        const who = l.customer_telegram ? "@" + escapeMd(l.customer_telegram) : `\`${l.customer_id}\``
+        const issued = new Date(l.issued_at * 1000).toISOString().slice(0, 10)
+        const body = `*${l.id}*\nPlan: *${l.interval}*\nCustomer: ${who}\nIssued: ${issued}\n${status}`
+        const kb: TgKeyboard | undefined = l.revoked_at
+          ? undefined
+          : [[{ text: "🚫 Revoke", callback_data: `adm:licrevoke:${l.id}` }]]
+        await send(chatId, body, "Markdown", kb)
+      }
       return
     }
     case "revoke": {
@@ -644,19 +794,31 @@ async function handle(update: TgUpdate) {
         await send(chatId, "✨ No pending users — the queue is empty.")
         return
       }
-      const lines = list.map((c) => {
+      // Render one message per pending user with inline approve/reject
+      // buttons. Telegram caps the inline keyboard at ~100 buttons but
+      // editing a single big message after each click is awkward — a
+      // message-per-row keeps each click self-contained: the approved
+      // row's message gets edited to "Approved by …", others stay live.
+      await send(chatId, `⏳ *Pending approvals* (${list.length})`, "Markdown")
+      for (const c of list) {
         const tg = c.telegram ? "@" + escapeMd(c.telegram) : "_no telegram_"
-        const tgId = c.telegram_user_id ? ` (\`${c.telegram_user_id}\`)` : ""
+        const tgIdLine = c.telegram_user_id ? `\nTG: \`${c.telegram_user_id}\`` : ""
+        const username = c.username ? `\nUser: \`${escapeMd(c.username)}\`` : ""
+        const email = c.email ? `\nEmail: \`${escapeMd(c.email)}\`` : ""
         const when = new Date(c.created_at * 1000).toISOString().replace("T", " ").slice(0, 16)
-        const name = c.username ? ` · ${escapeMd(c.username)}` : ""
-        return `• \`${c.id}\` — ${tg}${tgId}${name} — ${when}`
-      })
-      await send(
-        chatId,
-        `⏳ *Pending approvals* (${list.length})\n\n${lines.join("\n")}\n\n` +
-          "Approve: `/approve <cus_id> [days=2]`\nReject: `/reject <cus_id> [reason]`",
-        "Markdown",
-      )
+        const body =
+          `*${c.id}*\n` +
+          `${tg}${tgIdLine}${username}${email}\n` +
+          `Registered: ${when} UTC`
+        const kb: TgKeyboard = [
+          [
+            { text: "✅ 2d", callback_data: `adm:approve:${c.id}:2` },
+            { text: "🎁 7d", callback_data: `adm:approve:${c.id}:7` },
+            { text: "❌ Reject", callback_data: `adm:reject:${c.id}` },
+          ],
+        ]
+        await send(chatId, body, "Markdown", kb)
+      }
       return
     }
     case "approve": {
