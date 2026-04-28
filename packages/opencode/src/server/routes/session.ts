@@ -26,6 +26,7 @@ const log = Log.create({ service: "server" })
 
 export const SessionRoutes = lazy(() =>
   new Hono()
+    .get('/health', (c) => c.json({ ok: true, ts: Date.now() }))
     .get(
       "/",
       describeRoute({
@@ -57,18 +58,23 @@ export const SessionRoutes = lazy(() =>
         }),
       ),
       async (c) => {
-        const query = c.req.valid("query")
-        const sessions: Session.Info[] = []
-        for await (const session of Session.list({
-          directory: query.directory,
-          roots: query.roots,
-          start: query.start,
-          search: query.search,
-          limit: query.limit,
-        })) {
-          sessions.push(session)
+        try {
+          const query = c.req.valid("query")
+          const sessions: Session.Info[] = []
+          for await (const session of Session.list({
+            directory: query.directory,
+            roots: query.roots,
+            start: query.start,
+            search: query.search,
+            limit: query.limit,
+          })) {
+            sessions.push(session)
+          }
+          return c.json(sessions)
+        } catch (err) {
+          log.error("Failed to list sessions", { error: err })
+          return c.json({ error: "Failed to load sessions" }, 500)
         }
-        return c.json(sessions)
       },
     )
     .get(

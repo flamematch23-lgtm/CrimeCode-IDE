@@ -1,4 +1,4 @@
-import { createMemo, createEffect, on, onCleanup, For, Show } from "solid-js"
+import { createMemo, createEffect, on, onCleanup, For, Show, createSignal, onMount } from "solid-js"
 import type { JSX } from "solid-js"
 import { useSync } from "@/context/sync"
 import { checksum } from "@opencode-ai/util/encode"
@@ -97,6 +97,18 @@ export function SessionContextTab() {
   const { params, view } = useSessionLayout()
 
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
+  const showContent = createMemo(() => !!info())
+  const [loadTimedOut, setLoadTimedOut] = createSignal(false)
+
+  onMount(() => {
+    const t = window.setTimeout(() => {
+      if (!showContent()) {
+        setLoadTimedOut(true)
+      }
+    }, 1000)
+    // cleanup
+    onCleanup(() => window.clearTimeout(t))
+  })
 
   const messages = createMemo(
     () => {
@@ -268,7 +280,19 @@ export function SessionContextTab() {
   })
 
   return (
-    <ScrollView
+    <Show when={showContent()} fallback={
+      loadTimedOut() ? (
+        <div class="p-4 text-center text-sm text-muted">
+          Errore nel caricamento delle sessioni.
+          <button class="ml-2 px-2 py-1 rounded" onClick={() => location.reload()}>
+            Riprova
+          </button>
+        </div>
+      ) : (
+        <div class="p-4 text-center text-sm text-muted">Caricamento sessione...</div>
+      )
+    }>
+      <ScrollView
       class="@container h-full"
       viewportRef={(el) => {
         scroll = el
@@ -336,6 +360,7 @@ export function SessionContextTab() {
           </Accordion>
         </div>
       </div>
-    </ScrollView>
+      </ScrollView>
+    </Show>
   )
 }
