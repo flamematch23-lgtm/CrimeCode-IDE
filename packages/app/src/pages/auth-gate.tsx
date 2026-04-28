@@ -8,6 +8,7 @@ import {
   writeWebSession,
   logout as logoutSession,
 } from "../utils/teams-client"
+import { configureCloudSyncIfDesktop } from "../utils/cloud-sync"
 
 /**
  * AuthGate — wraps the AppInterface. Two sign-in paths:
@@ -237,6 +238,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             const next: Credentials = { url: DEFAULT_URL, username: "bearer", password: r.token, kind: "bearer" }
             writeCredentials(next)
             setCreds(next)
+            void configureCloudSyncIfDesktop(r.token)
             setPinState(null)
           }
           if (r.status === "awaiting_approval") {
@@ -343,6 +345,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
       }
       writeCredentials(next)
       setCreds(next)
+      void configureCloudSyncIfDesktop(result.token)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(friendlyAuthError(msg))
@@ -394,6 +397,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             }
             writeCredentials(next)
             setCreds(next)
+            void configureCloudSyncIfDesktop(result.token)
           } catch (err) {
             setError(friendlyAuthError(err instanceof Error ? err.message : String(err)))
           }
@@ -446,6 +450,7 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
               }
               writeCredentials(next)
               setCreds(next)
+              void configureCloudSyncIfDesktop(r.token)
             } else {
               // Pin already consumed or expired — point the user back
               // to the Telegram tab so they grab a fresh PIN.
