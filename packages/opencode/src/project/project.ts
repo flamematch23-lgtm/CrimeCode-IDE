@@ -515,6 +515,8 @@ export namespace Project {
    */
   export function tagWithCustomer(projectId: ProjectID, customerId: string): boolean {
     if (!customerId) return false
+    // Never tag the shared global project — see comment on assertOrTagOwnership.
+    if (projectId === ProjectID.global) return false
     const r = Database.use((db) =>
       db
         .update(ProjectTable)
@@ -547,6 +549,15 @@ export namespace Project {
     customerId: string,
   ): "tagged" | "owner" | "forbidden" {
     if (!customerId) return "owner" // unauthenticated callers fall through
+    // The global project (id === "global") is the catch-all bucket for any
+    // directory that has no `.git` — on the cloud this is `/root`, which
+    // every authenticated request hits. If we tag it with the first caller's
+    // customer_id, every subsequent customer gets a 403. Treat it as
+    // implicitly shared: each customer's session rows already carry their
+    // own customer_id (set by the SQLite trigger on insert + the auth
+    // middleware), so they can't see each other's sessions even on the same
+    // project row.
+    if (projectId === ProjectID.global) return "owner"
     return Database.use((db) => {
       const row = db
         .select({ customer_id: ProjectTable.customer_id })
