@@ -37,6 +37,9 @@ where to call them from.
 | **web-research** | Look up current docs / CVEs / "is this a known issue" via live web search. Pairs with `web-search` + `fetch-url` + `docs-extract`. |
 | **stack-trace-triage** | User pastes a stack trace. Resolve frames to source, show ±2 line excerpts, propose minimal fix. |
 | **dependency-update-safety** | Bumping a dep version. Baseline → changelog → upgrade → targeted tests → flake detection → re-audit → PR. |
+| **test-driven-debugging** | Fixing a real bug. Reproduce → write failing test FIRST → fix → verify → commit (test + fix together). Lock in the fix as a regression. |
+| **code-review-as-author** | Before opening a PR. Self-review, run pre-flight tools (secret-scan, api-shape diff, dep-audit, semver-bump), draft a description that pre-empts reviewer questions. |
+| **parallel-feature-development** | 2+ feature branches in flight. Set up git worktrees so each lives in its own dir with its own state — no more stash-switch-rebuild. Killer for hotfixes mid-feature. |
 
 ## Tool helpers (in `packages/opencode/script/agent-tools/`)
 
@@ -59,6 +62,11 @@ git + ripgrep where noted.
 | **stack-trace-resolve.ts** | Parse stack traces (Node/Bun, Deno, Python, Go, Rust, Java) and emit per-frame source excerpts with `>>>` markers on the offending line. |
 | **flaky-test-detect.ts** | Run a test command N× and flag tests that pass-and-fail across runs. Auto-detects Bun/Vitest/Jest/cargo/pytest/go-test. |
 | **docs-extract.ts** | Pull homepage + repository URLs for every dependency in the project (npm via registry, others derivable). Chains into web-search / fetch-url. |
+| **secret-scan.ts** | Find hardcoded secrets in a diff or working tree (gitleaks-lite). 25+ rules + entropy gate. `.secret-scan-ignore` allow-list for fixtures. |
+| **codemod.ts** | AST-aware multi-file refactoring: rename-symbol, rename-import, replace-literal, add-import, remove-export. Preserves comments + formatting. `--dry-run` first. |
+| **api-shape-extract.ts** | Emit a flat list of every public export of a TS package (kind + signature). `--diff <snapshot>` for "what API changed?" review. |
+| **bench-quick.ts** | Micro-benchmark: `single` (one fn), `ab` (compare two implementations with Welch's t-test), or `suite` (run every `bench_*` export). 30-second answer to "is this faster?". |
+| **semver-bump-suggest.ts** | Recommend major/minor/patch from API-shape diff + Conventional Commits + files touched. Combines all signals into one rationale-tagged answer. |
 
 ## Calling the tools from a skill
 
