@@ -1722,7 +1722,14 @@ export default function Page() {
           <div class="flex-1 min-h-0 overflow-hidden">
             <Switch>
               <Match when={params.id}>
-                <Show when={messagesReady()}>
+                <Show
+                  when={messagesReady()}
+                  fallback={
+                    <div class="h-full flex items-center justify-center text-12-regular text-text-weak">
+                      {language.t("common.loading")}…
+                    </div>
+                  }
+                >
                   <MessageTimeline
                     mobileChanges={mobileChanges()}
                     mobileFallback={reviewContent({

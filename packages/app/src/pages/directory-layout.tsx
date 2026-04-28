@@ -70,7 +70,21 @@ export default function Layout(props: ParentProps) {
   })
 
   return (
-    <Show when={resolved()} keyed>
+    <Show
+      when={resolved()}
+      keyed
+      // Without an explicit fallback the <main> renders nothing on the
+      // brief transition window between route param change and the
+      // SDK/Sync providers being ready — users saw a blank canvas with
+      // only the floating workspace-dock pill, no error, no loader.
+      // Keep it minimal so a real failure (decode fault) still triggers
+      // the redirect-to-home effect above.
+      fallback={
+        <div class="size-full flex items-center justify-center">
+          <div class="text-12-regular text-text-weak">{language.t("common.loading")}…</div>
+        </div>
+      }
+    >
       {(resolved) => (
         <SDKProvider directory={() => resolved}>
           <SyncProvider>
