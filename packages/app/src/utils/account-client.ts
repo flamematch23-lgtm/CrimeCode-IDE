@@ -146,6 +146,43 @@ export function getSyncMe(): Promise<SyncMe> {
   return getJSON<SyncMe>("/sync/me")
 }
 
+export interface SyncStatusSnapshot {
+  configured: boolean
+  lastPushAt: number | null
+  lastPullAt: number | null
+  lastError: string | null
+  pushedCount: number
+  pulledCount: number
+}
+
+/**
+ * Read /sync/status from a server (typically the local sidecar). The
+ * `configured` flag is the single source of truth for "should I show
+ * the Re-link button"; if it's false the sidecar has no
+ * {api, token} pair to push with and Sync-now will fail.
+ */
+export async function getSyncStatus(
+  server: { url: string; username?: string; password?: string },
+): Promise<SyncStatusSnapshot | null> {
+  const auth =
+    server.username === "bearer"
+      ? `Bearer ${server.password ?? ""}`
+      : `Basic ${
+          typeof btoa === "function"
+            ? btoa(`${server.username ?? "opencode"}:${server.password ?? ""}`)
+            : Buffer.from(`${server.username ?? "opencode"}:${server.password ?? ""}`).toString("base64")
+        }`
+  try {
+    const r = await fetch(`${server.url.replace(/\/+$/, "")}/sync/status`, {
+      headers: { Authorization: auth },
+    })
+    if (!r.ok) return null
+    return (await r.json()) as SyncStatusSnapshot
+  } catch {
+    return null
+  }
+}
+
 /**
  * Trigger an immediate sync round-trip on the LOCAL sidecar's CloudClient
  * (not the cloud — it's the local that pushes/pulls). Falls through to

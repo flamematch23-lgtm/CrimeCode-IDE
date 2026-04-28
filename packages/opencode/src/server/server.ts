@@ -705,6 +705,20 @@ export namespace Server {
       log.warn("failed to start team reaper", { error: err instanceof Error ? err.message : String(err) })
       captureException(err, { tags: { surface: "team-reaper-init" } })
     }
+    // Cloud-sync auto-hydrate: pick up the {api, token} pair the
+    // renderer wrote during a previous successful login so a sidecar
+    // restart doesn't drop the cloud-sync configuration. Without this
+    // "Sync now" surfaced "not configured" after every restart, even
+    // though the user had configured it minutes earlier.
+    void (async () => {
+      try {
+        const { CloudClient } = await import("../sync/cloud-client")
+        const ok = await CloudClient.hydrateFromDisk()
+        if (ok) log.info("cloud-sync rehydrated from disk")
+      } catch (err) {
+        log.warn("cloud-sync hydrate failed", { error: err instanceof Error ? err.message : String(err) })
+      }
+    })()
     // Renewal reminders — DM customers ~7 days before their monthly/annual
     // license expires.
     if (process.env.TELEGRAM_BOT_TOKEN) {

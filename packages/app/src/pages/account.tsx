@@ -7,6 +7,7 @@ import {
   getAccountMe,
   getAccountDevices,
   getSyncMe,
+  getSyncStatus,
   hasAccountSession,
   revokeDevice,
   logoutAllDevices,
@@ -16,7 +17,8 @@ import {
   type SyncMe,
 } from "@/utils/account-client"
 import { clearCredentials } from "@/pages/auth-gate"
-import { writeWebSession } from "@/utils/teams-client"
+import { readWebSession, writeWebSession } from "@/utils/teams-client"
+import { configureCloudSyncIfDesktop } from "@/utils/cloud-sync"
 
 /**
  * Customer dashboard. Identity and devices come from the central API
@@ -56,6 +58,15 @@ export default function AccountPage() {
     } catch {
       return null
     }
+  })
+
+  // Local sidecar's CloudClient state — separate from the cloud-side
+  // sync stats above. If `configured: false`, the local CloudClient
+  // has no {api, token} pair to push with → Sync-now is a no-op until
+  // the user re-links by clicking the button below.
+  const [syncStatus, syncStatusActions] = createResource(localCreds, async (creds) => {
+    if (!creds) return null
+    return getSyncStatus(creds)
   })
 
   const [busy, setBusy] = createSignal<string | null>(null)
@@ -106,14 +117,46 @@ export default function AccountPage() {
     setBusy("sync-now")
     try {
       const r = await triggerSyncNow(creds)
-      flash(
-        r.ok
-          ? `Sync OK — pushed ${r.pushed}, pulled ${r.pulled}.`
-          : "Sync skipped: " + (r.error ?? "not configured"),
-      )
+      if (r.ok) {
+        flash(`Sync OK — pushed ${r.pushed}, pulled ${r.pulled}.`)
+      } else if (r.error === "not configured") {
+        // Don't blame the user with a useless toast — surface the
+        // re-link path instead.
+        flash("Sync isn't configured on this device. Click Re-link below.")
+      } else {
+        flash("Sync skipped: " + (r.error ?? "unknown reason"))
+      }
       syncActions.refetch()
+      syncStatusActions.refetch()
     } catch (err) {
       flash("Sync failed: " + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Re-link this device: re-runs the same configure-sidecar call the
+   * login flow does, using the Bearer token currently in webSession.
+   * Useful after a sidecar restart that dropped the in-memory config
+   * before v2.22.21 added on-disk persistence — and as a manual
+   * recovery path even after that fix lands.
+   */
+  async function onRelink() {
+    const ws = readWebSession()
+    if (!ws) {
+      flash("Sign in first — there's no Bearer token to link with.")
+      return
+    }
+    setBusy("relink")
+    try {
+      await configureCloudSyncIfDesktop(ws.token)
+      // Give the sidecar a beat to flip configured=true before we re-poll.
+      await new Promise((r) => setTimeout(r, 500))
+      syncStatusActions.refetch()
+      flash("Device linked — sync should now run on its own.")
+    } catch (err) {
+      flash("Re-link failed: " + (err instanceof Error ? err.message : String(err)))
     } finally {
       setBusy(null)
     }
@@ -179,16 +222,38 @@ export default function AccountPage() {
           {/* ───────── Cloud sync ───────── */}
           <Section
             title="Cloud sync"
-            onRefresh={() => syncActions.refetch()}
-            loading={sync.loading}
+            onRefresh={() => {
+              syncActions.refetch()
+              syncStatusActions.refetch()
+            }}
+            loading={sync.loading || syncStatus.loading}
             right={
-              <Button variant="secondary" disabled={busy() === "sync-now"} onClick={onSyncNow}>
-                {busy() === "sync-now" ? "Syncing…" : "Sync now"}
-              </Button>
+              <Show
+                when={syncStatus()?.configured}
+                fallback={
+                  <Button variant="primary" disabled={busy() === "relink"} onClick={onRelink}>
+                    {busy() === "relink" ? "Linking…" : "🔗 Link this device"}
+                  </Button>
+                }
+              >
+                <Button variant="secondary" disabled={busy() === "sync-now"} onClick={onSyncNow}>
+                  {busy() === "sync-now" ? "Syncing…" : "Sync now"}
+                </Button>
+              </Show>
             }
           >
-            <Show when={sync()} fallback={<Empty>No cloud-sync data yet for this account.</Empty>}>
-              {(s) => <SyncCard stats={s()} />}
+            <Show
+              when={syncStatus()?.configured}
+              fallback={
+                <Empty>
+                  Cloud sync isn't linked to this device yet. Click <strong>Link this device</strong> above
+                  to push your local sessions to your account and pick up changes from your other devices.
+                </Empty>
+              }
+            >
+              <Show when={sync()} fallback={<Empty>Linked. No events synced yet — try opening a session.</Empty>}>
+                {(s) => <SyncCard stats={s()} />}
+              </Show>
             </Show>
           </Section>
         </Show>

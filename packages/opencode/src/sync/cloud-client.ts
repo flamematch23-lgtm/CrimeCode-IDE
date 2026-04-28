@@ -1,10 +1,55 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from "node:fs"
+import path from "node:path"
 import { Database, eq, gt, asc } from "../storage/db"
+import { Global } from "../global"
 import { EventTable } from "./event.sql"
 import { SyncCursorTable } from "./cloud-event.sql"
 import { SyncEvent } from "./index"
 import { Log } from "../util/log"
 
 const log = Log.create({ service: "cloud-client" })
+
+/**
+ * Where the sidecar persists the {api, token} pair so a restart doesn't
+ * drop the cloud-sync configuration. The directory is per-user (lives
+ * under Global.Path.data) and the file is chmod'd 600 since it holds
+ * the Bearer JWT.
+ *
+ * The previous version of CloudClient kept config in-memory only — when
+ * the sidecar restarted (app reopen, sidecar crash recovery dialog,
+ * deploy on the cloud side), the config was lost and the next "Sync now"
+ * showed the "Sync skipped: not configured" toast even though the user
+ * had just configured it minutes earlier.
+ */
+const CONFIG_FILE = path.join(Global.Path.data, "cloud-sync.json")
+
+function persistConfig(c: { api: string; token: string } | null): void {
+  try {
+    if (c == null) {
+      if (existsSync(CONFIG_FILE)) unlinkSync(CONFIG_FILE)
+      return
+    }
+    mkdirSync(path.dirname(CONFIG_FILE), { recursive: true })
+    writeFileSync(CONFIG_FILE, JSON.stringify(c), { mode: 0o600 })
+    // chmod again on POSIX in case the umask interfered with the open
+    // mode flag above.
+    if (process.platform !== "win32") chmodSync(CONFIG_FILE, 0o600)
+  } catch (err) {
+    log.warn("failed to persist cloud-sync config", { error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+function loadPersistedConfig(): { api: string; token: string } | null {
+  try {
+    if (!existsSync(CONFIG_FILE)) return null
+    const parsed = JSON.parse(readFileSync(CONFIG_FILE, "utf-8")) as { api?: unknown; token?: unknown }
+    if (typeof parsed.api !== "string" || typeof parsed.token !== "string") return null
+    return { api: parsed.api, token: parsed.token }
+  } catch (err) {
+    log.warn("failed to load persisted cloud-sync config", { error: err instanceof Error ? err.message : String(err) })
+    return null
+  }
+}
 
 // Cursor keys persisted in sync_cursor.
 const PUSH_CURSOR = "push:event_id" // last successfully pushed local event id
@@ -46,10 +91,14 @@ export namespace CloudClient {
    * Stamp the sidecar with the cloud endpoint and Bearer token. Renderer
    * calls this after a successful Telegram login. We immediately do an
    * initial round-trip, then start the background poller and bus listener.
+   *
+   * The config is persisted to disk so a sidecar restart picks it back
+   * up automatically (see hydrateFromDisk below).
    */
   export async function configure(api: string, token: string): Promise<void> {
     config = { api: api.replace(/\/+$/, ""), token }
     status.configured = true
+    persistConfig(config)
     log.info("configured", { api: config.api })
 
     // Hook local event bus once: after each local mutation, schedule a push.
@@ -69,6 +118,45 @@ export namespace CloudClient {
 
   export function isConfigured(): boolean {
     return config !== null
+  }
+
+  /**
+   * Wipe the in-memory + on-disk config. Used by the renderer's
+   * "Unlink this device" flow and on logout.
+   */
+  export function reset(): void {
+    config = null
+    status = {
+      configured: false,
+      lastPushAt: null,
+      lastPullAt: null,
+      lastError: null,
+      pushedCount: 0,
+      pulledCount: 0,
+    }
+    if (pushDebounce) clearTimeout(pushDebounce)
+    if (pollTimer) clearInterval(pollTimer)
+    if (busUnsub) busUnsub()
+    pushDebounce = null
+    pollTimer = null
+    busUnsub = null
+    persistConfig(null)
+    log.info("config reset")
+  }
+
+  /**
+   * Re-hydrate config from disk at server startup. If a previous run
+   * called configure() and the sidecar then restarted, this is what
+   * makes "Sync now" work without the user having to re-login.
+   * Returns true if a config was loaded (and the poller restarted).
+   */
+  export async function hydrateFromDisk(): Promise<boolean> {
+    if (config) return true // already configured this run
+    const loaded = loadPersistedConfig()
+    if (!loaded) return false
+    log.info("rehydrating cloud-sync config from disk", { api: loaded.api })
+    await configure(loaded.api, loaded.token)
+    return true
   }
 
   /**
