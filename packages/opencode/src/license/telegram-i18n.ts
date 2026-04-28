@@ -46,6 +46,11 @@ The IDE built for fraud researchers and security pros — by the team, for the t
 \`/myorders\` — list your last orders
 \`/teams\` — list your teams
 
+🔁 *Account & sync*
+\`/devices\` — list devices currently signed in to your account
+\`/logout\` — sign out everywhere (kicks every active device)
+\`/sync\` — show your cloud-sync status (events stored, last activity)
+
 🔒 *Privacy*
 We store only your Telegram handle, your order, and the license token signature. No email, no card data, no KYC.
 
@@ -79,6 +84,11 @@ L'IDE costruito per ricercatori di frodi e professionisti della sicurezza — da
 \`/status <order_id>\` — controlla lo stato di un ordine
 \`/myorders\` — elenca i tuoi ultimi ordini
 \`/teams\` — elenca i tuoi team
+
+🔁 *Account e sync*
+\`/devices\` — elenca i dispositivi loggati nel tuo account
+\`/logout\` — disconnetti tutti i dispositivi (kick everywhere)
+\`/sync\` — mostra lo stato della sincronizzazione cloud (eventi salvati, ultima attività)
 
 🔒 *Privacy*
 Salviamo solo il tuo handle Telegram, il tuo ordine, e la firma del token di licenza. Nessuna email, nessuna carta, nessun KYC.

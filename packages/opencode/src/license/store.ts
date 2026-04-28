@@ -84,6 +84,37 @@ export function findOrCreateCustomerByTelegram(opts: {
   return db.prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE id = ?").get(id)!
 }
 
+/**
+ * Read-only lookup that accepts either a `cus_…` id, a Telegram handle
+ * (with or without leading "@"), or a numeric Telegram user id passed as
+ * a string. Returns null if nothing matches — never inserts. Used by the
+ * Telegram bot's admin `/whois` command and similar tooling.
+ */
+export function findCustomerByIdOrTelegram(needle: string): CustomerRow | null {
+  const db = getDb()
+  const trimmed = needle.trim()
+  if (!trimmed) return null
+  // 1) cus_… id
+  if (trimmed.startsWith("cus_")) {
+    const r = db.prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE id = ?").get(trimmed)
+    if (r) return r
+  }
+  // 2) numeric Telegram user id
+  const numeric = Number(trimmed)
+  if (Number.isFinite(numeric) && Number.isInteger(numeric)) {
+    const r = db
+      .prepare<CustomerRow, [number]>("SELECT * FROM customers WHERE telegram_user_id = ? LIMIT 1")
+      .get(numeric)
+    if (r) return r
+  }
+  // 3) Telegram handle (strip leading @ if present)
+  const handle = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed
+  const byHandle = db
+    .prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE lower(telegram) = lower(?) LIMIT 1")
+    .get(handle)
+  return byHandle ?? null
+}
+
 export function createOrder(opts: {
   customer_telegram?: string | null
   customer_user_id?: number | null

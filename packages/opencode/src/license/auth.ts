@@ -238,6 +238,18 @@ export function revokeSession(sid: string): boolean {
   return r.changes > 0
 }
 
+/**
+ * Kick every active session for a customer ("logout everywhere"). Returns
+ * the number of sessions actually flipped from active → revoked. Used by
+ * the Telegram bot's `/logout` and the admin's `/whois`-style controls.
+ */
+export function revokeAllSessionsForCustomer(customerId: string): number {
+  const r = getDb()
+    .prepare("UPDATE auth_sessions SET revoked_at = ? WHERE customer_id = ? AND revoked_at IS NULL")
+    .run(Math.floor(Date.now() / 1000), customerId)
+  return r.changes
+}
+
 export function listSessionsForCustomer(customerId: string) {
   return getDb()
     .prepare<

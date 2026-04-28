@@ -1,6 +1,12 @@
 import { Log } from "../util/log"
 import { captureException } from "./sentry"
-import { approveCustomer, claimPinForCustomer, rejectCustomer } from "./auth"
+import {
+  approveCustomer,
+  claimPinForCustomer,
+  listSessionsForCustomer,
+  rejectCustomer,
+  revokeAllSessionsForCustomer,
+} from "./auth"
 import { notifyUserApproved, notifyUserRejected } from "./telegram-notify"
 import { listTeamsForCustomer } from "./teams"
 import { helpUser, orderCreatedMessage, pickLang, rememberLang, type Lang } from "./telegram-i18n"
@@ -9,6 +15,7 @@ import {
   cancelOrder,
   confirmOrderAndIssue,
   createOrder,
+  findCustomerByIdOrTelegram,
   findOrCreateCustomerByTelegram,
   getLicense,
   getOffersForOrder,
@@ -19,6 +26,7 @@ import {
   revokeLicense,
   statsCounts,
 } from "./store"
+import { CloudEventQueries } from "../sync/cloud-event-queries"
 import { verifyToken } from "./token"
 import { formatAmount, usdToSmallestUnit, type Currency } from "./prices"
 import { paymentUri, qrCodeUrl, withDiscriminator } from "./payments"
@@ -130,12 +138,23 @@ We store only your Telegram handle, your order, and the license token signature.
 
 const HELP_ADMIN = `🛠️ *Admin commands* (you only)
 
+*Orders & licenses*
 \`/confirm <order_id> [tx_hash]\` — confirm payment + auto-deliver token
 \`/cancel <order_id>\` — cancel a pending order
 \`/pending\` — list pending orders
 \`/list\` — last 20 licenses
 \`/revoke <license_id> [reason]\` — revoke a license
 \`/lookup <token>\` — find license by token
+
+*Customers & sessions*
+\`/whois <cus_id|@telegram|user_id>\` — full customer dump
+\`/forcelogout <cus_id|@telegram|user_id>\` — kick every device for this customer
+
+*Cloud sync*
+\`/syncstats\` — global cloud-event stats + top 10 customers
+\`/wipesync <cus_id|@telegram|user_id>\` — *DESTRUCTIVE* wipe all cloud events for a customer (GDPR)
+
+*Counters*
 \`/stats\` — counters dashboard
 
 Dashboard web: \`https://api.crimecode.cc/license/admin\``
@@ -424,6 +443,74 @@ async function handle(update: TgUpdate) {
       return
     }
 
+    // ── Account & sync (user-facing) ──
+    case "devices": {
+      const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+      const sessions = listSessionsForCustomer(customer.id)
+      const active = sessions.filter((s) => s.revoked_at == null)
+      if (active.length === 0) {
+        await send(chatId, "You have no active sessions. Sign in from the desktop or web app to get started.")
+        return
+      }
+      const lines = active.map((s) => {
+        const last = new Date(s.last_seen_at * 1000).toISOString().replace("T", " ").slice(0, 16)
+        const id = s.id.length > 18 ? s.id.slice(0, 8) + "…" + s.id.slice(-6) : s.id
+        return `• \`${id}\` — ${escapeMd(s.device_label ?? "unknown device")} — last seen *${last}* UTC`
+      })
+      await send(
+        chatId,
+        `🔐 *Active devices* (${active.length})\n\n${lines.join("\n")}\n\nUse \`/logout\` to sign out everywhere.`,
+        "Markdown",
+      )
+      return
+    }
+    case "logout": {
+      const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+      const n = revokeAllSessionsForCustomer(customer.id)
+      if (n === 0) {
+        await send(chatId, "You have no active sessions to sign out.")
+      } else {
+        await send(
+          chatId,
+          `✅ Signed out *${n}* device${n === 1 ? "" : "s"}. You'll need to sign in again on each one.`,
+          "Markdown",
+        )
+      }
+      return
+    }
+    case "sync": {
+      const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
+      const stats = CloudEventQueries.statsForCustomer(customer.id)
+      if (stats.totalEvents === 0) {
+        await send(
+          chatId,
+          "☁️ *Cloud sync*\n\nYou don't have any synced data yet. Sign in to the desktop app and your sessions will start syncing automatically.",
+          "Markdown",
+        )
+        return
+      }
+      const top = CloudEventQueries.topAggregatesForCustomer(customer.id, 5)
+      const last = stats.lastPushedAt
+        ? new Date(stats.lastPushedAt).toISOString().replace("T", " ").slice(0, 16) + " UTC"
+        : "never"
+      const first = stats.firstPushedAt
+        ? new Date(stats.firstPushedAt).toISOString().replace("T", " ").slice(0, 10)
+        : "—"
+      const topLines = top.map(
+        (a) =>
+          `• \`${a.aggregate_id.length > 24 ? a.aggregate_id.slice(0, 22) + "…" : a.aggregate_id}\` — ${a.eventCount} events`,
+      )
+      const body =
+        `☁️ *Your cloud sync*\n\n` +
+        `Total events: *${stats.totalEvents}*\n` +
+        `Aggregates: *${stats.uniqueAggregates}* (sessions/projects)\n` +
+        `First sync: *${first}*\n` +
+        `Last sync: *${last}*\n\n` +
+        `*Recent activity*\n${topLines.join("\n")}`
+      await send(chatId, body, "Markdown")
+      return
+    }
+
     // ── Admin ──
     case "confirm": {
       if (!isAdmin) { await send(chatId, "Not authorized."); return }
@@ -515,6 +602,79 @@ async function handle(update: TgUpdate) {
       await send(
         chatId,
         Object.entries(s).map(([k, v]) => `${k}: *${v}*`).join("\n"),
+        "Markdown",
+      )
+      return
+    }
+    case "whois": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      if (!args) { await send(chatId, "Usage: `/whois <cus_id|@telegram|user_id>`", "Markdown"); return }
+      const c = findCustomerByIdOrTelegram(args)
+      if (!c) { await send(chatId, "Customer not found."); return }
+      const sessions = listSessionsForCustomer(c.id)
+      const active = sessions.filter((s) => s.revoked_at == null)
+      const sync = CloudEventQueries.statsForCustomer(c.id)
+      const teams = listTeamsForCustomer(c.id)
+      const created = new Date(c.created_at * 1000).toISOString().replace("T", " ").slice(0, 16)
+      const lastSync = sync.lastPushedAt
+        ? new Date(sync.lastPushedAt).toISOString().replace("T", " ").slice(0, 16)
+        : "never"
+      const body =
+        `👤 *Customer dump*\n\n` +
+        `ID: \`${c.id}\`\n` +
+        `Telegram: ${c.telegram ? "@" + escapeMd(c.telegram) : "_none_"}` +
+        (c.telegram_user_id ? ` (\`${c.telegram_user_id}\`)` : "") +
+        `\n` +
+        `Email: ${c.email ? escapeMd(c.email) : "_none_"}\n` +
+        `Status: *${c.approval_status}*` +
+        (c.rejected_reason ? ` (${escapeMd(c.rejected_reason)})` : "") +
+        `\n` +
+        `Created: *${created}* UTC\n` +
+        `\n` +
+        `Sessions: *${active.length}* active / *${sessions.length}* total\n` +
+        `Teams: *${teams.length}*\n` +
+        `Cloud events: *${sync.totalEvents}* across *${sync.uniqueAggregates}* aggregates — last push *${lastSync}* UTC\n` +
+        `\n` +
+        `Use \`/forcelogout ${c.id}\` to kick all devices, \`/wipesync ${c.id}\` to drop their cloud data.`
+      await send(chatId, body, "Markdown")
+      return
+    }
+    case "forcelogout": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      if (!args) { await send(chatId, "Usage: `/forcelogout <cus_id|@telegram|user_id>`", "Markdown"); return }
+      const c = findCustomerByIdOrTelegram(args)
+      if (!c) { await send(chatId, "Customer not found."); return }
+      const n = revokeAllSessionsForCustomer(c.id)
+      await send(chatId, `🔌 Revoked *${n}* session${n === 1 ? "" : "s"} for \`${c.id}\`.`, "Markdown")
+      return
+    }
+    case "syncstats": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      const g = CloudEventQueries.globalStats()
+      const top = CloudEventQueries.topCustomers(10)
+      const lines = top.map((r, i) => {
+        const last = new Date(r.lastPushedAt).toISOString().slice(0, 10)
+        return `${i + 1}. \`${r.customer_id}\` — *${r.eventCount}* events (last ${last})`
+      })
+      const body =
+        `☁️ *Cloud-event log — global*\n\n` +
+        `Total events: *${g.totalEvents}*\n` +
+        `Unique customers syncing: *${g.uniqueCustomers}*\n` +
+        `Unique aggregates: *${g.uniqueAggregates}*\n\n` +
+        (lines.length > 0 ? `*Top 10 customers*\n${lines.join("\n")}` : "_No customers have synced yet._")
+      await send(chatId, body, "Markdown")
+      return
+    }
+    case "wipesync": {
+      if (!isAdmin) { await send(chatId, "Not authorized."); return }
+      if (!args) { await send(chatId, "Usage: `/wipesync <cus_id|@telegram|user_id>`", "Markdown"); return }
+      const c = findCustomerByIdOrTelegram(args)
+      if (!c) { await send(chatId, "Customer not found."); return }
+      const before = CloudEventQueries.statsForCustomer(c.id).totalEvents
+      const deleted = CloudEventQueries.wipeCustomer(c.id)
+      await send(
+        chatId,
+        `🗑️ Wiped *${deleted}* cloud event${deleted === 1 ? "" : "s"} for \`${c.id}\` (was ${before}).`,
         "Markdown",
       )
       return
