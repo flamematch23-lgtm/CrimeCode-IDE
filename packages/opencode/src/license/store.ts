@@ -309,6 +309,42 @@ export function listAudit(limit = 100): Array<{ id: number; action: string; deta
     .all(limit)
 }
 
+/**
+ * Return every license row for `customerId` (most-recently-issued first).
+ * Used by /account/me/license + the bot's /mylicense command so a user
+ * can see and re-fetch a token they already paid for. Includes revoked
+ * rows so the UI can show "ended on YYYY-MM-DD" — filtering is the
+ * caller's responsibility.
+ */
+export function listLicensesForCustomer(customerId: string): LicenseRow[] {
+  return getDb()
+    .prepare<LicenseRow, [string]>(
+      "SELECT * FROM licenses WHERE customer_id = ? ORDER BY issued_at DESC",
+    )
+    .all(customerId)
+}
+
+/**
+ * Convenience: pick the single "currently usable" license for a customer.
+ * Returns the most-recently-issued non-revoked, non-expired row, or null
+ * if there isn't one. The token isn't included — call makeToken() at
+ * the call site to regenerate it from the row (the signature in the DB
+ * is deterministic, so the same payload always produces the same JWT).
+ */
+export function getActiveLicenseForCustomer(customerId: string): LicenseRow | null {
+  const nowSec = now()
+  const row = getDb()
+    .prepare<LicenseRow, [string, number]>(
+      `SELECT * FROM licenses
+        WHERE customer_id = ?
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)
+        ORDER BY issued_at DESC LIMIT 1`,
+    )
+    .get(customerId, nowSec)
+  return row ?? null
+}
+
 export function getLicense(id: string): LicenseRow | null {
   return getDb().prepare<LicenseRow, [string]>("SELECT * FROM licenses WHERE id = ?").get(id) ?? null
 }

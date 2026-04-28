@@ -44,6 +44,7 @@ The IDE built for fraud researchers and security pros — by the team, for the t
 \`/order monthly|annual|lifetime\` — create a new order
 \`/status <order_id>\` — check the status of one of your orders
 \`/myorders\` — list your last orders
+\`/mylicense\` — re-fetch your activation token (auto-applied on login)
 \`/teams\` — list your teams
 
 🔁 *Account & sync*
@@ -83,6 +84,7 @@ L'IDE costruito per ricercatori di frodi e professionisti della sicurezza — da
 \`/order monthly|annual|lifetime\` — crea un nuovo ordine
 \`/status <order_id>\` — controlla lo stato di un ordine
 \`/myorders\` — elenca i tuoi ultimi ordini
+\`/mylicense\` — re-invia il token di attivazione (applicato in automatico al login)
 \`/teams\` — elenca i tuoi team
 
 🔁 *Account e sync*

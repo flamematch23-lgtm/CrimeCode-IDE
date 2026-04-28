@@ -7,7 +7,12 @@ import {
   revokeAllSessionsForCustomer,
   revokeSession,
 } from "../../license/auth"
-import { findCustomerByIdOrTelegram } from "../../license/store"
+import {
+  findCustomerByIdOrTelegram,
+  getActiveLicenseForCustomer,
+  listLicensesForCustomer,
+} from "../../license/store"
+import { makeToken } from "../../license/token"
 
 const log = Log.create({ service: "account" })
 
@@ -103,6 +108,75 @@ export const AccountRoutes = () =>
         const ok = revokeSession(sid)
         log.info("device revoked", { customerId, sid, ok })
         return c.json({ revoked: ok })
+      },
+    )
+    // GET /account/me/license — return the calling customer's currently
+    // usable license + a freshly-regenerated activation token. Used by
+    // the renderer right after a successful Telegram / username sign-in
+    // to skip the manual "paste token" step: if the user already paid,
+    // the desktop app applies the license automatically.
+    //
+    // The token is regenerated deterministically from the license row
+    // (makeToken with the same payload always yields the same JWT), so
+    // the customer can re-fetch from any device — no per-device state.
+    // Returns 200 with `{license: null, token: null}` (not 404) when
+    // there's no active license, so the caller can branch cleanly.
+    .get(
+      "/me/license",
+      describeRoute({
+        summary: "Get the calling customer's active license + activation token",
+        operationId: "account.me.license",
+        responses: {
+          200: { description: "License or null" },
+          401: { description: "Bearer token required" },
+        },
+      }),
+      async (c) => {
+        const customerId = requireCustomer(c)
+        const license = getActiveLicenseForCustomer(customerId)
+        if (!license) {
+          return c.json({ license: null, token: null })
+        }
+        const { token } = makeToken({
+          l: license.id,
+          i: license.interval,
+          t: license.issued_at,
+          ...(license.expires_at != null ? { e: license.expires_at } : {}),
+        })
+        return c.json({
+          license: {
+            id: license.id,
+            interval: license.interval,
+            issued_at: license.issued_at,
+            expires_at: license.expires_at,
+          },
+          token,
+        })
+      },
+    )
+    // GET /account/me/licenses — full license history for the calling
+    // customer (active + revoked + expired). Useful for an "Order
+    // history" / "License history" panel in the dashboard.
+    .get(
+      "/me/licenses",
+      describeRoute({
+        summary: "List all licenses for the calling customer",
+        operationId: "account.me.licenses",
+        responses: { 200: { description: "License list" } },
+      }),
+      async (c) => {
+        const customerId = requireCustomer(c)
+        const licenses = listLicensesForCustomer(customerId)
+        return c.json({
+          licenses: licenses.map((l) => ({
+            id: l.id,
+            interval: l.interval,
+            issued_at: l.issued_at,
+            expires_at: l.expires_at,
+            revoked_at: l.revoked_at,
+            revoked_reason: l.revoked_reason,
+          })),
+        })
       },
     )
     // POST /account/me/devices/logout-all — kick every active session for

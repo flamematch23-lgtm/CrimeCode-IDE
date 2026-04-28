@@ -20,6 +20,7 @@ import {
   findCustomerByIdOrTelegram,
   findCustomerByTelegram,
   findOrCreateCustomerByTelegram,
+  getActiveLicenseForCustomer,
   getLicense,
   getOffersForOrder,
   getOrder,
@@ -30,7 +31,7 @@ import {
   statsCounts,
 } from "./store"
 import { CloudEventQueries } from "../sync/cloud-event-queries"
-import { verifyToken } from "./token"
+import { makeToken, verifyToken } from "./token"
 import { formatAmount, usdToSmallestUnit, type Currency } from "./prices"
 import { paymentUri, qrCodeUrl, withDiscriminator } from "./payments"
 import { getWallets } from "./wallets"
@@ -597,6 +598,51 @@ async function handle(update: TgUpdate) {
       return
     }
 
+    case "mylicense":
+    case "license": {
+      // Re-fetch the calling user's active license + activation token.
+      // The customer is identified by telegram_user_id — same path the
+      // /account/me/license HTTP endpoint uses, just exposed inside the
+      // chat for users who lost their original token DM.
+      const customer = findCustomerByTelegram({ telegram_user_id: userId })
+      if (!customer) {
+        await send(chatId, "No CrimeCode account linked to this Telegram. Open the desktop app to sign up.")
+        return
+      }
+      const lic = getActiveLicenseForCustomer(customer.id)
+      if (!lic) {
+        await send(
+          chatId,
+          "📭 *No active license*\n\nYou don't have a paid or trial license yet. Pick a plan:",
+          "Markdown",
+          [
+            [
+              { text: "⚡ Monthly $20", callback_data: "menu:order:monthly" },
+              { text: "🔥 Annual $200", callback_data: "menu:order:annual" },
+            ],
+            [{ text: "💎 Lifetime $500", callback_data: "menu:order:lifetime" }],
+          ],
+        )
+        return
+      }
+      const { token } = makeToken({
+        l: lic.id,
+        i: lic.interval,
+        t: lic.issued_at,
+        ...(lic.expires_at != null ? { e: lic.expires_at } : {}),
+      })
+      const expLine = lic.expires_at
+        ? `\nExpires: *${new Date(lic.expires_at * 1000).toISOString().slice(0, 10)}*`
+        : "\nExpires: *never (lifetime)* 🎉"
+      await send(
+        chatId,
+        `🎟️ *Your license*\n\nID: \`${lic.id}\`\nPlan: *${lic.interval}*${expLine}\n\n` +
+          `Activation token (paste in the desktop app):\n\n\`${token}\`\n\n` +
+          "_If you log in with the same Telegram on the desktop, the token is applied automatically — no copy-paste needed._",
+        "Markdown",
+      )
+      return
+    }
     // ── Account & sync (user-facing) ──
     case "devices": {
       const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
