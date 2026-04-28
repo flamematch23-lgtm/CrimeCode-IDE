@@ -10,9 +10,16 @@ import {
 import {
   findCustomerByIdOrTelegram,
   getActiveLicenseForCustomer,
+  listAuditForCustomer,
   listLicensesForCustomer,
 } from "../../license/store"
 import { makeToken } from "../../license/token"
+import {
+  getOrCreateReferralCode,
+  listReferralsByCustomer,
+  REFERRAL_BONUS,
+  resolveReferralCode,
+} from "../../license/referrals"
 
 const log = Log.create({ service: "account" })
 
@@ -177,6 +184,49 @@ export const AccountRoutes = () =>
             revoked_reason: l.revoked_reason,
           })),
         })
+      },
+    )
+    // GET /account/me/referral — get (or create) the calling customer's
+    // shareable referral code and a count of claims they've earned.
+    .get(
+      "/me/referral",
+      describeRoute({
+        summary: "Calling customer's referral code + history",
+        operationId: "account.me.referral",
+        responses: { 200: { description: "Referral code + claim list" } },
+      }),
+      async (c) => {
+        const customerId = requireCustomer(c)
+        const row = getOrCreateReferralCode(customerId)
+        const claims = listReferralsByCustomer(customerId, 50)
+        return c.json({
+          code: row.code,
+          shareUrl: `https://crimecode.cc/r/${row.code}`,
+          bonus: REFERRAL_BONUS,
+          claims: claims.map((c) => ({
+            referred_customer_id: c.referred_customer_id,
+            claimed_at: c.claimed_at,
+            referrer_bonus_days: c.referrer_bonus_days,
+          })),
+        })
+      },
+    )
+    // GET /account/me/audit — read-only ledger of actions involving this
+    // customer (license issue, approval, revocation, …). Trust + surface
+    // for the dashboard's "Activity" panel; not a real-time stream
+    // (audit is append-only, polling is fine).
+    .get(
+      "/me/audit",
+      describeRoute({
+        summary: "Audit log entries that reference the calling customer",
+        operationId: "account.me.audit",
+        responses: { 200: { description: "Audit list" } },
+      }),
+      async (c) => {
+        const customerId = requireCustomer(c)
+        const limit = Math.min(Math.max(Number.parseInt(c.req.query("limit") ?? "100", 10), 1), 500)
+        const rows = listAuditForCustomer(customerId, limit)
+        return c.json({ entries: rows })
       },
     )
     // POST /account/me/devices/logout-all — kick every active session for

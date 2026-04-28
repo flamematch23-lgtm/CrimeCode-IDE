@@ -45,6 +45,7 @@ The IDE built for fraud researchers and security pros — by the team, for the t
 \`/status <order_id>\` — check the status of one of your orders
 \`/myorders\` — list your last orders
 \`/mylicense\` — re-fetch your activation token (auto-applied on login)
+\`/referral\` — your invite code + bonus-trial-days history
 \`/teams\` — list your teams
 
 🔁 *Account & sync*
@@ -85,6 +86,7 @@ L'IDE costruito per ricercatori di frodi e professionisti della sicurezza — da
 \`/status <order_id>\` — controlla lo stato di un ordine
 \`/myorders\` — elenca i tuoi ultimi ordini
 \`/mylicense\` — re-invia il token di attivazione (applicato in automatico al login)
+\`/referral\` — il tuo codice invito + storia dei bonus
 \`/teams\` — elenca i tuoi team
 
 🔁 *Account e sync*

@@ -15,7 +15,8 @@
  * signed in at all — no more conflating "no Bearer here" with "not signed in".
  */
 
-import { readWebSession } from "./teams-client"
+import { readWebSession, writeWebSession } from "./teams-client"
+import { notify } from "../context/notifications"
 
 export interface AccountMe {
   customer_id: string
@@ -78,8 +79,27 @@ async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(CLOUD_BASE + path, {
     headers: { Authorization: `Bearer ${bearer()}` },
   })
+  if (res.status === 401) handleExpired()
   if (!res.ok) throw new Error(`${path} ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   return (await res.json()) as T
+}
+
+/**
+ * Centralised reaction to a cloud-side 401 — the JWT has expired or
+ * been revoked. Wipe the local webSession so the auth-gate snaps the
+ * user back to the sign-in screen, and post a notification so they
+ * understand what happened (instead of just silently being logged out).
+ */
+let expiredHandled = false
+function handleExpired(): void {
+  if (expiredHandled) return
+  expiredHandled = true
+  writeWebSession(null)
+  notify({
+    level: "warning",
+    title: "Session expired",
+    body: "Your sign-in expired. Open the workspace switcher to sign in again.",
+  })
 }
 
 async function postJSON<T>(path: string, body?: unknown): Promise<T> {
@@ -91,6 +111,7 @@ async function postJSON<T>(path: string, body?: unknown): Promise<T> {
     },
     body: body == null ? undefined : JSON.stringify(body),
   })
+  if (res.status === 401) handleExpired()
   if (!res.ok) throw new Error(`${path} ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   return (await res.json()) as T
 }
@@ -100,6 +121,7 @@ async function deleteJSON<T>(path: string): Promise<T> {
     method: "DELETE",
     headers: { Authorization: `Bearer ${bearer()}` },
   })
+  if (res.status === 401) handleExpired()
   if (!res.ok) throw new Error(`${path} ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   return (await res.json()) as T
 }

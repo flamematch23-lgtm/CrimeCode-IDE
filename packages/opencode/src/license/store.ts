@@ -301,6 +301,27 @@ export function listLicenses(limit = 100): Array<LicenseRow & { customer_telegra
     .all(limit)
 }
 
+/**
+ * Audit rows that mention the given customer id anywhere in their JSON
+ * `details` payload. Cheap LIKE-scan over the audit ledger — fine for
+ * the dashboard's "your activity" panel since the audit table is
+ * append-only and usually only a few thousand rows.
+ */
+export function listAuditForCustomer(
+  customerId: string,
+  limit = 100,
+): Array<{ id: number; action: string; details: string | null; ts: number }> {
+  const needle = "%" + customerId + "%"
+  return getDb()
+    .prepare<
+      { id: number; action: string; details: string | null; ts: number },
+      [string, number]
+    >(
+      "SELECT id, action, details, ts FROM audit WHERE details LIKE ? ORDER BY ts DESC LIMIT ?",
+    )
+    .all(needle, limit)
+}
+
 export function listAudit(limit = 100): Array<{ id: number; action: string; details: string | null; ts: number }> {
   return getDb()
     .prepare<{ id: number; action: string; details: string | null; ts: number }, [number]>(

@@ -31,6 +31,12 @@ import {
   statsCounts,
 } from "./store"
 import { CloudEventQueries } from "../sync/cloud-event-queries"
+import {
+  claimReferral,
+  getOrCreateReferralCode,
+  listReferralsByCustomer,
+  REFERRAL_BONUS,
+} from "./referrals"
 import { makeToken, verifyToken } from "./token"
 import { formatAmount, usdToSmallestUnit, type Currency } from "./prices"
 import { paymentUri, qrCodeUrl, withDiscriminator } from "./payments"
@@ -416,6 +422,7 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
   if (data.startsWith("menu:")) {
     const [, verb, a1] = data.split(":")
     if (!cb.message) return ack("ok")
+    const chatId = cb.message.chat.id
     if (verb === "order" && (a1 === "monthly" || a1 === "annual" || a1 === "lifetime")) {
       const customer = findCustomerByTelegram({ telegram_user_id: fromId })
       const lang = recallLang(fromId)
@@ -424,8 +431,87 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
         customer_user_id: fromId,
         interval: a1,
       })
-      await sendNew(cb.message.chat.id, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang))
+      await sendNew(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang))
       await ack("Ordine creato")
+      return
+    }
+    if (verb === "mylicense") {
+      const cust = findCustomerByTelegram({ telegram_user_id: fromId })
+      const lic = cust ? getActiveLicenseForCustomer(cust.id) : null
+      if (!lic) {
+        await sendNew(chatId, "📭 No active license — pick a plan with /order monthly|annual|lifetime.")
+      } else {
+        const { token: licTok } = makeToken({
+          l: lic.id,
+          i: lic.interval,
+          t: lic.issued_at,
+          ...(lic.expires_at != null ? { e: lic.expires_at } : {}),
+        })
+        const exp = lic.expires_at
+          ? `\nExpires: *${new Date(lic.expires_at * 1000).toISOString().slice(0, 10)}*`
+          : "\nExpires: *never (lifetime)* 🎉"
+        await sendNew(
+          chatId,
+          `🎟️ *Your license*\n\nID: \`${lic.id}\`\nPlan: *${lic.interval}*${exp}\n\n\`${licTok}\``,
+        )
+      }
+      await ack("ok")
+      return
+    }
+    if (verb === "myorders") {
+      const orders = listOrdersForUser(fromId, 5)
+      if (orders.length === 0) {
+        await sendNew(chatId, "📋 *No orders yet*. Tap /order monthly|annual|lifetime to start one.")
+      } else {
+        const lines = orders.map((o) => `• \`${o.id}\` — ${o.interval} — *${o.status}*`)
+        await sendNew(chatId, "📋 *Your last orders*\n\n" + lines.join("\n"))
+      }
+      await ack("ok")
+      return
+    }
+    if (verb === "devices") {
+      const cust = findCustomerByTelegram({ telegram_user_id: fromId })
+      const sessions = cust ? listSessionsForCustomer(cust.id).filter((s) => s.revoked_at == null) : []
+      if (sessions.length === 0) {
+        await sendNew(chatId, "🔐 No active devices. Sign in from the desktop or web app.")
+      } else {
+        const lines = sessions
+          .map((s) => `• ${escapeMd(s.device_label ?? "unknown")} — last seen ${new Date(s.last_seen_at * 1000).toISOString().slice(0, 16)} UTC`)
+        await sendNew(chatId, `🔐 *Active devices* (${sessions.length})\n\n` + lines.join("\n"), [
+          [{ text: "🔌 Logout everywhere", callback_data: "usr:logoutall" }],
+        ])
+      }
+      await ack("ok")
+      return
+    }
+    if (verb === "teams") {
+      const cust = findCustomerByTelegram({ telegram_user_id: fromId })
+      const teams = cust ? listTeamsForCustomer(cust.id) : []
+      if (teams.length === 0) {
+        await sendNew(chatId, "You're not in any team yet.")
+      } else {
+        const lines = teams.map((t) => `• *${escapeMd(t.name)}* — role *${t.role}* — ${t.member_count} members`)
+        await sendNew(chatId, "👥 *Your teams*\n\n" + lines.join("\n"))
+      }
+      await ack("ok")
+      return
+    }
+    if (verb === "sync") {
+      const cust = findCustomerByTelegram({ telegram_user_id: fromId })
+      if (!cust) {
+        await sendNew(chatId, "No CrimeCode account linked yet.")
+      } else {
+        const { CloudEventQueries } = await import("../sync/cloud-event-queries")
+        const stats = CloudEventQueries.statsForCustomer(cust.id)
+        const last = stats.lastPushedAt
+          ? new Date(stats.lastPushedAt).toISOString().replace("T", " ").slice(0, 16) + " UTC"
+          : "never"
+        await sendNew(
+          chatId,
+          `☁️ *Cloud sync*\n\nEvents: *${stats.totalEvents}*\nAggregates: *${stats.uniqueAggregates}*\nLast push: *${last}*`,
+        )
+      }
+      await ack("ok")
       return
     }
     return ack("ok")
@@ -464,10 +550,26 @@ async function handle(update: TgUpdate) {
   // one-time admin notification with inline approve/reject buttons —
   // this used to never happen for Telegram-only signups, leaving the
   // dashboard's "Pending approvals" tab as the only way to see them.
+  // Also: if the caller arrived via a /start ref_<CODE> deep-link, claim
+  // the referral exactly once at create time.
+  let _newSignup = false
   if (username || userId) {
     const existed = findCustomerByTelegram({ telegram: username, telegram_user_id: userId })
     const customer = findOrCreateCustomerByTelegram({ telegram: username, telegram_user_id: userId })
     if (!existed) {
+      _newSignup = true
+      const refCode = text.match(/^\/start\s+ref_([A-Z0-9]{4,32})\b/i)?.[1]
+      if (refCode) {
+        const r = claimReferral({ code: refCode, referredCustomerId: customer.id })
+        if (r.ok) {
+          log.info("referral claimed at signup", {
+            customer: customer.id,
+            referrer: r.referrer_customer_id,
+          })
+        } else {
+          log.info("referral claim skipped", { reason: r.reason, code: refCode })
+        }
+      }
       void notifyAdminNewPendingUser({
         customer_id: customer.id,
         username: null,
@@ -519,14 +621,32 @@ async function handle(update: TgUpdate) {
         return
       }
       // Main menu — quick access to the most-used flows. Buttons fire
-      // `menu:*` callback patterns handled in handleCallbackQuery.
-      const menu: TgKeyboard = [
-        [
-          { text: "⚡ Monthly $20", callback_data: "menu:order:monthly" },
-          { text: "🔥 Annual $200", callback_data: "menu:order:annual" },
-        ],
-        [{ text: "💎 Lifetime $500", callback_data: "menu:order:lifetime" }],
-      ]
+      // `menu:*` and `usr:*` callback patterns handled in
+      // handleCallbackQuery. Layout adapts to whether the caller already
+      // has an active license (in which case showing the order plans
+      // first would be backwards).
+      const me = findCustomerByTelegram({ telegram_user_id: userId })
+      const lic = me ? getActiveLicenseForCustomer(me.id) : null
+      const menu: TgKeyboard = lic
+        ? [
+            [{ text: "🎟️ My license", callback_data: "menu:mylicense" }],
+            [
+              { text: "📋 My orders", callback_data: "menu:myorders" },
+              { text: "🔐 Devices", callback_data: "menu:devices" },
+            ],
+            [
+              { text: "👥 Teams", callback_data: "menu:teams" },
+              { text: "☁️ Sync", callback_data: "menu:sync" },
+            ],
+          ]
+        : [
+            [
+              { text: "⚡ Monthly $20", callback_data: "menu:order:monthly" },
+              { text: "🔥 Annual $200", callback_data: "menu:order:annual" },
+            ],
+            [{ text: "💎 Lifetime $500", callback_data: "menu:order:lifetime" }],
+            [{ text: "📋 My orders", callback_data: "menu:myorders" }],
+          ]
       await send(chatId, helpUser(lang) + (isAdmin ? "\n\n" + HELP_ADMIN : ""), "Markdown", menu)
       return
     }
@@ -598,6 +718,31 @@ async function handle(update: TgUpdate) {
       return
     }
 
+    case "referral":
+    case "invite": {
+      // /referral — show the calling user's shareable code + claim history.
+      // The cap and reward amounts come from the central constant in
+      // referrals.ts so the chat copy never drifts from the actual award.
+      const customer = findCustomerByTelegram({ telegram_user_id: userId })
+      if (!customer) {
+        await send(chatId, "No CrimeCode account linked yet — open the desktop app first.")
+        return
+      }
+      const row = getOrCreateReferralCode(customer.id)
+      const claims = listReferralsByCustomer(customer.id, 50)
+      const earned = claims.reduce((acc, c) => acc + c.referrer_bonus_days, 0)
+      const body =
+        "🎁 *Refer a friend* — earn extra trial days\n\n" +
+        `Your code: \`${row.code}\`\n` +
+        `Share link: https://crimecode.cc/r/${row.code}\n\n` +
+        `Each new signup that uses your code:\n` +
+        `• earns *you* +${REFERRAL_BONUS.referrer} days\n` +
+        `• gives *them* +${REFERRAL_BONUS.referred} days bonus trial\n\n` +
+        `Claims: *${claims.length}* — total earned: *${earned}* days\n` +
+        `_(Cap: ${REFERRAL_BONUS.monthlyCap} bonus days per 30 rolling days.)_`
+      await send(chatId, body, "Markdown")
+      return
+    }
     case "mylicense":
     case "license": {
       // Re-fetch the calling user's active license + activation token.

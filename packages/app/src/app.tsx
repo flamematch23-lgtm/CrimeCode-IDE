@@ -1,4 +1,5 @@
 import "@/index.css"
+import { NotificationsProvider } from "@/context/notifications"
 import { I18nProvider } from "@opencode-ai/ui/context"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
@@ -152,8 +153,10 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
                 <DialogProvider>
                   <MarkedProvider>
                     <FileComponentProvider component={File}>
-                      {props.children}
-                      <DiagnosticOverlay />
+                      <NotificationsProvider>
+                        {props.children}
+                        <DiagnosticOverlay />
+                      </NotificationsProvider>
                     </FileComponentProvider>
                   </MarkedProvider>
                 </DialogProvider>

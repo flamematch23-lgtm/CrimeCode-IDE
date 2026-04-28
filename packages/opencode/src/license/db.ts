@@ -228,6 +228,44 @@ function runMigrations(db: Database): void {
       "v2.customers.approval_idx",
       "CREATE INDEX IF NOT EXISTS customers_approval_idx ON customers(approval_status, created_at)",
     ],
+    // v2.22.21: referral system. Each customer gets a short shareable
+    // code on demand; when a brand-new signup uses that code, both
+    // sides earn extra trial days. The codes table holds the slug;
+    // the claims table records who referred whom and whether the bonus
+    // has already been credited (so the same referrer/referred pair
+    // can't be claimed twice).
+    [
+      "v3.referral_codes",
+      `CREATE TABLE IF NOT EXISTS referral_codes (
+         code            TEXT PRIMARY KEY,
+         customer_id     TEXT NOT NULL,
+         created_at      INTEGER NOT NULL,
+         FOREIGN KEY (customer_id) REFERENCES customers(id)
+       )`,
+    ],
+    [
+      "v3.referral_codes_customer_idx",
+      "CREATE INDEX IF NOT EXISTS referral_codes_customer_idx ON referral_codes(customer_id)",
+    ],
+    [
+      "v3.referral_claims",
+      `CREATE TABLE IF NOT EXISTS referral_claims (
+         id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+         code                     TEXT NOT NULL,
+         referrer_customer_id     TEXT NOT NULL,
+         referred_customer_id     TEXT NOT NULL,
+         claimed_at               INTEGER NOT NULL,
+         referrer_bonus_days      INTEGER NOT NULL,
+         referred_bonus_days      INTEGER NOT NULL,
+         UNIQUE (referrer_customer_id, referred_customer_id),
+         FOREIGN KEY (referrer_customer_id) REFERENCES customers(id),
+         FOREIGN KEY (referred_customer_id) REFERENCES customers(id)
+       )`,
+    ],
+    [
+      "v3.referral_claims_referrer_idx",
+      "CREATE INDEX IF NOT EXISTS referral_claims_referrer_idx ON referral_claims(referrer_customer_id, claimed_at DESC)",
+    ],
   ]
   for (const [name, sql] of ops) {
     try {

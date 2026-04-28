@@ -18,6 +18,7 @@
  */
 
 import { buildAuthHeader } from "./auth-fetch"
+import { notify } from "../context/notifications"
 
 const CLOUD_API_URL =
   (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.crimecode.cc"
@@ -72,9 +73,19 @@ export async function configureCloudSyncIfDesktop(bearerToken: string): Promise<
     if (!res.ok) {
       const detail = await res.text().catch(() => "")
       console.warn("[cloud-sync] /sync/configure rejected", { status: res.status, detail: detail.slice(0, 200) })
+      notify({
+        level: "warning",
+        title: "Cloud sync not configured",
+        body: `The local sidecar refused /sync/configure (HTTP ${res.status}). Sync is disabled until the next login.`,
+      })
       return
     }
     console.info("[cloud-sync] sidecar configured for cloud sync", { api: CLOUD_API_URL })
+    notify({
+      level: "success",
+      title: "Cloud sync ready",
+      body: `Your sessions will now sync across devices.`,
+    })
   } catch (err) {
     console.warn("[cloud-sync] /sync/configure error", err)
   }
@@ -123,6 +134,12 @@ export async function applyCloudLicenseIfDesktop(bearerToken: string): Promise<v
     console.info("[license] auto-applied cloud license", {
       id: body.license.id,
       interval: body.license.interval,
+    })
+    notify({
+      level: "success",
+      title: "License applied",
+      body: `Your ${body.license.interval} license is active on this device.`,
+      href: "/account",
     })
   } catch (err) {
     console.warn("[license] auto-apply error", err)
