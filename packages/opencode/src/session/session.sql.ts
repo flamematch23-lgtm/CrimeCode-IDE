@@ -35,11 +35,17 @@ export const SessionTable = sqliteTable(
     ...Timestamps,
     time_compacting: integer(),
     time_archived: integer(),
+    // Multi-tenant scoping (Phase 1). NULL = legacy/shared. Sessions inherit
+    // their customer_id from the project on creation; copying it here is a
+    // denormalisation to keep the per-customer session list a single-table
+    // index hit instead of a JOIN against project.
+    customer_id: text(),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),
     index("session_workspace_idx").on(table.workspace_id),
     index("session_parent_idx").on(table.parent_id),
+    index("session_customer_idx").on(table.customer_id),
   ],
 )
 

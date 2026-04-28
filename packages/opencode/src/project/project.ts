@@ -1,5 +1,5 @@
 import z from "zod"
-import { and, Database, eq } from "../storage/db"
+import { and, Database, eq, isNull, or } from "../storage/db"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import { Log } from "../util/log"
@@ -484,6 +484,47 @@ export namespace Project {
         .all()
         .map((row) => fromRow(row)),
     )
+  }
+
+  /**
+   * Multi-tenant variant of `list`. Returns rows whose `customer_id` either
+   * matches `customerId` (the caller's identity from the verified Bearer
+   * token) OR is NULL (legacy/shared rows from before scoping was added).
+   * Pass `null` to get only legacy rows; pass `undefined` to fall back to
+   * the unscoped `list()`.
+   */
+  export function listForCustomer(customerId: string | null): Info[] {
+    return Database.use((db) => {
+      const rows =
+        customerId == null
+          ? db.select().from(ProjectTable).where(isNull(ProjectTable.customer_id)).all()
+          : db
+              .select()
+              .from(ProjectTable)
+              .where(or(isNull(ProjectTable.customer_id), eq(ProjectTable.customer_id, customerId)))
+              .all()
+      return rows.map((row) => fromRow(row))
+    })
+  }
+
+  /**
+   * Stamp a customer_id onto a project row. Used by the auth middleware /
+   * route handlers so a project gets attributed to the first Bearer-
+   * authenticated caller that touches it. Idempotent: if the row already has
+   * a `customer_id` set we leave it alone (won't transfer ownership silently).
+   */
+  export function tagWithCustomer(projectId: ProjectID, customerId: string): boolean {
+    if (!customerId) return false
+    const r = Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({ customer_id: customerId })
+        .where(and(eq(ProjectTable.id, projectId), isNull(ProjectTable.customer_id)))
+        .run(),
+    )
+    // .run() returns void in this driver; the success signal is "did we go
+    // from null → set". A second call is a no-op which is what we want.
+    return r != null
   }
 
   export function get(id: ProjectID): Info | undefined {

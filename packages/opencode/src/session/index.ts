@@ -9,7 +9,7 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage/db"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, or } from "../storage/db"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage/db"
 import { SessionTable } from "./session.sql"
@@ -533,6 +533,12 @@ export namespace Session {
     search?: string
     limit?: number
     archived?: boolean
+    /**
+     * Multi-tenant filter. When provided, restrict results to sessions
+     * owned by this customer (or NULL — legacy/shared rows). Pass `null`
+     * to get only legacy rows; omit to disable filtering entirely.
+     */
+    customerId?: string | null
   }) {
     const conditions: SQL[] = []
 
@@ -553,6 +559,18 @@ export namespace Session {
     }
     if (!input?.archived) {
       conditions.push(isNull(SessionTable.time_archived))
+    }
+    if (input && "customerId" in input) {
+      const cid = input.customerId
+      if (cid == null) {
+        conditions.push(isNull(SessionTable.customer_id))
+      } else {
+        // Bearer-authenticated callers see their own + legacy NULL rows.
+        const cidNotNull: string = cid
+        conditions.push(
+          or(isNull(SessionTable.customer_id), eq(SessionTable.customer_id, cidNotNull))!,
+        )
+      }
     }
 
     const limit = input?.limit ?? 100

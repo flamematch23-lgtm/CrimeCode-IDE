@@ -57,7 +57,12 @@ export const ProjectRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        const projects = Project.list()
+        // Multi-tenant filter: when a Bearer token has identified the caller,
+        // only return projects this customer owns (plus legacy NULL rows from
+        // before scoping). Without a customer_id (e.g. local Basic-auth
+        // sidecar) fall back to the unscoped list.
+        const customerId = c.get("customer_id" as never) as string | undefined
+        const projects = customerId ? Project.listForCustomer(customerId) : Project.list()
         return c.json(projects)
       },
     )
@@ -79,6 +84,11 @@ export const ProjectRoutes = lazy(() =>
         },
       }),
       async (c) => {
+        // Stamp the project with the caller's customer_id on first contact
+        // so subsequent /project list requests scope to it. Idempotent — only
+        // sets when the row's customer_id is currently NULL.
+        const customerId = c.get("customer_id" as never) as string | undefined
+        if (customerId) Project.tagWithCustomer(Instance.project.id, customerId)
         return c.json(Instance.project)
       },
     )

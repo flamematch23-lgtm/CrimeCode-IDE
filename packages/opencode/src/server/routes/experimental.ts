@@ -228,6 +228,10 @@ export const ExperimentalRoutes = lazy(() =>
         const query = c.req.valid("query")
         const limit = query.limit ?? 100
         const sessions: Session.GlobalInfo[] = []
+        // Multi-tenant filter: a Bearer-authenticated caller only sees their
+        // own sessions plus legacy NULL rows. No Bearer → unscoped (local
+        // sidecar / Basic auth).
+        const customerId = c.get("customer_id" as never) as string | undefined
         for await (const session of Session.listGlobal({
           directory: query.directory,
           roots: query.roots,
@@ -236,6 +240,7 @@ export const ExperimentalRoutes = lazy(() =>
           search: query.search,
           limit: limit + 1,
           archived: query.archived,
+          ...(customerId ? { customerId } : {}),
         })) {
           sessions.push(session)
         }
