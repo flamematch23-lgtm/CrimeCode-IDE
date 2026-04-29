@@ -60,6 +60,7 @@ import { JWTTool } from "./jwt_tool"
 import { SSRFProbeTool } from "./ssrf_probe"
 import { CVEPocTool } from "./cve_poc"
 import { NmapTool, NucleiTool, SqlmapTool } from "./external_scanners"
+import { BurpToolkitTool } from "./burp_toolkit"
 import { InviteTool } from "./invite"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
@@ -206,6 +207,7 @@ export namespace ToolRegistry {
           NmapTool,
           NucleiTool,
           SqlmapTool,
+          BurpToolkitTool,
           InviteTool,
           SkillTool,
           ApplyPatchTool,

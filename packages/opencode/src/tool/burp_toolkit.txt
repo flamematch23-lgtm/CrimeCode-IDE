@@ -1,0 +1,56 @@
+Run any tool in the local Burp Suite-style Security Toolkit. The toolkit
+mirrors what you'd reach for inside Burp Suite Pro:
+
+- proxy        : start/control the local MITM proxy, list flows, send-to-repeater
+- repeater     : send / replay HTTP requests, parse curl
+- intruder     : payload-driven fuzzer (sniper / battering / pitchfork / clusterbomb)
+- decoder      : encode / decode / smart-detect / JWT decode
+- comparer     : diff two requests/responses (line, word, byte, JSON, headers)
+- sequencer    : analyse token randomness (Shannon, FIPS-loose, structural)
+- scanner      : passive + active vulnerability scanning
+- crawler      : site map + parameter / form discovery
+- param-miner  : hidden query/header/cookie/body parameter discovery
+
+USE THIS TOOL WHEN:
+- The user asks you to test, audit, or attack a web application's security
+- You are debugging an HTTP issue and need full request/response visibility
+- You need to inspect or replay a captured flow
+- You need to compare two HTTP responses to spot a behavioural difference
+- You need to assess whether a token / cookie / session ID is well-randomised
+- You need to discover hidden parameters on an endpoint
+- You need to crawl a site to enumerate URLs / forms / params
+
+SAFETY RULES (the tool enforces these — your job is to respect them in your reasoning):
+- Active scanning + intruder + sequencer-collect refuse private/loopback targets
+  unless --allow-private is passed. Don't pass that flag without asking the user.
+- Active scanner needs --enable=class1,class2 — pick the smallest set that
+  answers the question. Default to passive + crawler first.
+- The proxy's `start` command runs in the foreground. If you need a long-running
+  proxy, ask the user to run it in their own shell — don't block your tool turn.
+- Always ask the user before running any active probe against a host the user
+  hasn't explicitly named.
+
+The full output of the underlying script is returned. Pass `as_json: true`
+to get the structured form (most tools support --json). For long-running
+modes (proxy start, intruder with many payloads, crawler with high
+max-pages), prefer `as_json: true` so the output is parseable.
+
+Examples:
+
+# List captured flows from the proxy
+{ "subtool": "proxy", "args": ["list", "--limit", "20"], "as_json": true }
+
+# Send a single request via the repeater
+{ "subtool": "repeater", "args": ["send", "--url", "https://example.com", "--json"], "as_json": true }
+
+# JWT decode a token
+{ "subtool": "decoder", "args": ["jwt-decode"], "stdin": "<jwt>" }
+
+# Compare two captured flows
+{ "subtool": "comparer", "args": ["from-flows", "12", "14", "--json"], "as_json": true }
+
+# Passive scan a single response saved as raw HTTP
+{ "subtool": "scanner", "args": ["passive", "--file", "/tmp/resp.txt", "--json"], "as_json": true }
+
+# Crawl
+{ "subtool": "crawler", "args": ["--url", "https://target/", "--max-pages", "50", "--json"], "as_json": true }
