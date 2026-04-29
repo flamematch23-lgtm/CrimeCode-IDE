@@ -44,3 +44,16 @@ jobs:
       - name: Run token + payments tests
         working-directory: packages/opencode
         run: bun test src/license/token.test.ts src/license/payments.test.ts
+
+  security-toolkit-audit:
+    name: Security toolkit — TDZ audit
+    runs-on: ubuntu-latest
+    # The audit script only uses node:fs/path/url built-ins, so we skip
+    # `bun install` to keep this check sub-5-second.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Run TDZ audit
+        run: bun packages/opencode/script/agent-tools/security/_lib/audit.ts
