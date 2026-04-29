@@ -168,14 +168,24 @@ export const ProviderRoutes = lazy(() =>
           })
           return c.json(true)
         } catch (err) {
-          // Surface the underlying reason to the UI as a 400 with a
-          // structured body. The front-end's `formatError(value, fallback)`
-          // helper looks for `data.message` → `error` → `message`, so we put
-          // the human-readable reason in `data.message` and a stable error
-          // code in `error`.
-          const reason =
-            (err as { reason?: string })?.reason ??
-            (err instanceof Error ? err.message : String(err))
+          // OauthCallbackFailed is a NamedError whose payload lives in
+          // `.data.reason`, NOT `.reason` directly. Read both shapes for
+          // robustness, and fall back to the Error message only as a
+          // last resort (otherwise the front-end shows the bare error
+          // class name "ProviderAuthOauthCallbackFailed").
+          const e = err as {
+            data?: { reason?: unknown; message?: unknown }
+            reason?: unknown
+            message?: unknown
+          }
+          let reason: string | undefined
+          if (typeof e.data?.reason === "string" && e.data.reason) reason = e.data.reason
+          else if (typeof e.data?.message === "string" && e.data.message) reason = e.data.message
+          else if (typeof e.reason === "string" && e.reason) reason = e.reason
+          else if (err instanceof Error && err.message && err.message !== err.name)
+            reason = err.message
+          else reason = String(err)
+
           return c.json(
             {
               data: { message: reason },
