@@ -3,6 +3,7 @@ import {
   createEffect,
   createMemo,
   createResource,
+  createSignal,
   For,
   on,
   onCleanup,
@@ -639,6 +640,20 @@ export default function Layout(props: ParentProps) {
       await openProject(next.worktree, true)
     }
   })
+
+  // Hard safety: if autoselecting never resolves (network stall, sidecar
+  // race, sync.session.list hanging on a slow disk), the entire <main>
+  // stays blank because the <Show> below holds children behind it.
+  // Force-flip after 2s so the user always sees SOMETHING — even if it's
+  // the bare HomeRoute / current-route render. The autoselect logic
+  // continues running in the background and will navigate when ready;
+  // this just removes the "blank canvas forever" failure mode.
+  const [autoselectTimedOut, setAutoselectTimedOut] = createSignal(false)
+  onMount(() => {
+    const t = window.setTimeout(() => setAutoselectTimedOut(true), 2_000)
+    onCleanup(() => window.clearTimeout(t))
+  })
+  const renderChildren = createMemo(() => !autoselecting.loading || autoselectTimedOut())
 
   const workspaceName = (directory: string, projectId?: string, branch?: string) => {
     const key = workspaceKey(directory)
@@ -2539,7 +2554,7 @@ export default function Layout(props: ParentProps) {
                   "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base xl:border-l xl:rounded-tl-[12px]": true,
                 }}
               >
-                <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
+                <Show when={renderChildren()} fallback={<div class="size-full" />}>
                   {props.children}
                 </Show>
               </main>
