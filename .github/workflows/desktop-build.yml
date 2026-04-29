@@ -1,15 +1,20 @@
 name: desktop-build
 
+# Builds the desktop installer (Win/Mac/Linux) for development sanity checks.
+#
+# Runs on:
+#   - manual `workflow_dispatch` (any branch, channel selectable)
+#   - tag pushes `desktop-build-v*` if you want a manual one-off build
+#
+# Does NOT run on every push to master/dev anymore — that was duplicating
+# the work of `release-desktop-windows.yml` + `release-desktop-macos-linux.yml`
+# (which fire on `v*` tags) and burning ~30 min of GitHub Actions per push.
+# The duplicate `release` job that produced a draft GitHub Release on every
+# push was also the one tripping the spending limit and turning the workflow
+# red — it's been removed because the tag-based release workflows already
+# publish the real release.
+
 on:
-  push:
-    branches:
-      - master
-      - dev
-    paths:
-      - "packages/desktop-electron/**"
-      - "packages/opencode/**"
-      - "packages/app/**"
-      - "packages/ui/**"
   workflow_dispatch:
     inputs:
       channel:
@@ -21,6 +26,9 @@ on:
           - dev
           - beta
           - prod
+  push:
+    tags:
+      - "desktop-build-v*"
 
 concurrency:
   group: desktop-${{ github.ref }}
@@ -111,39 +119,3 @@ jobs:
           name: opencode-desktop-linux-packages
           path: packages/desktop-electron/dist/*
           retention-days: 7
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Generate release notes
-        run: |
-          cat > release-notes.md << 'EOF'
-          # OpenCode Desktop Release
-
-          ## Installation
-          Download the appropriate installer for your platform and run it.
-
-          ## What's New
-          See CHANGELOG.md for detailed release notes.
-
-          ## Platform Support
-          - Windows 10+ (x64)
-          - macOS 11+ (Intel and Apple Silicon)
-          - Linux (AppImage, deb, rpm)
-          EOF
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: release-notes.md
-          draft: true
-          files: artifacts/**/*.exe artifacts/**/*.dmg artifacts/**/*.AppImage artifacts/**/*.deb artifacts/**/*.rpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
