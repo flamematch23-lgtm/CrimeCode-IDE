@@ -13,10 +13,15 @@
  */
 import z from "zod"
 import { spawn } from "node:child_process"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { existsSync } from "node:fs"
 import { Tool } from "./tool"
 import DESCRIPTION from "./burp_toolkit.txt"
+
+// ESM-safe equivalent of __dirname. Bun does inject __dirname for compatibility
+// but we shouldn't rely on it — use import.meta.url instead.
+const HERE = dirname(fileURLToPath(import.meta.url))
 
 const SUBTOOLS = [
   "proxy",
@@ -53,16 +58,22 @@ const ACTIVE_SUBTOOLS = new Set<(typeof SUBTOOLS)[number]>([
 ])
 
 function resolveScript(name: string): string {
-  // Walk up from cwd looking for the security/ directory.
-  // Falls back to a path relative to the running file.
+  // 1) Walk up from cwd looking for packages/opencode/script/agent-tools/security/<name>.
   let dir = process.cwd()
   for (let i = 0; i < 8; i++) {
     const candidate = join(dir, "packages", "opencode", "script", "agent-tools", "security", name)
     if (existsSync(candidate)) return candidate
     dir = join(dir, "..")
   }
-  // dev fallback — sibling of src
-  return join(__dirname, "..", "..", "script", "agent-tools", "security", name)
+  // 2) Walk up from this module's directory (bundled / installed builds).
+  dir = HERE
+  for (let i = 0; i < 8; i++) {
+    const candidate = join(dir, "script", "agent-tools", "security", name)
+    if (existsSync(candidate)) return candidate
+    dir = join(dir, "..")
+  }
+  // 3) Last-resort relative path — will fail loudly with a helpful message.
+  return join(HERE, "..", "..", "script", "agent-tools", "security", name)
 }
 
 const Params = z.object({
@@ -90,9 +101,9 @@ export const BurpToolkitTool = Tool.define("burp_toolkit", async () => ({
       }
     }
 
-    // Build the final argv. Append --json if asked and the args don't already include it.
-    const fullArgs = [scriptPath, ...args]
-    if (as_json && !fullArgs.includes("--json")) fullArgs.push("--json")
+    // Build the final args (single source of truth)
+    const finalArgs = [...args]
+    if (as_json && !finalArgs.includes("--json")) finalArgs.push("--json")
 
     // Active subtools: ask the user once per session for blanket permission.
     if (ACTIVE_SUBTOOLS.has(subtool)) {
@@ -105,7 +116,7 @@ export const BurpToolkitTool = Tool.define("burp_toolkit", async () => ({
     }
 
     const startedAt = Date.now()
-    const result = await runBun(scriptPath, args.concat(as_json && !args.includes("--json") ? ["--json"] : []), {
+    const result = await runBun(scriptPath, finalArgs, {
       stdin,
       cwd,
       timeoutMs: timeout_ms ?? 120_000,
@@ -157,9 +168,15 @@ async function runBun(
   opts: { stdin?: string; cwd?: string; timeoutMs: number; signal?: AbortSignal },
 ): Promise<RunResult> {
   return new Promise((resolve) => {
-    const child = spawn("bun", [scriptPath, ...args], {
+    // Use the same Bun executable that the agent is running under — this avoids
+    // any "bun not on PATH" surprises when the agent is bundled or installed
+    // outside a typical PATH (Windows Electron, opencode-installer, etc.).
+    const bunBin = process.execPath
+    const child = spawn(bunBin, [scriptPath, ...args], {
       cwd: opts.cwd ?? process.cwd(),
       stdio: ["pipe", "pipe", "pipe"],
+      // On Windows, when execPath ends in .exe spawn handles it; no shell needed.
+      windowsHide: true,
     })
     let stdout = ""
     let stderr = ""

@@ -357,8 +357,20 @@ async function modeBytes() {
 // ---------------------------------------------------------------------------
 
 async function modeJson() {
-  const left = JSON.parse(await getInput("left"))
-  const right = JSON.parse(await getInput("right"))
+  const lRaw = await getInput("left")
+  const rRaw = await getInput("right")
+  let left: unknown
+  let right: unknown
+  try {
+    left = JSON.parse(lRaw)
+  } catch (e) {
+    bail(`left input is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  try {
+    right = JSON.parse(rRaw)
+  } catch (e) {
+    bail(`right input is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
   const ops = jsonDiff(left, right, "$")
   if (json) {
     console.log(JSON.stringify(ops, null, 2))

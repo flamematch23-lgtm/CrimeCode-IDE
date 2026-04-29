@@ -31,22 +31,28 @@
  *   plus on every key event.
  */
 import { argv, stdout, stdin } from "node:process"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { homedir } from "node:os"
 import { writeFileSync, existsSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { Database } from "bun:sqlite"
 import { makeArgs, formatBytes, bail } from "./_lib/common.ts"
 
-const cli = makeArgs(argv)
-if (cli.has("--help") || cli.has("-h")) usage(0)
+// ESM-safe replacement for __dirname so we can spawn sibling scripts.
+const HERE = dirname(fileURLToPath(import.meta.url))
 
+// Paths up here so usage() and other handlers can reference them.
 const DATA_DIR = join(
   process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
   "crimecode",
   "proxy",
 )
 const DB_PATH = join(DATA_DIR, "history.db")
+
+const cli = makeArgs(argv)
+if (cli.has("--help") || cli.has("-h")) usage(0)
+
 if (!existsSync(DB_PATH)) {
   bail(`no proxy DB at ${DB_PATH} — run \`http-proxy.ts start\` once to create it`)
 }
@@ -475,7 +481,7 @@ async function onKey(key: string) {
       const out = spawnSync(
         "bun",
         [
-          join(__dirname, "http-proxy.ts"),
+          join(HERE, "http-proxy.ts"),
           "send-to-repeater",
           String(f.id),
         ],
@@ -499,14 +505,14 @@ async function openDetail() {
   if (state.panel === "flows") {
     const f = state.flows[state.cursor.flows]
     if (!f) return
-    const out = spawnSync("bun", [join(__dirname, "http-proxy.ts"), "show", String(f.id)], { encoding: "utf8" })
+    const out = spawnSync("bun", [join(HERE, "http-proxy.ts"), "show", String(f.id)], { encoding: "utf8" })
     state.detail = (out.stdout || out.stderr).slice(0, 8000)
   } else if (state.panel === "findings") {
     const f = state.findings[state.cursor.findings]
     if (!f) return
     state.detail = JSON.stringify(f, null, 2)
     if (f.flowId) {
-      const out = spawnSync("bun", [join(__dirname, "http-proxy.ts"), "show", String(f.flowId)], { encoding: "utf8" })
+      const out = spawnSync("bun", [join(HERE, "http-proxy.ts"), "show", String(f.flowId)], { encoding: "utf8" })
       state.detail += "\n\n--- flow ---\n" + out.stdout
     }
   } else if (state.panel === "rules") {

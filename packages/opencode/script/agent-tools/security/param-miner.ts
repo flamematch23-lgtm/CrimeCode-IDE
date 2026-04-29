@@ -97,7 +97,13 @@ const json = cli.has("--json")
 if (wordlist.length === 0) bail("empty wordlist")
 
 info(`Probing ${wordlist.length} candidate ${mode} names against ${url}…`)
-const baseline = await fireOne(null)
+const baseline = await fireOne(null).catch((err) => {
+  console.error(
+    `✗ baseline request failed: ${err instanceof Error ? err.message : String(err)}\n` +
+      `  Cannot mine parameters without a working baseline. Check the URL/auth/network.`,
+  )
+  process.exit(1)
+})
 
 interface Hit {
   name: string
