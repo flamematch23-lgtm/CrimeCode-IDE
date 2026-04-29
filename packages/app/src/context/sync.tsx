@@ -16,6 +16,24 @@ import { SESSION_CACHE_LIMIT, dropSessionCaches, pickSessionCacheEvictions } fro
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
+/**
+ * Detect a "session no longer exists" error coming back from the SDK.
+ * The backend returns 404 with a serialised NamedError of the form
+ *   { name: "NotFoundError", data: { message: "Session not found: ..." } }
+ * Because the SDK is configured with `throwOnError: true`, this body is
+ * thrown as-is by `client.session.get/diff/todo/messages`. We catch it
+ * here so the UI can drop the stale session reference instead of
+ * surfacing an `unhandledrejection`.
+ */
+function isSessionNotFound(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false
+  const e = err as { name?: unknown; data?: { message?: unknown }; status?: unknown }
+  if (e.name === "NotFoundError") return true
+  const msg = typeof e.data?.message === "string" ? e.data.message : ""
+  if (/^session not found/i.test(msg)) return true
+  return false
+}
+
 function sortParts(parts: Part[]) {
   return parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id))
 }
@@ -485,22 +503,41 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             const sessionReq =
               hasSession && !opts?.force
                 ? Promise.resolve()
-                : retry(() => client.session.get({ sessionID })).then((session) => {
-                    if (!tracked(directory, sessionID)) return
-                    const data = session.data
-                    if (!data) return
-                    setStore(
-                      "session",
-                      produce((draft) => {
-                        const match = Binary.search(draft, sessionID, (s) => s.id)
-                        if (match.found) {
-                          draft[match.index] = data
-                          return
-                        }
-                        draft.splice(match.index, 0, data)
-                      }),
-                    )
-                  })
+                : retry(() => client.session.get({ sessionID }))
+                    .then((session) => {
+                      if (!tracked(directory, sessionID)) return
+                      const data = session.data
+                      if (!data) return
+                      setStore(
+                        "session",
+                        produce((draft) => {
+                          const match = Binary.search(draft, sessionID, (s) => s.id)
+                          if (match.found) {
+                            draft[match.index] = data
+                            return
+                          }
+                          draft.splice(match.index, 0, data)
+                        }),
+                      )
+                    })
+                    .catch((err) => {
+                      if (isSessionNotFound(err)) {
+                        // Backend doesn't have this session anymore (e.g. it
+                        // was deleted, the DB was cleared, or the project
+                        // directory mismatch). Drop the stale reference from
+                        // our store so the UI stops trying to render it.
+                        console.warn("[sync] session no longer exists, dropping reference", { sessionID })
+                        setStore(
+                          "session",
+                          produce((draft) => {
+                            const match = Binary.search(draft, sessionID, (s) => s.id)
+                            if (match.found) draft.splice(match.index, 1)
+                          }),
+                        )
+                        return
+                      }
+                      throw err
+                    })
 
             const messagesReq =
               cached && !opts?.force
@@ -525,10 +562,18 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
           const key = keyFor(directory, sessionID)
           return runInflight(inflightDiff, key, () =>
-            retry(() => client.session.diff({ sessionID })).then((diff) => {
-              if (!tracked(directory, sessionID)) return
-              setStore("session_diff", sessionID, reconcile(diff.data ?? [], { key: "file" }))
-            }),
+            retry(() => client.session.diff({ sessionID }))
+              .then((diff) => {
+                if (!tracked(directory, sessionID)) return
+                setStore("session_diff", sessionID, reconcile(diff.data ?? [], { key: "file" }))
+              })
+              .catch((err) => {
+                if (isSessionNotFound(err)) {
+                  console.warn("[sync.diff] session no longer exists, skipping", { sessionID })
+                  return
+                }
+                throw err
+              }),
           )
         },
         async todo(sessionID: string, opts?: { force?: boolean }) {
@@ -551,12 +596,20 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
           const key = keyFor(directory, sessionID)
           return runInflight(inflightTodo, key, () =>
-            retry(() => client.session.todo({ sessionID })).then((todo) => {
-              if (!tracked(directory, sessionID)) return
-              const list = todo.data ?? []
-              setStore("todo", sessionID, reconcile(list, { key: "id" }))
-              globalSync.todo.set(sessionID, list)
-            }),
+            retry(() => client.session.todo({ sessionID }))
+              .then((todo) => {
+                if (!tracked(directory, sessionID)) return
+                const list = todo.data ?? []
+                setStore("todo", sessionID, reconcile(list, { key: "id" }))
+                globalSync.todo.set(sessionID, list)
+              })
+              .catch((err) => {
+                if (isSessionNotFound(err)) {
+                  console.warn("[sync.todo] session no longer exists, skipping", { sessionID })
+                  return
+                }
+                throw err
+              }),
           )
         },
         history: {
