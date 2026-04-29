@@ -231,6 +231,85 @@ respects `XDG_DATA_HOME` if set, otherwise falls back to
 - Default no-MITM list excludes OS auto-update + telemetry +
   certificate-OCSP endpoints so you don't break the rest of the system.
 
+## Style rules for new tools (avoiding TDZ traps)
+
+These scripts run with **top-level `await`** under Bun. The dispatch
+block (`if (cmd === "x") cmdX()`) executes during the *first synchronous
+phase*, which means it must **not reference any `const` or `let`
+declared further down the file**. Doing so produces a confusing
+`ReferenceError: Cannot access 'X' before initialization` at runtime —
+it's the exact bug that broke `proxy ca-export`, `dashboard --help`,
+and `fuzzer --builtin` in earlier revisions.
+
+**Rule of thumb — declare in this order, top to bottom:**
+
+```ts
+// 1. Imports
+import { … } from "node:…"
+import { … } from "./_lib/common.ts"
+
+// 2. Path / lazy-state constants
+const HERE     = dirname(fileURLToPath(import.meta.url))
+const DATA_DIR = …
+const DB_PATH  = join(DATA_DIR, "…")
+
+// 3. Runtime data tables, wordlists, severity ranks
+const BUILTIN_PAYLOADS = { … }
+const ACTIVE_CHECKS    = [ … ] as const
+const SEV_RANK         = { info: 0, low: 1, … }
+
+// 4. Module-scoped runtime state holders that handlers mutate
+let CA: Ca | null = null
+const CTX_CACHE = new Map<…>()
+
+// 5. CLI parser + dispatch
+const cli = makeArgs(argv)
+const cmd = cli.args[0]
+if (!cmd || cli.has("--help")) usage(0)
+if (cmd === "start") await cmdStart()
+else if (cmd === "list") cmdList()
+…
+
+// 6. Functions, interfaces, types — order doesn't matter here
+//    (function declarations are hoisted; interface/type are erased)
+function cmdStart() { … }
+interface Ca { … }
+function usage(code: number): never { … }
+```
+
+The audit script enforces this:
+
+```bash
+bun packages/opencode/script/agent-tools/security/_lib/audit.ts
+```
+
+It prints any `const`/`let` referenced at the top level **before** its
+own declaration line in any toolkit file. Exit code:
+- `0` clean (good for CI gating)
+- `1` one or more violations
+- `2` audit script error
+
+`interface`, `type`, and `function` declarations are intentionally
+allowed below — they're either erased at compile time (types) or hoisted
+at runtime (function declarations). The audit also skips references
+that live inside function bodies, since those only run when the function
+is called (which is presumably *after* the const has been declared).
+
+If you must reference data declared lower down, wrap it in a function
+(those are hoisted). Concretely:
+
+```ts
+// ❌ Won't work — TDZ on PAYLOADS
+if (cmd === "x") console.log(PAYLOADS)
+const PAYLOADS = { … }
+
+// ✅ Works — getPayloads() is hoisted, body runs lazily
+if (cmd === "x") console.log(getPayloads())
+function getPayloads() {
+  return { … }
+}
+```
+
 ## Linking with the existing red-team helpers
 
 - [`redteam-replay.ts`](../redteam-replay.ts) — engagement-file-driven
