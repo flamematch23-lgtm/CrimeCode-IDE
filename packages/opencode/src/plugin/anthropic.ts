@@ -1,12 +1,16 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { Log } from "../util/log"
 import { Auth, OAUTH_DUMMY_KEY } from "../auth"
+import { Installation } from "../installation"
 
 const log = Log.create({ service: "plugin.anthropic" })
 
 // Claude.ai / Claude Code OAuth client used for Pro / Max / Team / Enterprise subscription auth
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
+// The token endpoint is still served from console.anthropic.com even though
+// the user-facing callback page now lives on platform.claude.com. This is
+// confirmed by Claude Code CLI's own implementation.
 const TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 const REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
 const OAUTH_SCOPES = "org:create_api_key user:profile user:inference"
@@ -67,29 +71,90 @@ interface TokenResponse {
   scope?: string
 }
 
-async function exchangeCodeForTokens(code: string, pkce: PkceCodes, state: string): Promise<TokenResponse> {
-  // Anthropic accepts both `code` and `code#state` formats — split if user pasted the latter
-  const [authCode, pastedState] = code.includes("#") ? code.split("#") : [code, state]
+/**
+ * Exchange an authorization code for an access + refresh token.
+ *
+ * The user typically pastes the value shown on the callback page, which is
+ * formatted as `<code>#<state>` (Anthropic encodes both into one string so
+ * the user only has to copy a single chunk). We split on `#` and pass the
+ * code; the state is verified against the originator's expected state and
+ * is intentionally NOT included in the token request body — OAuth2 standard
+ * uses state only for CSRF in the redirect, not in the token exchange.
+ */
+async function exchangeCodeForTokens(
+  rawInput: string,
+  pkce: PkceCodes,
+  expectedState: string,
+): Promise<TokenResponse> {
+  const trimmed = rawInput.trim()
+  let authCode: string
+  let pastedState: string | undefined
+  if (trimmed.includes("#")) {
+    const parts = trimmed.split("#")
+    authCode = parts[0]
+    pastedState = parts.slice(1).join("#") // tolerate accidental `#` in state
+  } else {
+    authCode = trimmed
+    pastedState = undefined
+  }
+
+  // CSRF check — if the user got a different state back, abort early
+  if (pastedState !== undefined && pastedState !== expectedState) {
+    throw new Error(
+      `OAuth state mismatch: pasted code returned a different state than authorize. ` +
+        `This usually means a stale code from a previous attempt — start the flow again. ` +
+        `(expected="${expectedState.slice(0, 8)}…", got="${pastedState.slice(0, 8)}…")`,
+    )
+  }
+
+  const reqBody = {
+    grant_type: "authorization_code",
+    code: authCode,
+    state: expectedState,
+    redirect_uri: REDIRECT_URI,
+    client_id: CLIENT_ID,
+    code_verifier: pkce.verifier,
+  }
+
+  log.info("anthropic token exchange request", {
+    url: TOKEN_URL,
+    redirect_uri: REDIRECT_URI,
+    client_id: CLIENT_ID,
+    code_prefix: authCode.slice(0, 8),
+    code_verifier_len: pkce.verifier.length,
+    state_match: pastedState === undefined ? "no-state-pasted" : pastedState === expectedState,
+  })
 
   const response = await fetch(TOKEN_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": `opencode/${Installation.VERSION} (+https://opencode.ai)`,
     },
-    body: JSON.stringify({
-      grant_type: "authorization_code",
-      code: authCode,
-      redirect_uri: REDIRECT_URI,
-      client_id: CLIENT_ID,
-      code_verifier: pkce.verifier,
-      state: pastedState,
-    }),
+    body: JSON.stringify(reqBody),
   })
 
   if (!response.ok) {
     const text = await response.text().catch(() => "")
-    throw new Error(`Anthropic token exchange failed: ${response.status} ${text}`)
+    log.error("anthropic token exchange failed", {
+      status: response.status,
+      statusText: response.statusText,
+      body: text.slice(0, 1024),
+    })
+    // Make the error message specific so the UI surfaces something useful
+    let detail = text.slice(0, 200)
+    try {
+      const j = JSON.parse(text)
+      if (j.error_description) detail = j.error_description
+      else if (j.error) detail = j.error
+      else if (j.message) detail = j.message
+    } catch {
+      /* not JSON — leave the truncated text */
+    }
+    throw new Error(`Anthropic token exchange ${response.status}: ${detail}`)
   }
+
   return (await response.json()) as TokenResponse
 }
 
@@ -98,6 +163,8 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> 
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": `opencode/${Installation.VERSION} (+https://opencode.ai)`,
     },
     body: JSON.stringify({
       grant_type: "refresh_token",
@@ -107,17 +174,14 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> 
   })
   if (!response.ok) {
     const text = await response.text().catch(() => "")
-    throw new Error(`Anthropic token refresh failed: ${response.status} ${text}`)
+    log.error("anthropic token refresh failed", {
+      status: response.status,
+      body: text.slice(0, 512),
+    })
+    throw new Error(`Anthropic token refresh ${response.status}: ${text.slice(0, 200)}`)
   }
   return (await response.json()) as TokenResponse
 }
-
-interface PendingOAuth {
-  pkce: PkceCodes
-  state: string
-}
-
-let pending: PendingOAuth | undefined
 
 export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
   return {
@@ -218,24 +282,30 @@ export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
           label: "Claude Pro / Max (subscription login)",
           type: "oauth",
           async authorize() {
+            // Capture pkce + state in this closure — DO NOT use a module-level
+            // variable. The auth framework keeps this closure alive across the
+            // authorize → callback round-trip, so we don't need shared state.
             const pkce = await generatePKCE()
             const state = generateState()
             const url = buildAuthorizeUrl(pkce, state)
-            pending = { pkce, state }
+            log.info("anthropic oauth authorize", {
+              state_prefix: state.slice(0, 8),
+              challenge_prefix: pkce.challenge.slice(0, 8),
+            })
 
             return {
               url,
               method: "code" as const,
               instructions:
-                "Open the URL in your browser, sign in with your Claude Pro or Max account, then paste the authorization code shown on the callback page (it may include a #state suffix — paste it verbatim).",
+                "Visita il link, accedi con il tuo account Claude Pro/Max, poi incolla qui il codice mostrato sulla pagina (è nella forma 'CODE#STATE' — incolla tutto verbatim).",
               async callback(code: string) {
-                if (!pending) {
-                  return { type: "failed" as const }
-                }
                 try {
-                  const { pkce: currentPkce, state: currentState } = pending
-                  pending = undefined
-                  const tokens = await exchangeCodeForTokens(code.trim(), currentPkce, currentState)
+                  const tokens = await exchangeCodeForTokens(code, pkce, state)
+                  log.info("anthropic oauth success", {
+                    expires_in: tokens.expires_in,
+                    token_type: tokens.token_type,
+                    scope: tokens.scope,
+                  })
                   return {
                     type: "success" as const,
                     refresh: tokens.refresh_token,
@@ -243,8 +313,12 @@ export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
                     expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   }
                 } catch (err) {
-                  log.error("anthropic oauth callback failed", { error: err })
-                  pending = undefined
+                  // Surface the message to the log so the user can `tail` it.
+                  // ProviderAuth.callback turns a non-success return into 500
+                  // upstream — but the diagnostic is now in the log file.
+                  log.error("anthropic oauth callback error", {
+                    error: err instanceof Error ? err.message : String(err),
+                  })
                   return { type: "failed" as const }
                 }
               },
