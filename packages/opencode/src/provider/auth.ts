@@ -75,7 +75,16 @@ export namespace ProviderAuth {
     z.object({ providerID: ProviderID.zod }),
   )
 
-  export const OauthCallbackFailed = NamedError.create("ProviderAuthOauthCallbackFailed", z.object({}))
+  export const OauthCallbackFailed = NamedError.create(
+    "ProviderAuthOauthCallbackFailed",
+    z.object({
+      providerID: ProviderID.zod,
+      // Plugin-supplied human-readable reason. Surfaced verbatim to the UI
+      // so the user can see "invalid_grant: code expired" instead of a
+      // generic "callback failed".
+      reason: z.string().optional(),
+    }),
+  )
 
   export const ValidationFailed = NamedError.create(
     "ProviderAuthValidationFailed",
@@ -202,10 +211,26 @@ export namespace ProviderAuth {
           return yield* Effect.fail(new OauthCodeMissing({ providerID: input.providerID }))
         }
 
-        const result = yield* Effect.promise(() =>
-          match.method === "code" ? match.callback(input.code!) : match.callback(),
-        )
-        if (!result || result.type !== "success") return yield* Effect.fail(new OauthCallbackFailed({}))
+        // Use tryPromise so we can capture exceptions thrown by the plugin
+        // and turn them into a typed error with a message instead of a 500
+        // defect that the UI can't read.
+        const result = yield* Effect.tryPromise({
+          try: () => (match.method === "code" ? match.callback(input.code!) : match.callback()),
+          catch: (cause) =>
+            new OauthCallbackFailed({
+              providerID: input.providerID,
+              reason: cause instanceof Error ? cause.message : String(cause),
+            }),
+        })
+        if (!result || result.type !== "success") {
+          // The plugin returned `{ type: "failed", reason?: ... }` — propagate
+          // the reason if it provided one. If the plugin is older and didn't
+          // return a reason, we fall back to undefined and the UI shows a
+          // generic message.
+          const r = result as unknown as { reason?: unknown } | undefined
+          const reason = typeof r?.reason === "string" ? r.reason : undefined
+          return yield* Effect.fail(new OauthCallbackFailed({ providerID: input.providerID, reason }))
+        }
 
         if ("key" in result) {
           yield* auth.set(input.providerID, {

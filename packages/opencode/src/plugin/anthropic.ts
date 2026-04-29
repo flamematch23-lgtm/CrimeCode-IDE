@@ -107,10 +107,12 @@ async function exchangeCodeForTokens(
     )
   }
 
-  const reqBody = {
+  // Try with `state` in the body first (current Anthropic schema requires it).
+  // If we somehow get an "Invalid request format" back, retry without `state`
+  // — observed live, both shapes have been accepted at different points.
+  const baseBody = {
     grant_type: "authorization_code",
     code: authCode,
-    state: expectedState,
     redirect_uri: REDIRECT_URI,
     client_id: CLIENT_ID,
     code_verifier: pkce.verifier,
@@ -122,32 +124,52 @@ async function exchangeCodeForTokens(
     client_id: CLIENT_ID,
     code_prefix: authCode.slice(0, 8),
     code_verifier_len: pkce.verifier.length,
-    state_match: pastedState === undefined ? "no-state-pasted" : pastedState === expectedState,
+    state_pasted: pastedState !== undefined,
+    state_match: pastedState === undefined ? null : pastedState === expectedState,
   })
 
-  const response = await fetch(TOKEN_URL, {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "User-Agent": `opencode/${Installation.VERSION} (+https://opencode.ai)`,
+  }
+
+  // Attempt #1: include state
+  let response = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "User-Agent": `opencode/${Installation.VERSION} (+https://opencode.ai)`,
-    },
-    body: JSON.stringify(reqBody),
+    headers,
+    body: JSON.stringify({ ...baseBody, state: expectedState }),
   })
+  let firstAttemptText = ""
+  if (!response.ok) {
+    firstAttemptText = await response.text().catch(() => "")
+    const isFormatError = /invalid request format/i.test(firstAttemptText)
+    if (isFormatError) {
+      log.warn("anthropic token exchange — body with state rejected, retrying without", {
+        status: response.status,
+      })
+      // Attempt #2: same body, no state
+      response = await fetch(TOKEN_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(baseBody),
+      })
+    }
+  }
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "")
+    const text = (await response.text().catch(() => "")) || firstAttemptText
     log.error("anthropic token exchange failed", {
       status: response.status,
       statusText: response.statusText,
       body: text.slice(0, 1024),
     })
-    // Make the error message specific so the UI surfaces something useful
     let detail = text.slice(0, 200)
     try {
       const j = JSON.parse(text)
       if (j.error_description) detail = j.error_description
-      else if (j.error) detail = j.error
+      else if (j.error?.message) detail = j.error.message
+      else if (typeof j.error === "string") detail = j.error
       else if (j.message) detail = j.message
     } catch {
       /* not JSON — leave the truncated text */
@@ -313,13 +335,13 @@ export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
                     expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   }
                 } catch (err) {
-                  // Surface the message to the log so the user can `tail` it.
-                  // ProviderAuth.callback turns a non-success return into 500
-                  // upstream — but the diagnostic is now in the log file.
-                  log.error("anthropic oauth callback error", {
-                    error: err instanceof Error ? err.message : String(err),
-                  })
-                  return { type: "failed" as const }
+                  const reason = err instanceof Error ? err.message : String(err)
+                  log.error("anthropic oauth callback error", { error: reason })
+                  // Returning `reason` makes the UI show the actual upstream
+                  // failure (e.g. "Anthropic token exchange 400: invalid_grant
+                  // — Invalid 'code' in request.") instead of a generic
+                  // "codice non valido".
+                  return { type: "failed" as const, reason }
                 }
               },
             }

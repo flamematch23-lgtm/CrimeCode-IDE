@@ -110,6 +110,13 @@ export type AuthHook = {
             }
           | {
               type: "failed"
+              /**
+               * Optional human-readable explanation. When provided, the
+               * server propagates it verbatim to the UI so the user can
+               * see WHY the callback failed (e.g. "invalid_grant: code
+               * expired") instead of a generic "callback failed".
+               */
+              reason?: string
             }
         >
       }

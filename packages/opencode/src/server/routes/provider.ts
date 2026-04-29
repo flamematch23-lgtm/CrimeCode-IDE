@@ -160,12 +160,33 @@ export const ProviderRoutes = lazy(() =>
       async (c) => {
         const providerID = c.req.valid("param").providerID
         const { method, code } = c.req.valid("json")
-        await ProviderAuth.callback({
-          providerID,
-          method,
-          code,
-        })
-        return c.json(true)
+        try {
+          await ProviderAuth.callback({
+            providerID,
+            method,
+            code,
+          })
+          return c.json(true)
+        } catch (err) {
+          // Surface the underlying reason to the UI as a 400 with a
+          // structured body. The front-end's `formatError(value, fallback)`
+          // helper looks for `data.message` → `error` → `message`, so we put
+          // the human-readable reason in `data.message` and a stable error
+          // code in `error`.
+          const reason =
+            (err as { reason?: string })?.reason ??
+            (err instanceof Error ? err.message : String(err))
+          return c.json(
+            {
+              data: { message: reason },
+              error: "ProviderAuthOauthCallbackFailed",
+              providerID,
+              reason,
+              message: reason,
+            },
+            400,
+          )
+        }
       },
     ),
 )
