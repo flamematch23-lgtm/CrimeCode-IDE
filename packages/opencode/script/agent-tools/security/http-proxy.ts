@@ -145,6 +145,28 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Persistent intercept queue. Rows live for the duration of one HTTP
+-- request -- 'status' is 'pending' until the proxy or an external CLI/UI
+-- decides forward / drop / edit, then the row is consumed.
+CREATE TABLE IF NOT EXISTS pending_intercepts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  proxy_pid INTEGER NOT NULL,
+  phase TEXT NOT NULL,                -- 'request' | 'response'
+  method TEXT NOT NULL,
+  scheme TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  headers TEXT NOT NULL,
+  body BLOB,
+  status TEXT NOT NULL DEFAULT 'pending',
+  action TEXT,                        -- forward|drop|edit
+  action_payload TEXT,                -- JSON for edit
+  resolved_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_intercepts(status);
 `)
 
 // ---------------------------------------------------------------------------
@@ -172,6 +194,8 @@ else if (cmd === "list") cmdList()
 else if (cmd === "show") cmdShow()
 else if (cmd === "send-to-repeater") cmdSendToRepeater()
 else if (cmd === "intercept") cmdToggleIntercept()
+else if (cmd === "intercept-action") cmdInterceptAction()
+else if (cmd === "pending") cmdPending()
 else if (cmd === "match-and-replace") cmdMatchReplace()
 else if (cmd === "clear") cmdClear()
 else if (cmd === "stats") cmdStats()
@@ -375,6 +399,8 @@ async function cmdStart() {
   const bind = cli.flag("bind") ?? "127.0.0.1"
   const interceptOn = cli.has("--intercept")
   const noInterceptHosts = new Set([...DEFAULT_NO_INTERCEPT, ...cli.list("no-intercept")])
+  const apiPort = cli.num("api-port", 0) // 0 = disabled
+  const apiBind = cli.flag("api-bind") ?? "127.0.0.1"
 
   // Lazy CA generation: only attempt at startup if a CA already exists, so
   // HTTP-only flows work on hosts without openssl. CONNECT tunnels (HTTPS)
@@ -422,9 +448,16 @@ async function cmdStart() {
     }
   })
 
+  // Optional control API
+  let apiServer: ReturnType<typeof startControlApi> | null = null
+  if (apiPort > 0) {
+    apiServer = startControlApi({ port: apiPort, bind: apiBind })
+  }
+
   process.on("SIGINT", () => {
     info("\n✓ proxy stopping…")
     server.close()
+    apiServer?.close()
     process.exit(0)
   })
 }
@@ -550,26 +583,24 @@ async function onMitmRequest(
   const persistedIntercept = readSetting("intercept")
   if (persistedIntercept !== null) state.intercept = persistedIntercept === "1"
 
-  // Interception
+  // Interception — persist to DB so an external CLI / UI / API on the
+  // same machine can resolve the pending request.
   let action: InterceptAction = { kind: "forward" }
   if (state.intercept) {
-    const id = ++state.pendingId
-    info(`[intercept] #${id} ${method} ${target.scheme}://${target.host}${pathOnly}`)
-    info(`            (control with: bun http-proxy.ts intercept-action ${id} <forward|drop|edit:...>)`)
-    action = await new Promise<InterceptAction>((resolve) => {
-      state.pending.set(id, {
-        resolve,
-        request: { method, url: `${target.scheme}://${target.host}${pathOnly}`, headers: reqHeaders, body: reqBody },
-      })
-      // Auto-forward after 2 minutes of agent silence so a stuck client doesn't hang.
-      setTimeout(() => {
-        if (state.pending.has(id)) {
-          info(`[intercept] #${id} auto-forwarded after 120s timeout`)
-          state.pending.delete(id)
-          resolve({ kind: "forward" })
-        }
-      }, 120_000)
+    const dbId = enqueueIntercept({
+      phase: "request",
+      method,
+      scheme: target.scheme,
+      host: target.host,
+      port: target.port,
+      path: pathOnly,
+      headers: reqHeaders,
+      body: reqBody,
     })
+    info(`[intercept] #${dbId} ${method} ${target.scheme}://${target.host}${pathOnly}`)
+    info(`            forward: bun http-proxy.ts intercept-action ${dbId} forward`)
+    info(`            drop:    bun http-proxy.ts intercept-action ${dbId} drop`)
+    action = await waitForInterceptAction(dbId, 120_000)
     if (action.kind === "drop") {
       clientRes.statusCode = 502
       clientRes.end("Dropped by proxy")
@@ -1139,6 +1170,409 @@ function cmdStats() {
 }
 
 // ---------------------------------------------------------------------------
+// Persistent intercept queue
+// ---------------------------------------------------------------------------
+
+interface PendingRow {
+  id: number
+  ts: number
+  proxy_pid: number
+  phase: string
+  method: string
+  scheme: string
+  host: string
+  port: number
+  path: string
+  headers: string
+  body: Buffer | null
+  status: string
+  action: string | null
+  action_payload: string | null
+  resolved_at: number | null
+}
+
+function enqueueIntercept(args: {
+  phase: "request" | "response"
+  method: string
+  scheme: string
+  host: string
+  port: number
+  path: string
+  headers: Record<string, string>
+  body: Buffer
+}): number {
+  const result = db.run(
+    `INSERT INTO pending_intercepts
+     (ts, proxy_pid, phase, method, scheme, host, port, path, headers, body, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    [
+      Date.now(),
+      process.pid,
+      args.phase,
+      args.method,
+      args.scheme,
+      args.host,
+      args.port,
+      args.path,
+      JSON.stringify(args.headers),
+      args.body,
+    ],
+  )
+  return Number(result.lastInsertRowid)
+}
+
+function waitForInterceptAction(id: number, timeoutMs: number): Promise<InterceptAction> {
+  return new Promise<InterceptAction>((resolve) => {
+    const startedAt = Date.now()
+    const tick = () => {
+      const row = db.query("SELECT status, action, action_payload FROM pending_intercepts WHERE id = ?").get(id) as
+        | { status: string; action: string | null; action_payload: string | null }
+        | undefined
+      if (!row) return resolve({ kind: "forward" })
+      if (row.status !== "pending") {
+        if (row.action === "drop") return resolve({ kind: "drop" })
+        if (row.action === "edit" && row.action_payload) {
+          try {
+            const p = JSON.parse(row.action_payload) as {
+              method?: string
+              url?: string
+              headers?: Record<string, string>
+              body?: string
+            }
+            return resolve({
+              kind: "edit",
+              method: p.method,
+              url: p.url,
+              headers: p.headers,
+              body: p.body !== undefined ? Buffer.from(p.body, "utf8") : undefined,
+            })
+          } catch {
+            return resolve({ kind: "forward" })
+          }
+        }
+        return resolve({ kind: "forward" })
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        info(`[intercept] #${id} auto-forwarded after ${timeoutMs}ms timeout`)
+        db.run(
+          "UPDATE pending_intercepts SET status='auto-forwarded', action='forward', resolved_at=? WHERE id=?",
+          [Date.now(), id],
+        )
+        return resolve({ kind: "forward" })
+      }
+      setTimeout(tick, 120) // 120ms poll cadence
+    }
+    tick()
+  })
+}
+
+function cmdInterceptAction() {
+  const id = Number(cli.args[1])
+  const action = cli.args[2] // forward | drop | edit
+  if (!Number.isFinite(id) || !["forward", "drop", "edit"].includes(action)) {
+    bail("usage: intercept-action <id> <forward|drop|edit> [--method M --url U --header H:V --body B]")
+  }
+  const row = db.query("SELECT * FROM pending_intercepts WHERE id = ?").get(id) as PendingRow | undefined
+  if (!row) bail(`no pending intercept with id ${id}`)
+  if (row.status !== "pending") bail(`intercept ${id} already resolved (status=${row.status})`)
+
+  let payload: string | null = null
+  if (action === "edit") {
+    const p: Record<string, unknown> = {}
+    if (cli.flag("method")) p.method = cli.flag("method")!.toUpperCase()
+    if (cli.flag("url")) p.url = cli.flag("url")
+    const hs = cli.headers()
+    if (Object.keys(hs).length) p.headers = hs
+    if (cli.flag("body") !== null) p.body = cli.flag("body")
+    payload = JSON.stringify(p)
+  }
+  db.run(
+    "UPDATE pending_intercepts SET status='resolved', action=?, action_payload=?, resolved_at=? WHERE id=?",
+    [action, payload, Date.now(), id],
+  )
+  ok(`intercept ${id} → ${action}${payload ? " " + payload : ""}`)
+}
+
+function cmdPending() {
+  const json = cli.has("--json")
+  const rows = db
+    .query(
+      "SELECT id, ts, phase, method, scheme, host, path, status FROM pending_intercepts WHERE status='pending' ORDER BY id ASC",
+    )
+    .all() as Array<{
+    id: number
+    ts: number
+    phase: string
+    method: string
+    scheme: string
+    host: string
+    path: string
+    status: string
+  }>
+  if (json) {
+    console.log(JSON.stringify(rows, null, 2))
+    return
+  }
+  if (rows.length === 0) {
+    console.log("(no pending intercepts)")
+    return
+  }
+  console.log(`# Pending intercepts — ${rows.length}\n`)
+  for (const r of rows) {
+    console.log(
+      `#${String(r.id).padEnd(5)} ${new Date(r.ts).toISOString()}  ${r.method.padEnd(6)} ${r.scheme}://${r.host}${r.path}`,
+    )
+  }
+  console.log(`\nResolve with: bun http-proxy.ts intercept-action <id> <forward|drop|edit> [...]`)
+}
+
+// ---------------------------------------------------------------------------
+// Control HTTP API (for the UI / agent)
+// ---------------------------------------------------------------------------
+
+interface ControlServerOpts {
+  port: number
+  bind: string
+}
+
+function startControlApi(opts: ControlServerOpts) {
+  const { createServer } = require("node:http") as typeof import("node:http")
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost")
+    const path = url.pathname
+    res.setHeader("content-type", "application/json")
+    res.setHeader("access-control-allow-origin", "*")
+    res.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS")
+    res.setHeader("access-control-allow-headers", "content-type")
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204
+      res.end()
+      return
+    }
+
+    const send = (status: number, body: unknown) => {
+      res.statusCode = status
+      res.end(JSON.stringify(body))
+    }
+
+    const readJson = async (): Promise<unknown> => {
+      const chunks: Buffer[] = []
+      for await (const c of req) chunks.push(c as Buffer)
+      const txt = Buffer.concat(chunks).toString("utf8")
+      if (!txt) return {}
+      try {
+        return JSON.parse(txt)
+      } catch {
+        return {}
+      }
+    }
+
+    ;(async () => {
+      try {
+        // GET /flows?limit=&host=&status=&grep=
+        if (req.method === "GET" && path === "/flows") {
+          const limit = Number(url.searchParams.get("limit") ?? 50)
+          const host = url.searchParams.get("host")
+          const status = url.searchParams.get("status")
+          const grep = url.searchParams.get("grep")
+          let sql =
+            "SELECT id, ts, method, scheme, host, port, path, status, resp_body_size, resp_content_type, duration_ms, error, flagged FROM flows"
+          const where: string[] = []
+          const params: unknown[] = []
+          if (host) {
+            where.push("host LIKE ?")
+            params.push(`%${host}%`)
+          }
+          if (status) {
+            where.push("status = ?")
+            params.push(Number(status))
+          }
+          if (grep) {
+            where.push("(path LIKE ? OR req_headers LIKE ? OR resp_headers LIKE ?)")
+            const g = `%${grep}%`
+            params.push(g, g, g)
+          }
+          if (where.length) sql += " WHERE " + where.join(" AND ")
+          sql += " ORDER BY id DESC LIMIT ?"
+          params.push(limit)
+          const rows = db.query(sql).all(...(params as never[]))
+          return send(200, rows)
+        }
+
+        // GET /flows/:id
+        const flowMatch = /^\/flows\/(\d+)$/.exec(path)
+        if (req.method === "GET" && flowMatch) {
+          const id = Number(flowMatch[1])
+          const row = db.query("SELECT * FROM flows WHERE id = ?").get(id) as FlowRow | undefined
+          if (!row) return send(404, { error: `no flow ${id}` })
+          return send(200, {
+            ...row,
+            req_headers: JSON.parse(row.req_headers),
+            resp_headers: row.resp_headers ? JSON.parse(row.resp_headers) : {},
+            req_body: row.req_body ? row.req_body.toString("utf8") : "",
+            resp_body: row.resp_body ? row.resp_body.toString("utf8") : "",
+          })
+        }
+
+        // POST /flows/:id/flag
+        const flagMatch = /^\/flows\/(\d+)\/flag$/.exec(path)
+        if (req.method === "POST" && flagMatch) {
+          const id = Number(flagMatch[1])
+          db.run("UPDATE flows SET flagged = 1 - flagged WHERE id = ?", [id])
+          return send(200, { ok: true, id })
+        }
+
+        // GET /pending
+        if (req.method === "GET" && path === "/pending") {
+          const rows = db
+            .query(
+              "SELECT id, ts, phase, method, scheme, host, port, path, headers, body, status FROM pending_intercepts WHERE status='pending' ORDER BY id ASC",
+            )
+            .all() as PendingRow[]
+          return send(
+            200,
+            rows.map((r) => ({
+              ...r,
+              headers: JSON.parse(r.headers),
+              body: r.body ? r.body.toString("utf8") : "",
+            })),
+          )
+        }
+
+        // POST /pending/:id/forward | drop | edit
+        const pendingMatch = /^\/pending\/(\d+)\/(forward|drop|edit)$/.exec(path)
+        if (req.method === "POST" && pendingMatch) {
+          const id = Number(pendingMatch[1])
+          const action = pendingMatch[2]
+          const row = db.query("SELECT status FROM pending_intercepts WHERE id = ?").get(id) as
+            | { status: string }
+            | undefined
+          if (!row) return send(404, { error: "no pending" })
+          if (row.status !== "pending") return send(409, { error: `already ${row.status}` })
+          let payload: string | null = null
+          if (action === "edit") {
+            const body = (await readJson()) as Record<string, unknown>
+            payload = JSON.stringify(body)
+          }
+          db.run(
+            "UPDATE pending_intercepts SET status='resolved', action=?, action_payload=?, resolved_at=? WHERE id=?",
+            [action, payload, Date.now(), id],
+          )
+          return send(200, { ok: true, id, action })
+        }
+
+        // GET /rules / POST /rules / DELETE /rules/:id / POST /rules/:id/toggle
+        if (req.method === "GET" && path === "/rules") {
+          return send(200, listRules())
+        }
+        if (req.method === "POST" && path === "/rules") {
+          const body = (await readJson()) as { type: string; scope: string; match: string; replace: string; description?: string; enabled?: boolean }
+          if (!body.type || !body.scope || !body.match) return send(400, { error: "type/scope/match required" })
+          if (!["request", "response"].includes(body.type)) return send(400, { error: "type must be request|response" })
+          if (!["header", "body", "url"].includes(body.scope)) return send(400, { error: "scope must be header|body|url" })
+          const result = db.run(
+            "INSERT INTO rules (enabled, type, scope, match, replace, description) VALUES (?, ?, ?, ?, ?, ?)",
+            [body.enabled === false ? 0 : 1, body.type, body.scope, body.match, body.replace ?? "", body.description ?? null],
+          )
+          return send(200, { ok: true, id: Number(result.lastInsertRowid) })
+        }
+        const ruleDelMatch = /^\/rules\/(\d+)$/.exec(path)
+        if (req.method === "DELETE" && ruleDelMatch) {
+          db.run("DELETE FROM rules WHERE id = ?", [Number(ruleDelMatch[1])])
+          return send(200, { ok: true })
+        }
+        const ruleToggleMatch = /^\/rules\/(\d+)\/toggle$/.exec(path)
+        if (req.method === "POST" && ruleToggleMatch) {
+          db.run("UPDATE rules SET enabled = 1 - enabled WHERE id = ?", [Number(ruleToggleMatch[1])])
+          return send(200, { ok: true })
+        }
+
+        // GET /settings
+        if (req.method === "GET" && path === "/settings") {
+          const intercept = readSetting("intercept") === "1"
+          const port = readSetting("port") ?? "8181"
+          const flowCount = (db.query("SELECT COUNT(*) AS c FROM flows").get() as { c: number }).c
+          const pendingCount = (db.query("SELECT COUNT(*) AS c FROM pending_intercepts WHERE status='pending'").get() as { c: number }).c
+          return send(200, { intercept, port: Number(port), flowCount, pendingCount })
+        }
+
+        // POST /settings/intercept  body { on: bool }
+        if (req.method === "POST" && path === "/settings/intercept") {
+          const body = (await readJson()) as { on?: boolean }
+          writeSetting("intercept", body.on ? "1" : "0")
+          return send(200, { ok: true, intercept: !!body.on })
+        }
+
+        // GET /events  → SSE stream of flow + pending changes
+        if (req.method === "GET" && path === "/events") {
+          res.setHeader("content-type", "text/event-stream")
+          res.setHeader("cache-control", "no-cache")
+          res.setHeader("connection", "keep-alive")
+          res.statusCode = 200
+          res.write("retry: 2000\n\n")
+          let lastFlow = (db.query("SELECT MAX(id) AS m FROM flows").get() as { m: number | null }).m ?? 0
+          let lastPending = (db.query("SELECT MAX(id) AS m FROM pending_intercepts").get() as { m: number | null }).m ?? 0
+          const tick = setInterval(() => {
+            try {
+              const newFlows = db
+                .query("SELECT id, method, scheme, host, path, status, resp_body_size, duration_ms, ts FROM flows WHERE id > ? ORDER BY id ASC LIMIT 50")
+                .all(lastFlow) as Array<{ id: number }>
+              for (const f of newFlows) {
+                res.write(`event: flow\ndata: ${JSON.stringify(f)}\n\n`)
+                lastFlow = Math.max(lastFlow, f.id)
+              }
+              const newPending = db
+                .query(
+                  "SELECT id, method, scheme, host, path, status, ts FROM pending_intercepts WHERE id > ? ORDER BY id ASC",
+                )
+                .all(lastPending) as Array<{ id: number; status: string }>
+              for (const p of newPending) {
+                res.write(`event: pending\ndata: ${JSON.stringify(p)}\n\n`)
+                lastPending = Math.max(lastPending, p.id)
+              }
+              // Resolved pending
+              const resolved = db
+                .query(
+                  "SELECT id, status, action FROM pending_intercepts WHERE resolved_at > ? ORDER BY resolved_at ASC LIMIT 50",
+                )
+                .all(Date.now() - 5000) as Array<{ id: number }>
+              for (const r of resolved) res.write(`event: resolved\ndata: ${JSON.stringify(r)}\n\n`)
+              res.write(`: ping\n\n`)
+            } catch {
+              /* ignore */
+            }
+          }, 800)
+          req.on("close", () => clearInterval(tick))
+          return
+        }
+
+        // GET /stats
+        if (req.method === "GET" && path === "/stats") {
+          const total = (db.query("SELECT COUNT(*) AS c FROM flows").get() as { c: number }).c
+          const byHost = db
+            .query("SELECT host, COUNT(*) AS n FROM flows GROUP BY host ORDER BY n DESC LIMIT 10")
+            .all()
+          const byStatus = db.query("SELECT status, COUNT(*) AS n FROM flows GROUP BY status ORDER BY n DESC").all()
+          return send(200, { total, byHost, byStatus })
+        }
+
+        // GET /health
+        if (path === "/health") return send(200, { ok: true, pid: process.pid })
+
+        send(404, { error: `no route for ${req.method} ${path}` })
+      } catch (e) {
+        send(500, { error: (e as Error).message })
+      }
+    })()
+  })
+  server.listen(opts.port, opts.bind, () => {
+    info(`✓ control API listening on http://${opts.bind}:${opts.port}`)
+    info(`  endpoints: /flows /flows/:id /pending /rules /settings /events /stats`)
+  })
+  return server
+}
+
+// ---------------------------------------------------------------------------
 // Help
 // ---------------------------------------------------------------------------
 
@@ -1151,6 +1585,8 @@ Commands:
     --bind ADDR               default 127.0.0.1
     --intercept               start with interception ON
     --no-intercept HOST       skip MITM for HOST (repeatable; * wildcards)
+    --api-port N              also expose REST control API on this port
+    --api-bind ADDR           default 127.0.0.1
 
   ca-export <path>            write the local Root CA pem
   list [--limit N --host H --status S --grep TEXT --json]
@@ -1158,6 +1594,9 @@ Commands:
   show <id> [--json]          show one full flow (decoded headers + body)
   send-to-repeater <id>       emit JSON the repeater can consume
   intercept <on|off>          flip interception on a running proxy
+  pending [--json]            list pending intercepts awaiting decision
+  intercept-action <id> <forward|drop|edit> [--method M --url U --header H:V --body B]
+                              resolve a pending intercept
   match-and-replace list
   match-and-replace add --type request|response --scope header|body|url \\
                           --match REGEX --replace TEXT [--description ""]
@@ -1165,6 +1604,22 @@ Commands:
   match-and-replace toggle <id>
   clear --yes                 wipe history DB
   stats [--json]              top hosts / status / slow flows
+
+Control API endpoints (when --api-port set):
+  GET  /flows ?limit&host&status&grep
+  GET  /flows/:id
+  POST /flows/:id/flag
+  GET  /pending
+  POST /pending/:id/{forward|drop|edit}
+  GET  /rules
+  POST /rules
+  DELETE /rules/:id
+  POST /rules/:id/toggle
+  GET  /settings
+  POST /settings/intercept   { on: true|false }
+  GET  /events                (SSE stream)
+  GET  /stats
+  GET  /health
 
 Storage: ${DATA_DIR}
 `)

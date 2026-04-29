@@ -33,6 +33,13 @@ const SUBTOOLS = [
   "scanner",
   "crawler",
   "param-miner",
+  "collaborator",
+  "csrf-poc",
+  "content-discovery",
+  "auth-matrix",
+  "engagement-notes",
+  "smuggler",
+  "hackvertor",
 ] as const
 
 const SCRIPT_BY_SUBTOOL: Record<(typeof SUBTOOLS)[number], string> = {
@@ -45,6 +52,13 @@ const SCRIPT_BY_SUBTOOL: Record<(typeof SUBTOOLS)[number], string> = {
   scanner: "vuln-scanner.ts",
   crawler: "site-crawler.ts",
   "param-miner": "param-miner.ts",
+  collaborator: "collaborator.ts",
+  "csrf-poc": "csrf-poc.ts",
+  "content-discovery": "content-discovery.ts",
+  "auth-matrix": "auth-matrix.ts",
+  "engagement-notes": "engagement-notes.ts",
+  smuggler: "smuggler.ts",
+  hackvertor: "hackvertor.ts",
 }
 
 // Tools that perform active probing — flagged so we can require explicit
@@ -55,6 +69,9 @@ const ACTIVE_SUBTOOLS = new Set<(typeof SUBTOOLS)[number]>([
   "sequencer", // for "collect"/"live" — those send N requests
   "param-miner",
   "crawler",
+  "content-discovery",
+  "auth-matrix", // probes endpoints across identities
+  "smuggler", // VERY active — corrupts request queues
 ])
 
 function resolveScript(name: string): string {

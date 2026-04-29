@@ -400,14 +400,56 @@ export function heartbeatSession(sessionId: string, actor: string, state?: unkno
   // in the DB and confusing downstream tooling that expects ended rows
   // to stop changing.
   if (row.ended_at !== null) return null
+  const stateJson = state !== undefined ? JSON.stringify(state).slice(0, 16_000) : null
   const r = db
     .prepare(
       "UPDATE team_sessions SET last_heartbeat_at = ?, state = COALESCE(?, state) WHERE id = ? AND ended_at IS NULL",
     )
-    .run(now(), state !== undefined ? JSON.stringify(state).slice(0, 16_000) : null, sessionId)
+    .run(now(), stateJson, sessionId)
   if (r.changes === 0) return null
   emitTeamEvent({ type: "session_heartbeat", team_id: row.team_id, session_id: sessionId })
+  // When the host pushed a fresh state blob alongside the heartbeat we
+  // emit a separate event so guests that follow this host can react
+  // *immediately* instead of waiting for the next listSessions() refresh
+  // — that's how the "follow my workspace" UX gets live.
+  if (state !== undefined) {
+    emitTeamEvent({
+      type: "session_state",
+      team_id: row.team_id,
+      session_id: sessionId,
+      host_customer_id: row.host_customer_id,
+      state,
+      ts: now(),
+    })
+  }
   return db.prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?").get(sessionId) ?? null
+}
+
+/**
+ * Read the most recent `state` blob a host pushed for a live session.
+ * Returns null if the session doesn't exist, has ended, or the viewer
+ * isn't a team member. Used by guests on first attach so they don't
+ * have to wait for the next state push to know what the host is on.
+ */
+export function getSessionState(
+  teamId: string,
+  sessionId: string,
+  viewer: string,
+): { state: unknown; host_customer_id: string; last_heartbeat_at: number } | null {
+  if (!getMemberRole(teamId, viewer)) return null
+  const row = getDb()
+    .prepare<TeamSessionRow, [string]>("SELECT * FROM team_sessions WHERE id = ?")
+    .get(sessionId)
+  if (!row || row.team_id !== teamId || row.ended_at !== null) return null
+  let parsed: unknown = null
+  if (row.state) {
+    try {
+      parsed = JSON.parse(row.state)
+    } catch {
+      parsed = null
+    }
+  }
+  return { state: parsed, host_customer_id: row.host_customer_id, last_heartbeat_at: row.last_heartbeat_at }
 }
 
 /**
@@ -440,6 +482,120 @@ export function reapStaleSessions(staleSec: number = 60): number {
     }
   }
   return reaped
+}
+
+/**
+ * Resolve the best display name we have for a customer (telegram @handle
+ * preferred, then username/email, then id). Used by chat to capture the
+ * author label at send-time.
+ */
+export function getCustomerDisplay(customerId: string): string | null {
+  const row = getDb()
+    .prepare<{ display: string | null }, [string]>(
+      "SELECT COALESCE(telegram, email, id) AS display FROM customers WHERE id = ?",
+    )
+    .get(customerId)
+  return row?.display ?? null
+}
+
+/* ──────────────────────────  Team chat  ────────────────────────── */
+
+export interface TeamChatRow {
+  id: number
+  team_id: string
+  customer_id: string
+  author_name: string | null
+  text: string
+  ts: number
+}
+
+const CHAT_RETENTION = 200 // keep at most N rows per team — dropped on insert
+
+/**
+ * Persist a chat message and emit a real-time event. Validates length,
+ * trims whitespace, and rejects empty / oversized messages. The author's
+ * `display` name (Telegram @handle when available, otherwise the customer
+ * id) is captured at write time so the UI can render the right label even
+ * after a member changes their handle.
+ */
+export function postChatMessage(args: {
+  team_id: string
+  author: string
+  author_name: string | null
+  text: string
+}): TeamChatRow | null {
+  if (!getMemberRole(args.team_id, args.author)) return null
+  const text = args.text.trim()
+  if (!text) return null
+  if (text.length > 2000) return null
+
+  const db = getDb()
+  const ts = now()
+  const result = db
+    .prepare(
+      "INSERT INTO team_chat_messages (team_id, customer_id, author_name, text, ts) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(args.team_id, args.author, args.author_name, text, ts)
+  const id = Number(result.lastInsertRowid)
+
+  // Prune old rows for this team so the table can't grow without bound.
+  // SQLite doesn't have a "DELETE … OFFSET" so we bound by id.
+  db.prepare(
+    `DELETE FROM team_chat_messages
+       WHERE team_id = ?
+         AND id NOT IN (
+           SELECT id FROM team_chat_messages WHERE team_id = ? ORDER BY id DESC LIMIT ?
+         )`,
+  ).run(args.team_id, args.team_id, CHAT_RETENTION)
+
+  const row: TeamChatRow = {
+    id,
+    team_id: args.team_id,
+    customer_id: args.author,
+    author_name: args.author_name,
+    text,
+    ts,
+  }
+  emitTeamEvent({
+    type: "chat_message",
+    team_id: args.team_id,
+    message_id: id,
+    customer_id: args.author,
+    author_name: args.author_name,
+    text,
+    ts,
+  })
+  return row
+}
+
+/**
+ * Most-recent N messages for a team, oldest-first so the UI can render
+ * a scrollable history without flipping the array.
+ */
+export function listChatMessages(teamId: string, viewer: string, limit = 50): TeamChatRow[] {
+  if (!getMemberRole(teamId, viewer)) return []
+  const cap = Math.min(Math.max(1, limit), 200)
+  return getDb()
+    .prepare<TeamChatRow, [string, number]>(
+      "SELECT id, team_id, customer_id, author_name, text, ts FROM team_chat_messages WHERE team_id = ? ORDER BY id DESC LIMIT ?",
+    )
+    .all(teamId, cap)
+    .reverse()
+}
+
+/**
+ * Lightweight typing indicator — emitted-only, not persisted. The client
+ * keeps a per-customer expiry timer to fade the indicator out after ~3 s
+ * of silence.
+ */
+export function broadcastTyping(args: { team_id: string; author: string; author_name: string | null }): void {
+  if (!getMemberRole(args.team_id, args.author)) return
+  emitTeamEvent({
+    type: "chat_typing",
+    team_id: args.team_id,
+    customer_id: args.author,
+    author_name: args.author_name,
+  })
 }
 
 export function endSession(sessionId: string, actor: string): boolean {

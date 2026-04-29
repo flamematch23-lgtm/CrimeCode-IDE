@@ -123,6 +123,29 @@ const api: ElectronAPI = {
     heartbeatSession: (id: string, sid: string, state: unknown) =>
       ipcRenderer.invoke("teams-heartbeat-session", id, sid, state),
     endSession: (id: string, sid: string) => ipcRenderer.invoke("teams-end-session", id, sid),
+    // Live cursor relay — fire-and-forget. ~10 Hz throttled in the renderer.
+    publishCursor: (id: string, sid: string, x: number, y: number, label?: string) =>
+      ipcRenderer.invoke("teams-publish-cursor", id, sid, x, y, label),
+    // Owner-only: transfer ownership of a team to another member.
+    transferOwnership: (id: string, newOwnerCustomerId: string) =>
+      ipcRenderer.invoke("teams-transfer-ownership", id, newOwnerCustomerId),
+    // Read shared workspace state for a live session.
+    getSession: (id: string, sid: string) => ipcRenderer.invoke("teams-get-session", id, sid),
+    // Real-time chat — list / post / typing
+    listChat: (id: string, limit?: number) => ipcRenderer.invoke("teams-list-chat", id, limit),
+    postChat: (id: string, text: string) => ipcRenderer.invoke("teams-post-chat", id, text),
+    postTyping: (id: string) => ipcRenderer.invoke("teams-post-typing", id),
+    // SSE event subscription bridged through main. Returns an unsubscribe fn.
+    subscribe: (id: string, onEvent: (e: unknown) => void) => {
+      const channel = `teams-event-${id}-${Math.random().toString(36).slice(2, 10)}`
+      const handler = (_: unknown, ev: unknown) => onEvent(ev)
+      ipcRenderer.on(channel, handler)
+      void ipcRenderer.invoke("teams-subscribe", id, channel)
+      return () => {
+        ipcRenderer.removeListener(channel, handler)
+        void ipcRenderer.invoke("teams-unsubscribe", id, channel)
+      }
+    },
   },
 
   // Enhancement 3: Native context menus
@@ -154,6 +177,16 @@ const api: ElectronAPI = {
     const handler = (_: unknown, url: string) => cb(url)
     ipcRenderer.on("browser-preview-navigate", handler)
     return () => ipcRenderer.removeListener("browser-preview-navigate", handler)
+  },
+
+  automation: {
+    getBrowserAllowAll: () => ipcRenderer.invoke("automation-get-browser-allow-all"),
+    setBrowserAllowAll: (value: boolean) => ipcRenderer.invoke("automation-set-browser-allow-all", value),
+    listConnectedBrowsers: () => ipcRenderer.invoke("automation-list-connected-browsers"),
+    getComputerUseStatus: () => ipcRenderer.invoke("automation-get-computer-use"),
+    setComputerUseEnabled: (value: boolean) => ipcRenderer.invoke("automation-set-computer-use", value),
+    getRestoreApps: () => ipcRenderer.invoke("automation-get-restore-apps"),
+    setRestoreApps: (value: boolean) => ipcRenderer.invoke("automation-set-restore-apps", value),
   },
 
   // Window management

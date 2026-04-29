@@ -25,6 +25,31 @@ export type TeamEvent =
       y: number // 0..1 normalized viewport Y
       label?: string | null
     }
+  | {
+      type: "chat_message"
+      team_id: string
+      message_id: number
+      customer_id: string
+      author_name: string | null
+      text: string
+      ts: number
+    }
+  | {
+      type: "chat_typing"
+      team_id: string
+      customer_id: string
+      author_name: string | null
+    }
+  | {
+      type: "session_state"
+      team_id: string
+      session_id: string
+      host_customer_id: string
+      // Whatever JSON blob the host pushed — the canonical shape lives in
+      // packages/app/src/utils/team-session.ts (SharedWorkspaceState).
+      state: unknown
+      ts: number
+    }
 
 type Listener = (event: TeamEvent) => void
 

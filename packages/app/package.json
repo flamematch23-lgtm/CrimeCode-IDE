@@ -12,6 +12,10 @@
     "./components/teams/workspace-switcher": "./src/components/teams/workspace-switcher.tsx",
     "./components/teams/create-team-dialog": "./src/components/teams/create-team-dialog.tsx",
     "./components/teams/manage-team-dialog": "./src/components/teams/manage-team-dialog.tsx",
+    "./components/teams/use-team-presence": "./src/components/teams/use-team-presence.ts",
+    "./components/teams/team-presence-panel": "./src/components/teams/team-presence-panel.tsx",
+    "./components/teams/team-chat-panel": "./src/components/teams/team-chat-panel.tsx",
+    "./components/teams/shared-workspace-publisher": "./src/components/teams/shared-workspace-publisher.tsx",
     "./a11y/focus-trap": "./src/a11y/focus-trap.ts"
   },
   "scripts": {
