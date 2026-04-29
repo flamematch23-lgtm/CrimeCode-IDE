@@ -1,7 +1,7 @@
 {
   "name": "@opencode-ai/desktop-electron",
   "private": true,
-  "version": "2.22.44",
+  "version": "2.22.45",
   "type": "module",
   "license": "MIT",
   "homepage": "https://opencode.ai",

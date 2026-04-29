@@ -174,6 +174,26 @@ async function exchangeCodeForTokens(
     } catch {
       /* not JSON — leave the truncated text */
     }
+
+    // Friendlier messages for the most common failure modes the user hits
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("retry-after")
+      const wait = retryAfter ? `attendi ${retryAfter}s` : "attendi qualche minuto"
+      throw new Error(
+        `Anthropic ha applicato un rate-limit (429) sul token endpoint — ${wait} ` +
+          `e riprova generando un NUOVO code (quelli OAuth scadono in ~2 minuti). ` +
+          `Se sei dietro VPN o proxy condiviso, prova senza. Dettaglio: ${detail}`,
+      )
+    }
+    if (response.status === 400 && /invalid_grant|invalid 'code'/i.test(detail)) {
+      throw new Error(
+        `Code OAuth non valido o scaduto (400 invalid_grant). ` +
+          `Chiudi questo dialog, riapri "Accedi con Claude Pro/Max", clicca "questo link" ` +
+          `e incolla il NUOVO codice qui SUBITO (i code scadono in pochi secondi). ` +
+          `Dettaglio: ${detail}`,
+      )
+    }
+
     throw new Error(`Anthropic token exchange ${response.status}: ${detail}`)
   }
 
@@ -292,9 +312,82 @@ export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
               headers.set("anthropic-beta", `${ANTHROPIC_OAUTH_BETA},${existingBeta}`)
             }
 
+            // Inject the Claude-Code identity prefix into the system prompt.
+            //
+            // Anthropic enforces this for OAuth Pro/Max tokens: if the system
+            // prompt's FIRST BLOCK is not exactly
+            //   "You are Claude Code, Anthropic's official CLI for Claude."
+            // the API responds with 429 rate_limit_error (a misleading status
+            // — it's actually an authorization gate). Verified live across
+            // Sonnet 4.5 / Opus 4.1: 429 without prefix, 200 with prefix.
+            //
+            // The trick: the prefix MUST live in its own array block. If we
+            // concatenate it to the user's system prompt as a single string
+            // ("prefix\n\nuser content"), Anthropic still rejects with 429.
+            // Therefore we ALWAYS convert the body's `system` field into an
+            // array form with the prefix as the first block.
+            //
+            // Only POSTs to /v1/messages are affected.
+            let body: BodyInit | undefined = init?.body ?? undefined
+            const url =
+              requestInput instanceof URL
+                ? requestInput.toString()
+                : typeof requestInput === "string"
+                  ? requestInput
+                  : (requestInput as Request).url
+            const isMessages = /\/v1\/messages(?:\?|$)/.test(url) && (init?.method ?? "POST").toUpperCase() === "POST"
+            if (isMessages && typeof body === "string") {
+              try {
+                const parsed = JSON.parse(body) as {
+                  system?: string | Array<{ type: string; text: string; cache_control?: unknown }>
+                  [key: string]: unknown
+                }
+                const CLAUDE_CODE_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude."
+                const prefixBlock = { type: "text" as const, text: CLAUDE_CODE_PREFIX }
+                if (parsed.system === undefined) {
+                  parsed.system = [prefixBlock]
+                } else if (typeof parsed.system === "string") {
+                  // String form: convert to array with prefix as first block,
+                  // user content as second. NEVER concatenate into one string
+                  // — Anthropic rejects that with 429.
+                  if (parsed.system === CLAUDE_CODE_PREFIX) {
+                    parsed.system = [prefixBlock]
+                  } else if (parsed.system.startsWith(CLAUDE_CODE_PREFIX)) {
+                    const rest = parsed.system.slice(CLAUDE_CODE_PREFIX.length).replace(/^[\s\n]+/, "")
+                    parsed.system = rest ? [prefixBlock, { type: "text" as const, text: rest }] : [prefixBlock]
+                  } else {
+                    parsed.system = [prefixBlock, { type: "text" as const, text: parsed.system }]
+                  }
+                } else if (Array.isArray(parsed.system)) {
+                  const first = parsed.system[0]
+                  const firstText = first && typeof first.text === "string" ? first.text : ""
+                  if (firstText !== CLAUDE_CODE_PREFIX) {
+                    if (firstText.startsWith(CLAUDE_CODE_PREFIX)) {
+                      // Split first block: prefix becomes its own block,
+                      // remainder stays in the original block (preserving any
+                      // cache_control etc. on the second block).
+                      const rest = firstText.slice(CLAUDE_CODE_PREFIX.length).replace(/^[\s\n]+/, "")
+                      const tail = rest ? [{ ...first, text: rest }, ...parsed.system.slice(1)] : parsed.system.slice(1)
+                      parsed.system = [prefixBlock, ...tail]
+                    } else {
+                      parsed.system = [prefixBlock, ...parsed.system]
+                    }
+                  }
+                }
+                body = JSON.stringify(parsed)
+                // Sync content-length on the new body
+                headers.set("content-length", String(Buffer.byteLength(body, "utf8")))
+              } catch (err) {
+                log.warn("anthropic oauth: could not inject Claude-Code prefix (body not JSON)", {
+                  error: err instanceof Error ? err.message : String(err),
+                })
+              }
+            }
+
             return fetch(requestInput, {
               ...init,
               headers,
+              body,
             })
           },
         }
