@@ -113,14 +113,13 @@ jobs:
         run: bun run --cwd packages/app build
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: crimecode-web
-          directory: packages/app/dist
-          branch: main
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          packageManager: npm
+          wranglerVersion: "3"
+          command: pages deploy packages/app/dist --project-name=crimecode-web --branch=main --commit-dirty=true
 
       - name: Show deploy URL
         run: echo "Web app live at https://crimecode-web.pages.dev"
