@@ -165,6 +165,7 @@ export namespace Agent {
                 defaults,
                 Permission.fromConfig({
                   "*": "deny",
+                  // -- file / code
                   read: "allow",
                   glob: "allow",
                   grep: "allow",
@@ -174,6 +175,7 @@ export namespace Agent {
                   edit: "allow",
                   bash: "allow",
                   code_runner: "allow",
+                  // -- recon
                   webfetch: "allow",
                   websearch: "allow",
                   http_client: "allow",
@@ -182,22 +184,38 @@ export namespace Agent {
                   whois: "allow",
                   ssl_checker: "allow",
                   security_headers: "allow",
+                  url_analyzer: "allow",
+                  // -- scanning
                   security_audit: "allow",
                   port_scanner: "allow",
                   vuln_scanner: "allow",
-                  url_analyzer: "allow",
+                  nmap: "allow",
+                  nuclei: "allow",
+                  sqlmap: "allow",
+                  // -- burp suite toolkit (proxy, repeater, intruder, scanner, etc.)
+                  burp_toolkit: "allow",
+                  // -- credential / crypto
                   encoding: "allow",
                   hash: "allow",
                   wordlist: "allow",
                   password_generator: "allow",
-                  phishing: "allow",
-                  pentest_report: "allow",
                   jwt_tool: "allow",
+                  // -- exploitation
                   ssrf_probe: "allow",
                   cve_poc: "allow",
-                  nmap: "allow",
-                  nuclei: "allow",
-                  sqlmap: "allow",
+                  ssti_tool: "allow",
+                  reverse_shell: "allow",
+                  payload_generator: "allow",
+                  // -- post-exploitation
+                  privesc_suggester: "allow",
+                  credential_dumper: "allow",
+                  c2_generator: "allow",
+                  amsi_bypass: "allow",
+                  persistence_tool: "allow",
+                  // -- reporting / phishing
+                  phishing: "allow",
+                  pentest_report: "allow",
+                  // -- agent internals
                   todowrite: "allow",
                   task: "allow",
                   external_directory: {
