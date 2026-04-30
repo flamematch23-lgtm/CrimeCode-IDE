@@ -157,6 +157,14 @@ export function TeamChatPanel(props: Props) {
           map[row.customer_id] = row.last_read_message_id
         }
         setReadsByCustomer(map)
+        // Sync the local high-water-mark with the server's view so we don't
+        // re-POST /chat/read for messages we already acknowledged in a
+        // prior session. Without this, every focus event would spam the
+        // endpoint until the user actually scrolls past new content.
+        if (props.selfCustomerId) {
+          const serverHWM = map[props.selfCustomerId] ?? 0
+          if (serverHWM > lastMarkedRead) lastMarkedRead = serverHWM
+        }
         return true
       } catch {
         return false

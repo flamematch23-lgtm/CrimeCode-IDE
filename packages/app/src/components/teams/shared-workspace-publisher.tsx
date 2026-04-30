@@ -199,6 +199,17 @@ export function SharedWorkspacePublisher() {
       let bindAttempts = 0
       const providerRef = crdtProvider
       bindInterval = setInterval(() => {
+        // Guard against a pending tick firing AFTER teardownCrdt() has
+        // destroyed the provider — touching providerRef.doc on a destroyed
+        // Y.Doc throws. crdtProvider is nulled out by teardown, so a
+        // mismatch means we're stale and should bail.
+        if (crdtProvider !== providerRef) {
+          if (bindInterval !== null) {
+            clearInterval(bindInterval)
+            bindInterval = null
+          }
+          return
+        }
         const el = findPromptEl()
         if (el && !crdtCleanup) {
           clearInterval(bindInterval!)

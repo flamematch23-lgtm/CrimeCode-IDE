@@ -24,6 +24,7 @@
  */
 
 import { spawn } from "node:child_process"
+import { randomBytes } from "node:crypto"
 
 export type SandboxLanguage = "python" | "node" | "javascript" | "bash" | "sh"
 
@@ -93,12 +94,14 @@ async function runViaDocker(req: SandboxRequest, timeoutMs: number): Promise<San
   const img = IMAGES[req.language]
   const startedAt = Date.now()
 
-  // Pass code via STDIN to avoid arg-length limits and shell-escaping.
-  // For interpreters that read code from -c/-e, we still need the arg, so
-  // we use a small wrapper: write code to /workspace/program, then exec it.
-  const program = `cat > /workspace/program <<'CRIMEOPUS_EOF'
+  // Pass code via heredoc with a per-request random terminator so user
+  // code can never close the heredoc early (e.g. by including a literal
+  // "CRIMEOPUS_EOF" line). The random tag is single-quoted so no
+  // variable expansion happens inside the body.
+  const eofTag = `CRIMEOPUS_EOF_${randomBytes(16).toString("hex").toUpperCase()}`
+  const program = `cat > /workspace/program <<'${eofTag}'
 ${req.code}
-CRIMEOPUS_EOF
+${eofTag}
 ${dispatchCmd(req.language)}`
 
   const args = [

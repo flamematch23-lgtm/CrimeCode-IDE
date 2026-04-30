@@ -645,23 +645,38 @@ function webClient(): TeamsClient {
       const s = readWebSession()
       if (!s) throw new Error("not_signed_in")
       const buf = await file.arrayBuffer()
-      const res = await fetch(
-        `${API_BASE}/license/teams/${encodeURIComponent(id)}/chat/upload`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": file.type,
-            "X-Attachment-Name": encodeURIComponent(file.name),
-            Authorization: `Bearer ${s.token}`,
+      // 60s upload timeout — without it a stalled R2 / TCP keepalive
+      // would leave the UI spinner spinning forever and disable the
+      // attach button until full page reload.
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 60_000)
+      try {
+        const res = await fetch(
+          `${API_BASE}/license/teams/${encodeURIComponent(id)}/chat/upload`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": file.type,
+              "X-Attachment-Name": encodeURIComponent(file.name),
+              Authorization: `Bearer ${s.token}`,
+            },
+            body: buf,
+            signal: controller.signal,
           },
-          body: buf,
-        },
-      )
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "upload_failed" }))
-        throw new Error((err as { error?: string }).error ?? `upload_failed_${res.status}`)
+        )
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "upload_failed" }))
+          throw new Error((err as { error?: string }).error ?? `upload_failed_${res.status}`)
+        }
+        return (await res.json()) as TeamChatAttachment
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          throw new Error("upload_timeout")
+        }
+        throw err
+      } finally {
+        clearTimeout(timer)
       }
-      return (await res.json()) as TeamChatAttachment
     },
     createInviteLink: (id, opts) =>
       json(`/license/teams/${encodeURIComponent(id)}/invite-links`, {

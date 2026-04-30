@@ -28,6 +28,14 @@ export async function refreshTeamAgents(teamId: string | null): Promise<void> {
     cachedAgents = []
     return
   }
+  // Invalidate stale cache IMMEDIATELY when the team changes, before
+  // awaiting any inflight request. Otherwise a submit between
+  // teamId-A → teamId-B switching would resolve `@<slug>` against
+  // team A's agents until the team-B fetch completes.
+  if (cachedTeamId !== teamId) {
+    cachedTeamId = null
+    cachedAgents = []
+  }
   if (inFlight) {
     try {
       await inFlight

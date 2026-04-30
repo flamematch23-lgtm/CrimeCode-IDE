@@ -21,7 +21,14 @@ import {
 } from "../../license/store"
 import { getWallets } from "../../license/wallets"
 import { backupOnce } from "../../license/backup"
-import { s3Put, s3Config } from "../../license/s3-upload"
+import {
+  s3Put,
+  s3Config,
+  s3GetSigned,
+  extractChatAttachmentKey,
+  signAttachmentUrl,
+  verifyAttachmentSignature,
+} from "../../license/s3-upload"
 import { randomBytes } from "node:crypto"
 import { checkRateLimit } from "../../license/rate-limit"
 import {
@@ -1308,9 +1315,15 @@ export const LicenseRoutes = lazy(() => {
     const key = `chat/${teamId}/${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`
 
     try {
-      const { url } = await s3Put(key, new Uint8Array(buf), contentType)
+      await s3Put(key, new Uint8Array(buf), contentType)
+      // Return a signed proxy URL. The signature lets `<img src>` and
+      // `<a href>` clicks dereference it WITHOUT carrying an Authorization
+      // header — yet the proxy still verifies the URL hasn't been forged
+      // and the TTL hasn't elapsed.
+      const apiBase = process.env.LICENSE_API_PUBLIC_URL ?? "https://api.crimecode.cc"
+      const proxyUrl = signAttachmentUrl({ apiBase, team_id: teamId, key })
       return c.json({
-        url,
+        url: proxyUrl,
         type: contentType,
         size,
         name: sanitizedName,
@@ -1318,6 +1331,51 @@ export const LicenseRoutes = lazy(() => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return c.json({ error: "upload_failed", detail: msg.slice(0, 200) }, 502)
+    }
+  })
+
+  // Download proxy. Accepts EITHER:
+  //   - HMAC-signed query (?key=..&exp=..&sig=..) — the modern path; works
+  //     for `<img src>` and link clicks that can't carry an Authorization
+  //     header. The signed URL is minted at upload + on every chat-history
+  //     read so members always see fresh URLs.
+  //   - Bearer JWT in the Authorization header — kept as a fallback for
+  //     authenticated fetch() callers (extension points, future scripts).
+  //   - Backward-compat: ?url=<old-raw-R2-url> with valid Bearer; we
+  //     extract the key.
+  // The key MUST start with `chat/<teamId>/` — guards against cross-team
+  // key spoofing even when the signature is valid.
+  app.get("/teams/:id/chat/attachments", (c) => {
+    const teamId = c.req.param("id")
+    const rawKey = c.req.query("key")
+    const rawUrl = c.req.query("url")
+    const exp = Number(c.req.query("exp") ?? "")
+    const sig = c.req.query("sig") ?? ""
+
+    let key = rawKey ?? null
+    if (!key && rawUrl) key = extractChatAttachmentKey(rawUrl)
+    if (!key) return c.json({ error: "missing_key" }, 400)
+    const expectedPrefix = `chat/${teamId}/`
+    if (!key.startsWith(expectedPrefix)) return c.json({ error: "forbidden_key" }, 403)
+
+    let authorized = false
+    if (sig && Number.isFinite(exp)) {
+      authorized = verifyAttachmentSignature({ team_id: teamId, key, exp, sig })
+    }
+    if (!authorized) {
+      const sess = sessionGuard(c as never)
+      if (!sess) return c.json({ error: "unauthorized" }, 401)
+      if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+      authorized = true
+    }
+    if (!authorized) return c.json({ error: "unauthorized" }, 401)
+    if (!s3Config()) return c.json({ error: "uploads_not_configured" }, 503)
+    try {
+      const signedR2 = s3GetSigned(key, 300)
+      return c.redirect(signedR2, 302)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return c.json({ error: "sign_failed", detail: msg.slice(0, 200) }, 502)
     }
   })
 
@@ -1360,7 +1418,21 @@ export const LicenseRoutes = lazy(() => {
     if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
     const limit = Number(c.req.query("limit") ?? "50")
     const messages = listChatMessages(teamId, sess.sub, Number.isFinite(limit) ? limit : 50)
-    return c.json({ messages })
+    // Re-sign attachment URLs at read time so a stale URL stored in the DB
+    // (e.g. from before v2.29.1 when raw R2 URLs were persisted) is upgraded
+    // to a freshly signed proxy URL valid for the configured TTL.
+    const apiBase = process.env.LICENSE_API_PUBLIC_URL ?? "https://api.crimecode.cc"
+    const refreshed = messages.map((m) => {
+      if (!m.attachment_url) return m
+      const key = extractChatAttachmentKey(m.attachment_url)
+      if (!key || !key.startsWith(`chat/${teamId}/`)) return m
+      try {
+        return { ...m, attachment_url: signAttachmentUrl({ apiBase, team_id: teamId, key }) }
+      } catch {
+        return m
+      }
+    })
+    return c.json({ messages: refreshed })
   })
 
   // Lightweight typing indicator — emit-only, not persisted.

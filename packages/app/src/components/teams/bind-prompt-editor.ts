@@ -106,16 +106,45 @@ export function bindPromptEditor(
   let ignoreInput = false
 
   // ── LOCAL → Y.Text ──────────────────────────────────────────────────────
+  // Apply the minimal diff (common-prefix / common-suffix style) instead of
+  // wholesale delete+insert. Wholesale replacement obliterates concurrent
+  // peer edits inside the Y.Text — which is the exact scenario CRDT is
+  // supposed to handle. The 2-hole diff covers the dominant editing
+  // patterns in a prompt input (single keystroke insert, paste, delete);
+  // multipoint simultaneous edits in the same buffer would benefit from a
+  // proper Myers diff, but those are rare here.
   function onInput() {
     if (ignoreInput) return
-    // innerText includes line-break characters introduced by <br> and block
-    // elements; strip the trailing newline browsers append.
-    const text = (el.innerText ?? "").replace(/​/g, "").replace(/\n$/, "")
+    // Normalise CRLF (Windows browsers in some flows) to LF so the doc
+    // doesn't accumulate a stray \r per line on round-trip.
+    const text = (el.innerText ?? "")
+      .replace(/​/g, "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\n$/, "")
     const current = ytext.toString()
     if (text === current) return
+
+    // Common prefix.
+    let prefix = 0
+    const minLen = Math.min(current.length, text.length)
+    while (prefix < minLen && current.charCodeAt(prefix) === text.charCodeAt(prefix)) prefix++
+
+    // Common suffix (constrained so it doesn't overlap with the prefix).
+    let suffix = 0
+    const maxSuffix = minLen - prefix
+    while (
+      suffix < maxSuffix &&
+      current.charCodeAt(current.length - 1 - suffix) === text.charCodeAt(text.length - 1 - suffix)
+    )
+      suffix++
+
+    const deleteLen = current.length - prefix - suffix
+    const insertText = text.slice(prefix, text.length - suffix)
+
+    if (deleteLen === 0 && insertText.length === 0) return
     ytext.doc!.transact(() => {
-      ytext.delete(0, ytext.length)
-      ytext.insert(0, text)
+      if (deleteLen > 0) ytext.delete(prefix, deleteLen)
+      if (insertText) ytext.insert(prefix, insertText)
     }, LOCAL)
     publishCursor()
   }
