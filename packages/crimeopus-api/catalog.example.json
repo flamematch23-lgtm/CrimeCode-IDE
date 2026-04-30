@@ -1,0 +1,51 @@
+{
+  "_comment": "Public model id → upstream Ollama tag mapping. Only models listed here appear in /v1/models when this catalog is loaded. Hidden:true models are still callable by id but don't show up in the public listing.",
+
+  "crimeopus-default": {
+    "upstream": "crimeopus-default:latest",
+    "display": "CrimeOpus 4.7 Code Elite",
+    "description": "General-purpose flagship: code, reasoning, multilingual.",
+    "maxContext": 8192
+  },
+  "crimeopus-fast": {
+    "upstream": "crimeopus-fast:latest",
+    "display": "CrimeOpus 4.7 FAST",
+    "description": "IQ3_M quant — quick replies, lower precision."
+  },
+  "crimeopus-coder": {
+    "upstream": "crimeopus-coder:latest",
+    "display": "CrimeOpus 4.7 CODER",
+    "description": "Tuned for code generation and refactoring tasks.",
+    "systemPrefix": "You are CrimeOpus CODER, an expert software engineer. Prefer concise, idiomatic code. Always explain non-obvious decisions in 1-2 lines."
+  },
+  "crimeopus-think-low": {
+    "upstream": "crimeopus-think-low:latest",
+    "display": "CrimeOpus 4.7 Reasoning · Low",
+    "description": "Reasoning effort: low. Faster, cheaper."
+  },
+  "crimeopus-think-med": {
+    "upstream": "crimeopus-think-med:latest",
+    "display": "CrimeOpus 4.7 Reasoning · Medium"
+  },
+  "crimeopus-think-high": {
+    "upstream": "crimeopus-think-high:latest",
+    "display": "CrimeOpus 4.7 Reasoning · High",
+    "description": "Maximum reasoning effort. Higher latency, sharper conclusions.",
+    "maxContext": 16384
+  },
+  "crimeopus-research": {
+    "upstream": "crimeopus-research:latest",
+    "display": "CrimeOpus 4.7 RESEARCH"
+  },
+  "crimeopus-italian": {
+    "upstream": "crimeopus-italian:latest",
+    "display": "CrimeOpus 4.7 Italiano",
+    "description": "Italian-tuned dialect, formal/informal blend."
+  },
+
+  "crimeopus-embed": {
+    "upstream": "nomic-embed-text:latest",
+    "display": "CrimeOpus Embeddings",
+    "description": "768-d sentence embeddings (nomic-embed-text)."
+  }
+}

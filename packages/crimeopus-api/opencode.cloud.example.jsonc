@@ -1,0 +1,70 @@
+// Esempio di .opencode/opencode.jsonc per puntare al TUO server CrimeOpus.
+//
+// Da distribuire ai membri del team / utenti: gli basta:
+//   1. Salvare questo file in `.opencode/opencode.jsonc` del progetto
+//   2. Esportare la variabile CRIMEOPUS_API_KEY (chiave fornita dall'admin)
+//   3. Cambiare `baseURL` se il server gira su un altro dominio
+//
+// Funziona identico ad OpenAI / Anthropic dal punto di vista dell'IDE.
+
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "crimeopus/crimeopus-default",
+  "provider": {
+    "crimeopus": {
+      "name": "CrimeOpus Cloud",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.crimeopus.dev/v1",
+        "apiKey": "{env:CRIMEOPUS_API_KEY}"
+      },
+      "models": {
+        "crimeopus-default": {
+          "name": "CrimeOpus 4.7 Code Elite",
+          "type": "chat",
+          "limit": { "context": 8192, "output": 2048 }
+        },
+        "crimeopus-fast": {
+          "name": "CrimeOpus 4.7 FAST",
+          "type": "chat",
+          "limit": { "context": 8192, "output": 2048 }
+        },
+        "crimeopus-coder": {
+          "name": "CrimeOpus 4.7 CODER",
+          "type": "chat",
+          "limit": { "context": 16384, "output": 4096 }
+        },
+        "crimeopus-think-low": {
+          "name": "CrimeOpus 4.7 Reasoning Low",
+          "type": "chat",
+          "limit": { "context": 8192, "output": 2048 }
+        },
+        "crimeopus-think-med": {
+          "name": "CrimeOpus 4.7 Reasoning Medium",
+          "type": "chat",
+          "limit": { "context": 8192, "output": 4096 }
+        },
+        "crimeopus-think-high": {
+          "name": "CrimeOpus 4.7 Reasoning High",
+          "type": "chat",
+          "limit": { "context": 16384, "output": 8192 }
+        },
+        "crimeopus-research": {
+          "name": "CrimeOpus 4.7 RESEARCH",
+          "type": "chat",
+          "limit": { "context": 16384, "output": 4096 }
+        },
+        "crimeopus-italian": {
+          "name": "CrimeOpus 4.7 Italiano",
+          "type": "chat",
+          "limit": { "context": 8192, "output": 2048 }
+        },
+        "crimeopus-embed": {
+          "name": "CrimeOpus Embeddings",
+          "type": "embedding",
+          "limit": { "context": 8192, "output": 0 }
+        }
+      }
+    }
+  }
+}
