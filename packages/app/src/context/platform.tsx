@@ -9,6 +9,37 @@ type OpenFilePickerOptions = { title?: string; multiple?: boolean; accept?: stri
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type UpdateInfo = { updateAvailable: boolean; version?: string; notes?: string }
 
+/** Information about a Chrome instance discovered locally. Mirrors the
+ *  ConnectedBrowser shape exposed by the Electron preload. */
+export type ConnectedBrowserInfo = {
+  id: string
+  label: string
+  url: string
+  port: number
+}
+
+/** Status of the computer-use master toggle. The reason field explains why
+ *  activation was refused (or why the feature is unavailable). */
+export type ComputerUseStatus = {
+  enabled: boolean
+  reason?: "not-activated" | "platform-unsupported" | "permission-denied"
+}
+
+/** Status of the apps-restore feature. */
+export type AppsRestoreStatus = { enabled: boolean; pending: number }
+
+/** Optional platform-level Automation API. Only the desktop platform
+ *  implements this; on web the renderer hides the whole settings tab. */
+export type AutomationAPI = {
+  getBrowserAllowAll(): Promise<boolean>
+  setBrowserAllowAll(value: boolean): Promise<void>
+  listConnectedBrowsers(): Promise<ConnectedBrowserInfo[]>
+  getComputerUseStatus(): Promise<ComputerUseStatus>
+  setComputerUseEnabled(value: boolean): Promise<ComputerUseStatus>
+  getRestoreApps(): Promise<AppsRestoreStatus>
+  setRestoreApps(value: boolean): Promise<AppsRestoreStatus>
+}
+
 export type Platform = {
   /** Platform discriminator */
   platform: "web" | "desktop"
@@ -99,6 +130,10 @@ export type Platform = {
 
   /** Subscribe to update-ready event (desktop only, returns cleanup fn) */
   onUpdateReady?(cb: (info: { version: string; notes?: string }) => void): () => void
+
+  /** Automation panel API (desktop only). Renderer hides the tab when this
+   *  is undefined, e.g. on the web platform. */
+  automation?: AutomationAPI
 }
 
 export type DisplayBackend = "auto" | "wayland"
