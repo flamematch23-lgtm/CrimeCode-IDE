@@ -48,9 +48,11 @@ import DirectoryLayout from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
 import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
+import { SharedWorkspacePublisher } from "./components/teams/shared-workspace-publisher"
 
 const HomeRoute = lazy(() => import("@/pages/home"))
 const SecurityRoute = lazy(() => import("@/pages/security"))
+const BurpWorkspaceRoute = lazy(() => import("@/pages/burp-workspace"))
 const AccountRoute = lazy(() => import("@/pages/account"))
 const ReferralLandingRoute = lazy(() => import("@/pages/referral-landing"))
 const Session = lazy(() => import("@/pages/session"))
@@ -133,6 +135,12 @@ function RouterRoot(props: ParentProps<{ appChildren?: JSX.Element }>) {
       <Suspense fallback={<Loading />}>
         {props.appChildren}
         {props.children}
+        {/* Mounted inside the Router so it can call useLocation /
+            useNavigate. Auto-publishes the local workspace state to the
+            active team session and, when the local user is following a
+            teammate, navigates to the teammate's workspace whenever they
+            push a state update. Renders nothing visible. */}
+        <SharedWorkspacePublisher />
       </Suspense>
     </AppShellProviders>
   )
@@ -309,6 +317,7 @@ export function AppInterface(props: {
                 >
                   <Route path="/" component={HomeRoute} />
                   <Route path="/security" component={SecurityRoute} />
+                  <Route path="/security/burp" component={BurpWorkspaceRoute} />
                   <Route path="/account" component={AccountRoute} />
                   <Route path="/r/:code" component={ReferralLandingRoute} />
                   <Route path="/:dir" component={DirectoryLayout}>

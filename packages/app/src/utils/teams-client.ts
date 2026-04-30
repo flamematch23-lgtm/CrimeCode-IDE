@@ -73,9 +73,13 @@ export interface TeamEvent {
     | "team_renamed"
     | "team_deleted"
     | "cursor_moved"
+    | "chat_message"
+    | "chat_typing"
+    | "session_state"
   team_id?: string
   session_id?: string
   host?: string
+  host_customer_id?: string
   title?: string
   customer_id?: string
   role?: string
@@ -83,6 +87,22 @@ export interface TeamEvent {
   x?: number
   y?: number
   label?: string | null
+  // chat_message / chat_typing
+  message_id?: number
+  author_name?: string | null
+  text?: string
+  ts?: number
+  // session_state
+  state?: unknown
+}
+
+export interface TeamChatMessage {
+  id: number
+  team_id: string
+  customer_id: string
+  author_name: string | null
+  text: string
+  ts: number
 }
 
 export interface AccountSession {
@@ -224,6 +244,19 @@ export interface TeamsClient {
   transferOwnership(id: string, newOwnerCustomerId: string): Promise<{ team: TeamSummary }>
   /** Publish a cursor position for a live session. Fire-and-forget. */
   publishCursor(id: string, sid: string, x: number, y: number, label?: string): Promise<void>
+  /** Read the current shared workspace state of a session — used by
+   *  guests when they begin to follow a host so they hydrate immediately
+   *  instead of waiting for the next state push. */
+  getSession(
+    id: string,
+    sid: string,
+  ): Promise<{ state: unknown; host_customer_id: string; last_heartbeat_at?: number } | null>
+  /** List the most-recent chat messages for a team (oldest-first). */
+  listChat(id: string, limit?: number): Promise<{ messages: TeamChatMessage[] }>
+  /** Post a chat message. The server captures the author name. */
+  postChat(id: string, text: string): Promise<{ message: TeamChatMessage }>
+  /** Notify other members that the local user is typing. Fire-and-forget. */
+  postTyping(id: string): Promise<void>
   /** Open an SSE subscription. Returns an unsubscribe. */
   subscribe(id: string, onEvent: (e: TeamEvent) => void): () => void
 }
@@ -251,15 +284,62 @@ function desktopClient(): TeamsClient {
     heartbeatSession: (id, sid, state) => api().heartbeatSession(id, sid, state),
     endSession: (id, sid) => api().endSession(id, sid),
     transferOwnership: (id, newOwnerCustomerId) =>
-      window.api
+      typeof api().transferOwnership === "function"
         ? api().transferOwnership(id, newOwnerCustomerId)
         : webClient().transferOwnership(id, newOwnerCustomerId),
-    publishCursor: (id, sid, x, y, label) =>
-      window.api ? api().publishCursor(id, sid, x, y, label) : webClient().publishCursor(id, sid, x, y, label),
+    // Older preload bundles may not expose publishCursor — feature-detect
+    // and silently no-op (or fall back to web). Without this guard,
+    // mouse-move events throw "publishCursor is not a function" hundreds of
+    // times per second and crater the renderer.
+    publishCursor: (id, sid, x, y, label) => {
+      const teams = api()
+      if (typeof teams?.publishCursor === "function") {
+        return teams.publishCursor(id, sid, x, y, label)
+      }
+      // No IPC binding — fire-and-forget via the web client (which is also
+      // a no-op when there's no session). Wrapped in try so a missing
+      // session doesn't bubble up to the mouse-move handler.
+      try {
+        return webClient().publishCursor(id, sid, x, y, label)
+      } catch {
+        return Promise.resolve()
+      }
+    },
+    getSession: (id, sid) => {
+      const teams = api()
+      if (typeof teams?.getSession === "function") return teams.getSession(id, sid)
+      return webClient().getSession(id, sid)
+    },
+    listChat: (id, limit) => {
+      const teams = api()
+      if (typeof teams?.listChat === "function") return teams.listChat(id, limit)
+      return webClient().listChat(id, limit)
+    },
+    postChat: (id, text) => {
+      const teams = api()
+      if (typeof teams?.postChat === "function") return teams.postChat(id, text)
+      return webClient().postChat(id, text)
+    },
+    postTyping: (id) => {
+      const teams = api()
+      if (typeof teams?.postTyping === "function") return teams.postTyping(id)
+      try {
+        return webClient().postTyping(id)
+      } catch {
+        return Promise.resolve()
+      }
+    },
     subscribe: (id, onEvent) => {
-      // Desktop: EventSource works in renderer with the same origin, fall
-      // through to the web impl but resolve the token via IPC so the secret
-      // stays in the main process.
+      const teams = api()
+      // Prefer the IPC-bridged subscription so the JWT stays in the main
+      // process and we get automatic reconnect / backoff. Fall back to the
+      // web client (fetch-based SSE) for older preload bundles or when the
+      // current login is web-only.
+      if (typeof teams?.subscribe === "function") {
+        return teams.subscribe(id, (ev: unknown) => {
+          if (ev && typeof ev === "object") onEvent(ev as TeamEvent)
+        })
+      }
       return webClient().subscribe(id, onEvent)
     },
   }
@@ -374,6 +454,23 @@ function webClient(): TeamsClient {
         method: "POST",
         body: JSON.stringify({ x, y, label }),
       }).catch(() => undefined)
+    },
+    getSession: async (id, sid) => {
+      try {
+        return await json(`/license/teams/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sid)}`)
+      } catch {
+        return null
+      }
+    },
+    listChat: (id, limit) =>
+      json(`/license/teams/${encodeURIComponent(id)}/chat${limit ? "?limit=" + limit : ""}`),
+    postChat: (id, text) =>
+      json(`/license/teams/${encodeURIComponent(id)}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      }),
+    postTyping: async (id) => {
+      await apiFetch(`/license/teams/${encodeURIComponent(id)}/chat/typing`, { method: "POST" }).catch(() => undefined)
     },
     subscribe: (id, onEvent) => {
       const s = readWebSession()

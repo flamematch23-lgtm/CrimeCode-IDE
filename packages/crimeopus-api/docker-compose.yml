@@ -1,0 +1,65 @@
+version: "3.9"
+
+# CrimeOpus API + Ollama — full stack on a single host.
+#
+# Starts Ollama with a persistent volume + the API gateway with API-key auth
+# and a usage SQLite log. Models you `ollama pull` inside the container persist
+# across restarts.
+#
+# Quickstart:
+#   1. cp .env.example .env  (or just edit API_KEYS below)
+#   2. docker compose up -d
+#   3. docker compose exec ollama ollama pull crimeopus-default
+#   4. test:
+#        curl -H "Authorization: Bearer sk-yourkey" \
+#             http://localhost:8787/v1/models
+#
+# To expose publicly with TLS, put a Caddy / Traefik / nginx in front, or
+# use a Cloudflare Tunnel — see README.md.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: crimeopus-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    # Don't expose Ollama publicly — only the API gateway should be reachable.
+    expose:
+      - "11434"
+    # GPU support: uncomment if you have nvidia-container-toolkit installed.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  api:
+    build: .
+    container_name: crimeopus-api
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      PORT: 8787
+      BIND: 0.0.0.0
+      OLLAMA_URL: http://ollama:11434
+      # JSON object: {"sk-key": "human-label"} so logs show "alice" instead of
+      # the raw key. Or comma-separated: "sk-1,sk-2".
+      API_KEYS: ${API_KEYS:-sk-dev-please-change-me:dev}
+      RATE_LIMIT_RPM: ${RATE_LIMIT_RPM:-60}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-10}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      LOG_DB: /data/usage.db
+      CATALOG_PATH: /app/catalog.json
+    volumes:
+      - api-data:/data
+      - ./catalog.json:/app/catalog.json:ro
+    ports:
+      - "${API_PORT:-8787}:8787"
+
+volumes:
+  ollama-data:
+  api-data:

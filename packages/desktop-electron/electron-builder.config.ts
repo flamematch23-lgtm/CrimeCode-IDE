@@ -95,16 +95,29 @@ function getConfig() {
 
   switch (channel) {
     case "dev": {
+      // The dev channel ships GitHub auto-updates by default (the legacy
+      // "https://opencode-dev.local/updates" placeholder broke auto-update
+      // entirely — clients running the dev build would silently fail to
+      // discover new releases). Override with PUBLISH_URL env if you want
+      // to host your own private feed.
+      const useGeneric = !!process.env.PUBLISH_URL
       return {
         ...base,
         appId: "ai.opencode.desktop.dev",
         productName: "OpenCode Dev",
-        // Dev publish target (override with PUBLISH_URL env when serving updates).
-        publish: {
-          provider: "generic",
-          url: process.env.PUBLISH_URL || "https://opencode-dev.local/updates",
-          channel: "latest",
-        },
+        publish: useGeneric
+          ? {
+              provider: "generic",
+              url: process.env.PUBLISH_URL!,
+              channel: "latest",
+            }
+          : {
+              provider: "github",
+              owner: "samupae2300-star",
+              repo: "CrimeCode-IDE",
+              channel: "latest",
+              releaseType: "release",
+            },
         rpm: { packageName: "opencode-dev" },
       }
     }

@@ -64,6 +64,11 @@ import {
   renameTeam,
   setMemberRole,
   transferOwnership,
+  postChatMessage,
+  listChatMessages,
+  broadcastTyping,
+  getCustomerDisplay,
+  getSessionState,
 } from "../../license/teams"
 import { subscribeTeam } from "../../license/team-events"
 import { streamSSE } from "hono/streaming"
@@ -1027,6 +1032,57 @@ export const LicenseRoutes = lazy(() => {
       y,
       label: typeof body.label === "string" ? body.label.slice(0, 32) : null,
     })
+    return c.json({ ok: true })
+  })
+
+  // Read the current shared workspace state for a live session. Used by
+  // guests when they decide to "follow" a host — they hydrate from this
+  // before the next session_state event arrives.
+  app.get("/teams/:id/sessions/:sid", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const sid = c.req.param("sid")
+    const data = getSessionState(teamId, sid, sess.sub)
+    if (!data) return c.json({ error: "not_found" }, 404)
+    return c.json({ session_id: sid, ...data })
+  })
+
+  // ── Team chat ──────────────────────────────────────────────────
+  // Persistent chat: posts a message, prunes oldest beyond N=200 per team,
+  // emits a `chat_message` SSE event so all subscribers see it instantly.
+  app.post("/teams/:id/chat", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    const body = (await c.req.json().catch(() => ({}))) as { text?: string }
+    const text = typeof body.text === "string" ? body.text : ""
+    if (!text.trim()) return c.json({ error: "empty" }, 400)
+    const display = getCustomerDisplay(sess.sub)
+    const row = postChatMessage({ team_id: teamId, author: sess.sub, author_name: display, text })
+    if (!row) return c.json({ error: "rejected" }, 400)
+    return c.json({ message: row })
+  })
+
+  app.get("/teams/:id/chat", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    const limit = Number(c.req.query("limit") ?? "50")
+    const messages = listChatMessages(teamId, sess.sub, Number.isFinite(limit) ? limit : 50)
+    return c.json({ messages })
+  })
+
+  // Lightweight typing indicator — emit-only, not persisted.
+  app.post("/teams/:id/chat/typing", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    const display = getCustomerDisplay(sess.sub)
+    broadcastTyping({ team_id: teamId, author: sess.sub, author_name: display })
     return c.json({ ok: true })
   })
 

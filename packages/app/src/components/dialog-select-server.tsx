@@ -84,24 +84,50 @@ function useServerPreview() {
     const host = normalized.replace(/^https?:\/\//, "").split("/")[0]
     if (!host) return false
     if (host.includes("localhost") || host.startsWith("127.0.0.1")) return true
-    return host.includes(".") || host.includes(":")
+    // Real hostnames have a `.` (TLD) or a `:port`. We additionally guard
+    // against degenerate hosts like "ht:" / "wss:" by requiring at least one
+    // alphanumeric character after the punctuation.
+    if (/[a-z0-9]\.[a-z]/i.test(host)) return true
+    if (/:\d{1,5}$/.test(host)) return true
+    return false
   }
 
-  const previewStatus = async (
+  // Debounce + abort: each keystroke schedules a check; only the latest one
+  // wins. This single-handedly stops the flood of `http://h//…`,
+  // `http://ht//…`, `http://htt//…` etc. requests we used to fire while the
+  // user was still typing.
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let inflight: AbortController | null = null
+
+  const previewStatus = (
     value: string,
     username: string,
     password: string,
     setStatus: (value: boolean | undefined) => void,
   ) => {
     setStatus(undefined)
+    if (debounceTimer) clearTimeout(debounceTimer)
+    if (inflight) {
+      inflight.abort()
+      inflight = null
+    }
     if (!looksComplete(value)) return
     const normalized = normalizeServerUrl(value)
     if (!normalized) return
-    const http: ServerConnection.HttpBase = { url: normalized }
-    if (username) http.username = username
-    if (password) http.password = password
-    const result = await checkServerHealth(http)
-    setStatus(result.healthy)
+
+    debounceTimer = setTimeout(async () => {
+      const ctrl = new AbortController()
+      inflight = ctrl
+      try {
+        const http: ServerConnection.HttpBase = { url: normalized }
+        if (username) http.username = username
+        if (password) http.password = password
+        const result = await checkServerHealth(http, { signal: ctrl.signal })
+        if (!ctrl.signal.aborted) setStatus(result.healthy)
+      } catch {
+        // network errors / aborts → leave status undefined
+      }
+    }, 350)
   }
 
   return { previewStatus }

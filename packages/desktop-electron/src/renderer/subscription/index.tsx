@@ -4,7 +4,7 @@ import { AdminPanel } from "./admin-panel"
 import { AccountModal } from "./account-modal"
 import { TrialBanner } from "./trial-banner"
 import { recordProjectOpen, schedulePush } from "./sync-manager"
-import { LiveCursors, TeamPresenceBadge } from "../teams"
+import { LiveCursors, TeamPresenceBadge, TeamChatTrigger } from "../teams"
 import { writeWebSession } from "@opencode-ai/app/utils/teams-client"
 
 export function SubscriptionOverlay() {
@@ -55,6 +55,7 @@ export function SubscriptionOverlay() {
           only carries the smaller team-presence pill. */}
       <div data-component="workspace-dock">
         <TeamPresenceBadge />
+        <TeamChatTrigger />
       </div>
       <LiveCursors />
     </>

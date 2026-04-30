@@ -100,12 +100,18 @@ export function useCheckServerHealth() {
   const platform = usePlatform()
   const fetcher = platform.fetch ?? globalThis.fetch
 
-  return (http: ServerConnection.HttpBase) => {
+  return (http: ServerConnection.HttpBase, opts?: CheckServerHealthOptions) => {
+    // When the caller supplies its own AbortSignal we must NOT cache the
+    // result — the signal might fire mid-flight and poison the entry for
+    // any subsequent caller. Just run the check directly.
+    if (opts?.signal) {
+      return checkServerHealth(http, fetcher, opts)
+    }
     const key = cacheKey(http)
     const hit = healthCache.get(key)
     const now = Date.now()
     if (hit && hit.fetch === fetcher && (!hit.done || now - hit.at < cacheMs)) return hit.promise
-    const promise = checkServerHealth(http, fetcher).finally(() => {
+    const promise = checkServerHealth(http, fetcher, opts).finally(() => {
       const next = healthCache.get(key)
       if (!next || next.promise !== promise) return
       next.done = true

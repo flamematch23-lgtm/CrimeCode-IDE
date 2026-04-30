@@ -11,7 +11,54 @@ const HEALTH_POLL_INTERVAL_MS = 10_000
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
   if (!trimmed) return
-  const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`
+
+  // Map WebSocket schemes to HTTP — the health check is a regular HTTP GET.
+  // Any other unknown scheme is rejected (we only do http(s)). This prevents
+  // the previous bug where `wss://host` became `http://wss://host`, which
+  // browsers normalise to `http://wss//host/...` and blasts requests at a
+  // host literally called `wss`.
+  const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(trimmed)
+  let withProtocol: string
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase()
+    const rest = trimmed.slice(schemeMatch[0].length)
+    if (scheme === "http" || scheme === "https") withProtocol = `${scheme}://${rest}`
+    else if (scheme === "ws") withProtocol = `http://${rest}`
+    else if (scheme === "wss") withProtocol = `https://${rest}`
+    else return // unknown scheme — refuse so we don't fetch a malformed URL
+  } else {
+    // Bare schemes like "h", "ht", "htt", "http", "https" while the user is
+    // still typing — short-circuit so we don't fire fetches at hosts named
+    // "h" or "ht".
+    if (/^https?$/i.test(trimmed)) return
+    if (/^wss?$/i.test(trimmed)) return
+    if (trimmed.includes("//") && !/[.:]/.test(trimmed.split("//")[0] ?? "")) {
+      // Pasted "://something" or "//something" — wait for the host part to
+      // become valid before issuing requests.
+      return
+    }
+    withProtocol = `http://${trimmed}`
+  }
+
+  // Validate that the result parses to a real URL with a non-empty host.
+  // If it doesn't, abort: callers will treat a missing return value as
+  // "input not yet complete enough to fetch".
+  try {
+    const u = new URL(withProtocol)
+    if (!u.hostname) return
+    // Reject hostnames that contain stray slashes — these are scheme
+    // remnants the regex above may have failed to strip. We DO allow
+    // colons in hostnames to keep IPv6 working (`[::1]`, `[2001:…]`):
+    // the URL parser already rejects truly malformed colons before we
+    // get here, so any colon that survives is a legitimate IPv6 byte.
+    if (u.hostname.includes("/")) return
+    // Reject scheme-leftovers like `wss:` or `ws:` that the URL parser
+    // sometimes accepts as a "host" when followed by garbage. IPv6 is
+    // bracketed (`[...]`) so it never matches this guard.
+    if (!u.hostname.startsWith("[") && /[a-z]+:$/i.test(u.hostname)) return
+  } catch {
+    return
+  }
   return withProtocol.replace(/\/+$/, "")
 }
 

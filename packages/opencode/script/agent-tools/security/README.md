@@ -8,7 +8,7 @@ Single-file `bun` scripts that mirror the surfaces you'd reach for in
 
 | Tool | Burp Suite equivalent | Script |
 |---|---|---|
-| HTTP Intercept Proxy + History DB | Proxy / HTTP history / Match-and-Replace | [`http-proxy.ts`](http-proxy.ts) |
+| HTTP Intercept Proxy + History DB + Control REST API | Proxy / HTTP history / Match-and-Replace | [`http-proxy.ts`](http-proxy.ts) |
 | Repeater | Repeater | [`http-repeater.ts`](http-repeater.ts) |
 | Intruder (sniper / battering / pitchfork / clusterbomb) | Intruder | [`http-fuzzer.ts`](http-fuzzer.ts) |
 | Decoder + JWT decode/tamper/verify + smart-detect | Decoder / JWT Editor | [`crypto-decoder.ts`](crypto-decoder.ts) |
@@ -17,7 +17,15 @@ Single-file `bun` scripts that mirror the surfaces you'd reach for in
 | Scanner (passive + active) | Scanner | [`vuln-scanner.ts`](vuln-scanner.ts) |
 | Site map / Crawler | Site map / Target | [`site-crawler.ts`](site-crawler.ts) |
 | Hidden parameter discovery | Param Miner extension | [`param-miner.ts`](param-miner.ts) |
+| OOB callback HTTP/DNS server | Burp Collaborator | [`collaborator.ts`](collaborator.ts) |
+| CSRF Proof-of-Concept generator | Engagement Tools → CSRF PoC | [`csrf-poc.ts`](csrf-poc.ts) |
+| Directory / file brute-force (gobuster-style) | Engagement Tools → Content Discovery | [`content-discovery.ts`](content-discovery.ts) |
+| Authorization matrix (BOLA / IDOR / privesc) | Authorize / AuthMatrix extension | [`auth-matrix.ts`](auth-matrix.ts) |
+| Notes + findings store with Markdown report | Engagement Tools → Notes | [`engagement-notes.ts`](engagement-notes.ts) |
+| HTTP request smuggling probe | HTTP Request Smuggler extension | [`smuggler.ts`](smuggler.ts) |
+| Tag-based chained encode/decode/transform | Hackvertor extension | [`hackvertor.ts`](hackvertor.ts) |
 | **TUI dashboard** (Flows / Findings / Rules) | Burp's main window | [`dashboard.ts`](dashboard.ts) |
+| **GUI workspace** (Solid + REST control API) | Burp's main window | `packages/app/src/pages/burp-workspace.tsx` |
 | Shared lib (host gate, fingerprints, lib helpers) | — | [`_lib/common.ts`](_lib/common.ts) |
 
 All tools are reachable from the AI agent via the **`burp_toolkit`** tool
@@ -69,6 +77,43 @@ bun packages/opencode/script/agent-tools/security/dashboard.ts
 Three panels (`Flows / Findings / Rules`); cycle with `Tab`, navigate with
 `↑↓`, `enter` for detail, `i` to toggle interception, `/` to filter, `r`
 to refresh findings, `s` to snapshot, `?` for help.
+
+### 4. Or open the GUI workspace (Electron / web app)
+
+Start the proxy with the REST control API:
+
+```bash
+bun packages/opencode/script/agent-tools/security/http-proxy.ts \
+    start --intercept --api-port 8182
+```
+
+Then in the desktop app: **Toolkit Sicurezza → Burp Workspace**. You get
+four live tabs:
+
+- **Flussi**: full HTTP history with click-to-detail (request + response
+  headers, bodies, security-relevant fields)
+- **Intercept**: pending requests held by the proxy. Inoltra / droppa /
+  edita method+headers+body before forwarding
+- **Match&Replace**: regex rewrites stored in the same DB, toggle
+  enabled/disabled per-rule live
+- **Collabora con AI**: build a structured prompt that references the
+  selected flow / pending intercept and copy it straight into the agent
+  composer with `burp_toolkit` already wired.
+
+The workspace re-renders via SSE (`GET /events`) and falls back to 3 s
+polling if SSE is unavailable.
+
+### 5. Drive intercepts from the CLI / agent
+
+Even without the GUI you can resolve pending intercepts:
+
+```bash
+bun http-proxy.ts pending                          # list waiting
+bun http-proxy.ts intercept-action 17 forward
+bun http-proxy.ts intercept-action 17 drop
+bun http-proxy.ts intercept-action 17 edit \
+    --method POST --header 'Authorization: Bearer x' --body 'foo=bar'
+```
 
 ## Per-tool quickref
 
@@ -189,7 +234,8 @@ it like any other tool:
 ```
 
 `subtool` is one of:
-`proxy | repeater | intruder | decoder | comparer | sequencer | scanner | crawler | param-miner`.
+`proxy | repeater | intruder | decoder | comparer | sequencer | scanner | crawler | param-miner |
+collaborator | csrf-poc | content-discovery | auth-matrix | engagement-notes | smuggler | hackvertor`.
 
 The wrapper:
 - Resolves the script path relative to the repo root

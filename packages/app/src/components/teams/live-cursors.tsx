@@ -116,6 +116,22 @@ export function LiveCursors() {
     window.addEventListener("workspace-changed", onWsChange)
     window.addEventListener("team-session-changed", onWsChange)
 
+    // Defensive wrapper: even if the underlying transport throws SYNCHRONOUSLY
+    // (e.g. an older preload bundle that didn't expose publishCursor and we're
+    // running with a stale main-*.js cache), we must NOT let the exception
+    // escape the mousemove handler — the OS fires this at >100 Hz and a single
+    // throw spams the renderer with errors and freezes UI updates.
+    const safePublishCursor = (tid: string, sid: string, x: number, y: number) => {
+      try {
+        const result = client.publishCursor(tid, sid, x, y)
+        if (result && typeof (result as Promise<unknown>).then === "function") {
+          ;(result as Promise<unknown>).catch(() => undefined)
+        }
+      } catch {
+        // sync throw — ignore. The next packet will reflect the latest pos.
+      }
+    }
+
     const onMouseMove = (e: MouseEvent) => {
       const tid = teamId()
       const sid = sessionId()
@@ -129,7 +145,7 @@ export function LiveCursors() {
         lastPublish = now
         const { x, y } = pendingCoords
         pendingCoords = null
-        void client.publishCursor(tid, sid, x, y).catch(() => undefined)
+        safePublishCursor(tid, sid, x, y)
       } else if (!publishTimer) {
         publishTimer = setTimeout(() => {
           publishTimer = null
@@ -137,9 +153,7 @@ export function LiveCursors() {
           lastPublish = Date.now()
           const { x, y } = pendingCoords
           pendingCoords = null
-          void client
-            .publishCursor(teamId() ?? "", sessionId() ?? "", x, y)
-            .catch(() => undefined)
+          safePublishCursor(teamId() ?? "", sessionId() ?? "", x, y)
         }, 100 - since)
       }
     }

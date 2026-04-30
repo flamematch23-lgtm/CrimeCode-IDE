@@ -1,0 +1,78 @@
+{
+  "_comment": "Public model id → provider routes. Ogni modello pubblico può avere multipli provider come failover. Il primo healthy con slot libero vince. Spostare il PROPRIO PC dalla lista (o lasciarlo come ultimo fallback in dev) significa che gli utenti NON consumano la tua GPU.",
+
+  "_provider_setup": "Definisci i provider in env UPSTREAM_PROVIDERS (vedi .env.example). Esempio production: solo cloud (Together + Fireworks come fallback) + Whisper su faster-whisper-server cloud.",
+
+  "crimeopus-default": {
+    "display": "CrimeOpus 4.7 Code Elite",
+    "description": "General-purpose flagship: code, reasoning, multilingue.",
+    "providers": [
+      { "provider": "together",  "model": "Qwen/Qwen2.5-72B-Instruct-Turbo" },
+      { "provider": "fireworks", "model": "accounts/fireworks/models/qwen2p5-72b-instruct" },
+      { "provider": "openrouter","model": "qwen/qwen-2.5-72b-instruct" }
+    ]
+  },
+
+  "crimeopus-fast": {
+    "display": "CrimeOpus 4.7 FAST",
+    "description": "Latency-optimized via Groq LPU.",
+    "providers": [
+      { "provider": "groq",      "model": "llama-3.3-70b-versatile" },
+      { "provider": "together",  "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo" }
+    ]
+  },
+
+  "crimeopus-coder": {
+    "display": "CrimeOpus 4.7 CODER",
+    "description": "Tuned for code generation and refactoring.",
+    "systemPrefix": "Sei CrimeOpus CODER, un esperto sviluppatore software. Genera codice idiomatico, conciso e ben commentato. Spiega le decisioni non ovvie in 1-2 righe.",
+    "providers": [
+      { "provider": "together",  "model": "Qwen/Qwen2.5-Coder-32B-Instruct" },
+      { "provider": "fireworks", "model": "accounts/fireworks/models/qwen2p5-coder-32b-instruct" }
+    ]
+  },
+
+  "crimeopus-think-low": {
+    "display": "CrimeOpus 4.7 Reasoning · Low",
+    "providers": [
+      { "provider": "openrouter", "model": "deepseek/deepseek-r1-distill-llama-70b" }
+    ]
+  },
+
+  "crimeopus-think-high": {
+    "display": "CrimeOpus 4.7 Reasoning · High",
+    "description": "Maximum reasoning effort. Higher latency, sharper conclusions.",
+    "providers": [
+      { "provider": "openrouter", "model": "deepseek/deepseek-r1" },
+      { "provider": "together",   "model": "deepseek-ai/DeepSeek-R1" }
+    ]
+  },
+
+  "crimeopus-italian": {
+    "display": "CrimeOpus 4.7 Italiano",
+    "description": "Italian-tuned dialect, formal/informal blend.",
+    "systemPrefix": "Rispondi sempre in italiano fluente.",
+    "providers": [
+      { "provider": "openrouter", "model": "anthropic/claude-3.5-haiku" },
+      { "provider": "together",   "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo" }
+    ]
+  },
+
+  "crimeopus-embed": {
+    "display": "CrimeOpus Embeddings",
+    "description": "768-d sentence embeddings.",
+    "providers": [
+      { "provider": "together", "model": "BAAI/bge-large-en-v1.5" },
+      { "provider": "openrouter", "model": "openai/text-embedding-3-small" }
+    ]
+  },
+
+  "_local_dev_only_legacy": {
+    "_": "Esempio: per dev locale puoi mantenere ollama come fallback. Sposta in fondo alla lista provider — viene scelto solo se gli altri sono saturi/down.",
+    "display": "Local Dev Test",
+    "hidden": true,
+    "providers": [
+      { "provider": "local-ollama", "model": "qwen2.5-coder:7b" }
+    ]
+  }
+}

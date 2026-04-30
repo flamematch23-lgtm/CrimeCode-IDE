@@ -6,6 +6,8 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 
 import type { InitStep, ServerReadyData, SqliteMigrationProgress, TitlebarTheme, WslConfig } from "../preload/types"
 import { browserService } from "./browser-service"
+import { computerUseService } from "./computer-use-service"
+import { appsRestoreService } from "./apps-restore-service"
 import { getStore } from "./store"
 import { windowStateService } from "./window-state-service"
 import { setTitlebar, snapWindow } from "./windows"
@@ -332,6 +334,80 @@ export function registerIpcHandlers(deps: Deps) {
     event.sender.send("browser-preview-navigate", url)
   })
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Automation panel — browser allow-all, computer-use, restore-apps.
+  // The renderer's settings page reads/writes through this small surface.
+  // Persistence is handled here (electron-store) so the toggles survive
+  // across reboots; the runtime services keep their own in-memory flags.
+  // ─────────────────────────────────────────────────────────────────────
+  const AUTOMATION_KEYS = {
+    browserAllowAll: "automation.browserAllowAll",
+    computerUse: "automation.computerUseEnabled",
+    restoreApps: "automation.restoreAppsOnExit",
+  } as const
+
+  // Hydrate the runtime services from persisted values on startup so the
+  // first read returns the user's last choice — not the constructor default.
+  try {
+    const settings = getStore()
+    const persistedAllowAll = settings.get(AUTOMATION_KEYS.browserAllowAll)
+    if (persistedAllowAll === true) browserService.setAllowAll(true)
+
+    const persistedRestore = settings.get(AUTOMATION_KEYS.restoreApps)
+    // default to true if the key has never been set
+    appsRestoreService.setEnabled(persistedRestore === false ? false : true)
+
+    // computer-use is intentionally NOT auto-activated — re-asking the user
+    // every session is a deliberate safety choice for an experimental feature
+  } catch {
+    /* electron-store unavailable in tests */
+  }
+
+  ipcMain.handle("automation-get-browser-allow-all", () => {
+    return browserService.isAllowAll()
+  })
+  ipcMain.handle("automation-set-browser-allow-all", (_event: IpcMainInvokeEvent, value: boolean) => {
+    const v = !!value
+    browserService.setAllowAll(v)
+    try {
+      getStore().set(AUTOMATION_KEYS.browserAllowAll, v)
+    } catch {
+      /* ignore — runtime flag is still applied for this session */
+    }
+  })
+
+  ipcMain.handle("automation-list-connected-browsers", async () => {
+    return browserService.listConnectedBrowsers()
+  })
+
+  ipcMain.handle("automation-get-computer-use", () => {
+    return computerUseService.status()
+  })
+  ipcMain.handle("automation-set-computer-use", async (_event: IpcMainInvokeEvent, value: boolean) => {
+    const status = await computerUseService.setEnabled(!!value)
+    // Only persist when the OS actually allowed it; otherwise the next boot
+    // would silently re-trigger the (failed) activation flow.
+    try {
+      getStore().set(AUTOMATION_KEYS.computerUse, status.enabled)
+    } catch {
+      /* ignore */
+    }
+    return status
+  })
+
+  ipcMain.handle("automation-get-restore-apps", () => {
+    return appsRestoreService.status()
+  })
+  ipcMain.handle("automation-set-restore-apps", (_event: IpcMainInvokeEvent, value: boolean) => {
+    const status = appsRestoreService.setEnabled(!!value)
+    try {
+      getStore().set(AUTOMATION_KEYS.restoreApps, status.enabled)
+    } catch {
+      /* ignore */
+    }
+    return status
+  })
+
   // Window management IPC handlers
   ipcMain.handle("window-minimize", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -581,6 +657,281 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("teams-end-session", (_e, teamId: string, sid: string) =>
     teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" }),
   )
+
+  // Live cursor — fire-and-forget POST. Errors are swallowed so a single
+  // network blip doesn't take the renderer down (this fires at ~10 Hz).
+  ipcMain.handle("teams-publish-cursor", async (_e, teamId: string, sid: string, x: number, y: number, label?: string) => {
+    try {
+      await teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}/cursor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y, label }),
+      })
+    } catch {
+      // ignore — the next packet will reflect the latest position anyway
+    }
+  })
+
+  ipcMain.handle("teams-transfer-ownership", (_e, teamId: string, newOwnerCustomerId: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/transfer-ownership`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_owner_customer_id: newOwnerCustomerId }),
+    }),
+  )
+
+  // ── Burp proxy lifecycle ──
+  // We track a single child process per main, restart-on-demand via the
+  // workspace UI. Spawned with the bundled Bun runtime + the http-proxy.ts
+  // script that ships inside the asar.unpacked tree (electron-builder is
+  // configured to keep .ts scripts unpacked so Bun can read them).
+  let burpProxyChild: import("node:child_process").ChildProcess | null = null
+  let burpProxyPort = 0
+
+  const findBurpScript = (): string | null => {
+    // Resolution order:
+    //   1. Repo path during dev (parents of __dirname)
+    //   2. asar.unpacked layout in production
+    const fs = require("node:fs") as typeof import("node:fs")
+    const path = require("node:path") as typeof import("node:path")
+    const candidates = [
+      path.join(__dirname, "..", "..", "..", "opencode", "script", "agent-tools", "security", "http-proxy.ts"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "out", "main", "http-proxy.ts"),
+      path.join(__dirname, "..", "..", "out", "main", "http-proxy.ts"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "packages", "opencode", "script", "agent-tools", "security", "http-proxy.ts"),
+    ]
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c
+      } catch {
+        /* ignore */
+      }
+    }
+    return null
+  }
+
+  const findBunBin = (): string | null => {
+    const fs = require("node:fs") as typeof import("node:fs")
+    const path = require("node:path") as typeof import("node:path")
+    // Prefer the bundled Bun that ships next to electron's resources.
+    const candidates = [
+      path.join(process.resourcesPath ?? "", "bun.exe"),
+      path.join(process.resourcesPath ?? "", "bun"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "bun.exe"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "bun"),
+    ]
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c
+      } catch {
+        /* ignore */
+      }
+    }
+    // Fall back to whatever 'bun' is on PATH (works in dev mode).
+    return "bun"
+  }
+
+  const checkProxyHealth = async (port: number): Promise<boolean> => {
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 1500)
+      const r = await fetch(`http://127.0.0.1:${port}/health`, { signal: ctrl.signal })
+      clearTimeout(t)
+      return r.ok
+    } catch {
+      return false
+    }
+  }
+
+  ipcMain.handle("proxy-start-burp", async (_e, port: number) => {
+    if (burpProxyChild && !burpProxyChild.killed) {
+      // Already running. If it's the same port we're done; if different,
+      // tell the caller so they can stop+restart explicitly.
+      if (burpProxyPort === port) return { ok: true, pid: burpProxyChild.pid }
+      return { ok: false, error: `proxy già in esecuzione su porta ${burpProxyPort}` }
+    }
+    const script = findBurpScript()
+    if (!script) {
+      return {
+        ok: false,
+        error:
+          "Script http-proxy.ts non trovato nel pacchetto installato. Avvia manualmente con il comando indicato.",
+      }
+    }
+    const bun = findBunBin()
+    if (!bun) {
+      return { ok: false, error: "Runtime Bun non disponibile per spawnare il proxy." }
+    }
+    const { spawn } = require("node:child_process") as typeof import("node:child_process")
+    try {
+      const child = spawn(bun, [script, "start", "--intercept", "--api-port", String(port)], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: false,
+      })
+      burpProxyChild = child
+      burpProxyPort = port
+      child.on("exit", () => {
+        if (burpProxyChild === child) {
+          burpProxyChild = null
+          burpProxyPort = 0
+        }
+      })
+      child.on("error", () => {
+        if (burpProxyChild === child) {
+          burpProxyChild = null
+          burpProxyPort = 0
+        }
+      })
+      // Wait up to 5 s for the API to be ready
+      const startAt = Date.now()
+      while (Date.now() - startAt < 5000) {
+        await new Promise((r) => setTimeout(r, 250))
+        if (await checkProxyHealth(port)) {
+          return { ok: true, pid: child.pid ?? undefined }
+        }
+      }
+      return { ok: false, error: "Il proxy non risponde su /health entro 5 s." }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle("proxy-stop-burp", async () => {
+    if (burpProxyChild && !burpProxyChild.killed) {
+      try {
+        burpProxyChild.kill("SIGTERM")
+      } catch {
+        /* ignore */
+      }
+      burpProxyChild = null
+      burpProxyPort = 0
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle("proxy-status-burp", () => ({
+    running: !!burpProxyChild && !burpProxyChild.killed,
+    port: burpProxyPort || undefined,
+    pid: burpProxyChild?.pid,
+  }))
+
+  // ── Shared workspace state ──
+  ipcMain.handle("teams-get-session", async (_e, teamId: string, sid: string) => {
+    try {
+      return await teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sid)}`)
+    } catch {
+      return null
+    }
+  })
+
+  // ── Team chat ──
+  ipcMain.handle("teams-list-chat", (_e, teamId: string, limit?: number) =>
+    teamJson(
+      `/license/teams/${encodeURIComponent(teamId)}/chat${limit ? "?limit=" + Number(limit) : ""}`,
+    ),
+  )
+  ipcMain.handle("teams-post-chat", (_e, teamId: string, text: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  )
+  ipcMain.handle("teams-post-typing", async (_e, teamId: string) => {
+    try {
+      await teamJson(`/license/teams/${encodeURIComponent(teamId)}/chat/typing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+    } catch {
+      // typing indicators are best-effort — never throw to the renderer
+    }
+  })
+
+  // SSE event bridge: open a fetch ReadableStream against
+  // /license/teams/:id/events-stream, parse "data:" frames, forward each one
+  // to the renderer over IPC. The renderer hands us a unique channel name
+  // and we tear down on `teams-unsubscribe`.
+  const teamSubscribers = new Map<string, AbortController>()
+  ipcMain.handle("teams-subscribe", async (event: IpcMainInvokeEvent, teamId: string, channel: string) => {
+    if (teamSubscribers.has(channel)) return // already subscribed
+    const ctrl = new AbortController()
+    teamSubscribers.set(channel, ctrl)
+    const send = (payload: unknown) => {
+      try {
+        if (event.sender.isDestroyed()) {
+          ctrl.abort()
+          teamSubscribers.delete(channel)
+          return
+        }
+        event.sender.send(channel, payload)
+      } catch {
+        /* renderer gone */
+      }
+    }
+
+    ;(async () => {
+      // Reconnect with capped exponential backoff while the channel is open.
+      let backoff = 1000
+      while (!ctrl.signal.aborted) {
+        try {
+          const r = await authService.fetch(`/license/teams/${encodeURIComponent(teamId)}/events-stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+            body: "{}",
+            signal: ctrl.signal,
+          } as RequestInit)
+          if (!r.ok || !r.body) {
+            throw new Error(`stream HTTP ${r.status}`)
+          }
+          backoff = 1000
+          const reader = r.body.getReader()
+          const decoder = new TextDecoder("utf-8")
+          let buf = ""
+          while (!ctrl.signal.aborted) {
+            const { value, done } = await reader.read()
+            if (done) break
+            buf += decoder.decode(value, { stream: true })
+            // SSE frames are separated by a blank line
+            let idx: number
+            while ((idx = buf.indexOf("\n\n")) >= 0) {
+              const frame = buf.slice(0, idx)
+              buf = buf.slice(idx + 2)
+              let evtName = "message"
+              let dataLines: string[] = []
+              for (const line of frame.split("\n")) {
+                if (line.startsWith(":")) continue // comment/heartbeat
+                if (line.startsWith("event:")) evtName = line.slice(6).trim()
+                else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim())
+              }
+              if (dataLines.length === 0) continue
+              if (evtName === "ping" || evtName === "hello") continue
+              try {
+                const parsed = JSON.parse(dataLines.join("\n"))
+                send(parsed)
+              } catch {
+                /* ignore malformed */
+              }
+            }
+          }
+        } catch (err) {
+          if (ctrl.signal.aborted) break
+          // Network/auth error — back off and reconnect
+          await new Promise((res) => setTimeout(res, backoff))
+          backoff = Math.min(backoff * 2, 30_000)
+        }
+      }
+    })()
+  })
+
+  ipcMain.handle("teams-unsubscribe", (_e, _teamId: string, channel: string) => {
+    const ctrl = teamSubscribers.get(channel)
+    if (ctrl) {
+      ctrl.abort()
+      teamSubscribers.delete(channel)
+    }
+  })
 
   // ── Project: create new (folder) ──
   ipcMain.handle("project-create", async (event: IpcMainInvokeEvent) => {

@@ -575,7 +575,12 @@ export default function Security() {
               </p>
             </div>
           </div>
-          <Button onClick={() => navigate("/")}>Apri Progetto</Button>
+          <div class="flex gap-2">
+            <Button variant="secondary" onClick={() => navigate("/security/burp")}>
+              Burp Workspace
+            </Button>
+            <Button onClick={() => navigate("/")}>Apri Progetto</Button>
+          </div>
         </div>
         {/* Disclaimer */}
         <div class="mb-6 p-3 rounded border border-surface-warning bg-surface-warning/20">
@@ -588,6 +593,61 @@ export default function Security() {
             </div>
           </div>
         </div>
+        {/* Burp Workspace card */}
+        <section class="mb-8">
+          <div class="rounded border border-icon-warning-base/40 bg-surface-base overflow-hidden">
+            <div class="flex flex-col md:flex-row gap-4 p-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <Icon name="code-lines" class="text-icon-warning-base" />
+                  <h2 class="text-14-semibold text-text-strong">Burp Workspace — Proxy MITM live</h2>
+                </div>
+                <p class="text-12-regular text-text-weak mb-3">
+                  Apri il workspace interattivo per ispezionare il traffico HTTP/HTTPS in tempo reale, intercettare e
+                  modificare richieste prima dell'inoltro, gestire regole match-and-replace, e collaborare con
+                  l'agente AI passandogli i flussi catturati come contesto.
+                </p>
+                <div class="text-11-regular text-text-weak space-y-1">
+                  <div>
+                    1) Avvia il proxy + Control API:{" "}
+                    <code class="bg-surface-weak px-1 rounded">
+                      bun packages/opencode/script/agent-tools/security/http-proxy.ts start --intercept --api-port 8182
+                    </code>
+                  </div>
+                  <div>
+                    2) Configura il browser/sistema su <code class="bg-surface-weak px-1 rounded">127.0.0.1:8181</code>{" "}
+                    e fida il CA generato (
+                    <code class="bg-surface-weak px-1 rounded">http-proxy.ts ca-export ~/cc-ca.pem</code>).
+                  </div>
+                  <div>3) Apri Burp Workspace qui sopra → tab Flussi / Intercept / Rules / AI.</div>
+                </div>
+              </div>
+              <div class="flex md:flex-col gap-2 md:w-48">
+                <Button class="flex-1" onClick={() => navigate("/security/burp")}>
+                  Apri Workspace
+                </Button>
+                <Button
+                  class="flex-1"
+                  variant="secondary"
+                  onClick={() =>
+                    copy(
+                      "Avvia il MITM proxy: bun packages/opencode/script/agent-tools/security/http-proxy.ts start --intercept --api-port 8182. Poi configurami browser+CA, e ricordami di catturare 5 flussi per la baseline.",
+                      "burp-bootstrap",
+                    )
+                  }
+                >
+                  {copied() === "burp-bootstrap" ? "Prompt copiato" : "Prompt setup"}
+                </Button>
+              </div>
+            </div>
+            <div class="px-4 py-2 bg-surface-weak/40 text-11-regular text-text-weak">
+              16 strumenti CLI · proxy · repeater · intruder · scanner · crawler · param-miner · decoder · comparer ·
+              sequencer · collaborator · csrf-poc · content-discovery · auth-matrix · engagement-notes · smuggler ·
+              hackvertor
+            </div>
+          </div>
+        </section>
+
         {/* Quick Engagements */}
         <section class="mb-8">
           <h2 class="text-14-semibold text-text-strong mb-3">Engagement Rapidi</h2>

@@ -22,6 +22,37 @@ export type ContextMenuItem = {
   enabled?: boolean
 }
 
+/** Information about a Chrome instance discovered locally via the DevTools
+ *  Protocol on a debug port. The renderer uses this to render the
+ *  "Browser connessi" list in the Automation settings page. */
+export type ConnectedBrowser = {
+  /** DevTools id, used for re-connecting to the same target. */
+  id: string
+  /** User-visible label (page title or "Chrome :9222" fallback). */
+  label: string
+  /** Last URL the page was on, for display only. */
+  url: string
+  /** Debug port the instance was found on. */
+  port: number
+}
+
+/** Snapshot of what computer-use exposes to the renderer. Mirrors the
+ *  master toggle in settings; the main process is the source of truth and
+ *  can deny activation if the OS does not permit it (Wayland/sandbox). */
+export type ComputerUseStatus = {
+  /** Whether the toggle has been activated and the OS allows it. */
+  enabled: boolean
+  /** Why the feature is unavailable, if `enabled === false`. */
+  reason?: "not-activated" | "platform-unsupported" | "permission-denied"
+}
+
+/** Snapshot of the apps-restore service. Used by the settings UI to display
+ *  whether there are pending hidden apps that will be restored on exit. */
+export type AppsRestoreStatus = {
+  enabled: boolean
+  pending: number
+}
+
 export type ProInterval = "monthly" | "annual" | "lifetime"
 export type LicenseStatus = "free" | "trial" | "trial_expired" | "active" | "expired" | "revoked"
 
@@ -175,6 +206,15 @@ export type ElectronAPI = {
   project: {
     readonly create: () => Promise<{ directory: string } | null>
   }
+  proxy: {
+    /** Start the local Burp-style MITM proxy + REST API as a child process.
+     *  Resolves once the API is reachable on /health (~1-3 s) or returns an error. */
+    readonly startBurp: (port: number) => Promise<{ ok: boolean; error?: string; pid?: number }>
+    /** Stop the running proxy child process if any. */
+    readonly stopBurp: () => Promise<{ ok: boolean }>
+    /** Current proxy status: { running, port, pid } */
+    readonly statusBurp: () => Promise<{ running: boolean; port?: number; pid?: number }>
+  }
   teams: {
     readonly list: () => Promise<{ teams: Array<TeamSummary> }>
     readonly create: (name: string) => Promise<{ team: TeamSummary }>
@@ -189,6 +229,45 @@ export type ElectronAPI = {
     readonly publishSession: (id: string, title: string, state: unknown) => Promise<TeamLiveSession>
     readonly heartbeatSession: (id: string, sid: string, state: unknown) => Promise<TeamLiveSession | null>
     readonly endSession: (id: string, sid: string) => Promise<{ ok: true }>
+    /** Publish a cursor position for a live session. Fire-and-forget. */
+    readonly publishCursor: (id: string, sid: string, x: number, y: number, label?: string) => Promise<void>
+    /** Transfer ownership of the team to another member (owner-only). */
+    readonly transferOwnership: (id: string, newOwnerCustomerId: string) => Promise<{ team: TeamSummary }>
+    /** Subscribe to a team's SSE event stream. Returns an unsubscribe fn. */
+    readonly subscribe: (id: string, onEvent: (e: unknown) => void) => () => void
+    /** Snapshot of a team session's shared workspace state. */
+    readonly getSession: (
+      id: string,
+      sid: string,
+    ) => Promise<{ state: unknown; host_customer_id: string; last_heartbeat_at?: number } | null>
+    /** Most-recent chat messages for a team (oldest-first). */
+    readonly listChat: (
+      id: string,
+      limit?: number,
+    ) => Promise<{
+      messages: Array<{
+        id: number
+        team_id: string
+        customer_id: string
+        author_name: string | null
+        text: string
+        ts: number
+      }>
+    }>
+    readonly postChat: (
+      id: string,
+      text: string,
+    ) => Promise<{
+      message: {
+        id: number
+        team_id: string
+        customer_id: string
+        author_name: string | null
+        text: string
+        ts: number
+      }
+    }>
+    readonly postTyping: (id: string) => Promise<void>
   }
 
   // Enhancement 3: Native context menus
@@ -218,6 +297,24 @@ export type ElectronAPI = {
   onBrowserScreenshot: (cb: (screenshot: string | null) => void) => () => void
   browserPreviewNavigate: (url: string) => Promise<void>
   onBrowserPreviewNavigate: (cb: (url: string) => void) => () => void
+
+  // ─── Automation panel (browser allow-all, computer-use, restore-apps) ───
+  automation: {
+    /** Read-only: whether browser actions are allowed without per-action prompts. */
+    readonly getBrowserAllowAll: () => Promise<boolean>
+    /** Persist the toggle and signal the browser-service to skip permission gates. */
+    readonly setBrowserAllowAll: (value: boolean) => Promise<void>
+    /** Discover Chrome/Edge instances running with --remote-debugging-port. */
+    readonly listConnectedBrowsers: () => Promise<ConnectedBrowser[]>
+    /** Read computer-use master toggle + reason if disabled. */
+    readonly getComputerUseStatus: () => Promise<ComputerUseStatus>
+    /** Activate computer-use; resolves with the new status (may stay disabled). */
+    readonly setComputerUseEnabled: (value: boolean) => Promise<ComputerUseStatus>
+    /** Read whether the renderer should restore hidden apps on Claude exit. */
+    readonly getRestoreApps: () => Promise<AppsRestoreStatus>
+    /** Persist the restore-apps toggle. */
+    readonly setRestoreApps: (value: boolean) => Promise<AppsRestoreStatus>
+  }
 
   // Window management
   windowMinimize: () => Promise<void>

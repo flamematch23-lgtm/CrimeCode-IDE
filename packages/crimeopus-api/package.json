@@ -1,0 +1,25 @@
+{
+  "name": "@opencode-ai/crimeopus-api",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Self-hosted OpenAI-compatible API server: chat / embeddings / Whisper bridging, JWT + API-key auth, monthly quotas, /admin dashboard, webhooks, and an idempotent HuggingFace→Ollama installer.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outfile=dist/server.js",
+    "compile": "bun build src/index.ts --compile --outfile=dist/crimeopus-api",
+    "install-models": "bun run scripts/install-models.ts",
+    "issue-jwt": "bun run scripts/issue-jwt.ts",
+    "setup": "bun run scripts/setup.ts",
+    "provision:hetzner": "bun run scripts/provision-hetzner.ts"
+  },
+  "dependencies": {
+    "hono": "^4"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  },
+  "license": "MIT"
+}

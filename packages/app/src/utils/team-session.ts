@@ -138,6 +138,144 @@ export function getActiveTeamSession(): { teamId: string; sessionId: string } | 
   return { teamId: activeTeamId, sessionId: activeSessionId }
 }
 
+// ─── Shared workspace state ──────────────────────────────────────────────
+
+/**
+ * Canonical shape of the JSON blob a host publishes for the rest of the
+ * team to mirror. Anything outside this list is allowed but ignored by
+ * the standard UI — extending it is fine, just keep `version` so old
+ * guests degrade gracefully.
+ *
+ * The point of having a contract here is so that a future session
+ * "follower" can replay the same workspace deterministically (open the
+ * project, attach to the same OpenCode session, scroll to the same
+ * file) without ad-hoc keys.
+ */
+export interface SharedWorkspaceState {
+  version: 1
+  /** absolute path to the project root the host has open */
+  project_path?: string
+  /** the OpenCode server the host is talking to (so guests can attach) */
+  server_url?: string
+  /** if the server is HTTP-Basic, transmit the username (NEVER the
+   * password — the user must already have it cached locally). */
+  server_username?: string
+  /** the OpenCode session id the host is currently inside */
+  opencode_session_id?: string
+  /** workspace path of the file the host is viewing (relative to project_path) */
+  active_file?: string
+  /** small "what am I looking at" caption for the UI */
+  title?: string
+  /** epoch ms — set by the publisher; used to ignore stale events */
+  ts?: number
+}
+
+const FOLLOW_KEY = "client.team-following-customer"
+let pushDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let pendingState: SharedWorkspaceState | null = null
+
+/**
+ * Publish the local workspace state up to the active team session so
+ * other members can mirror what we're looking at. Coalesced over a
+ * 250 ms window — call this on every "interesting" event (project open,
+ * session switch, file change, scroll) and the network pressure stays
+ * sane.
+ *
+ * Only the host of the active session can push state; if we're a guest
+ * (or no session is active) the call is a no-op.
+ */
+export function pushSharedState(state: SharedWorkspaceState): void {
+  if (!activeTeamId || !activeSessionId) return
+  pendingState = { ...state, version: 1, ts: Date.now() }
+  if (pushDebounceTimer) clearTimeout(pushDebounceTimer)
+  pushDebounceTimer = setTimeout(() => {
+    pushDebounceTimer = null
+    const out = pendingState
+    pendingState = null
+    if (!out || !activeTeamId || !activeSessionId) return
+    void getTeamsClient()
+      .heartbeatSession(activeTeamId, activeSessionId, out)
+      .catch(() => undefined)
+  }, 250)
+}
+
+/** Return the customer_id the local user is currently following (or null). */
+export function getFollowedCustomer(): string | null {
+  try {
+    return localStorage.getItem(FOLLOW_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Mark `customerId` as the member we want to mirror. Pass null to stop
+ * following. Fires a `team-following-changed` window event so panels can
+ * react without polling.
+ */
+export function setFollowedCustomer(customerId: string | null): void {
+  try {
+    if (customerId) localStorage.setItem(FOLLOW_KEY, customerId)
+    else localStorage.removeItem(FOLLOW_KEY)
+  } catch {
+    /* private mode — non fatal */
+  }
+  window.dispatchEvent(new CustomEvent("team-following-changed", { detail: customerId }))
+}
+
+/**
+ * Fetch the most recent shared state for a session — used by guests on
+ * first attach so they don't have to wait for the next push to know
+ * what the host is currently viewing.
+ */
+export async function fetchSharedState(
+  teamId: string,
+  sessionId: string,
+): Promise<{ state: SharedWorkspaceState | null; host_customer_id: string } | null> {
+  const client = getTeamsClient()
+  const fn = (client as unknown as { getSession?: typeof getSession }).getSession ?? getSession
+  return fn(teamId, sessionId).catch(() => null)
+}
+
+async function getSession(
+  teamId: string,
+  sessionId: string,
+): Promise<{ state: SharedWorkspaceState | null; host_customer_id: string } | null> {
+  // Routed through the desktop IPC bridge if available, web fetch otherwise.
+  const isDesktop = typeof window !== "undefined" && typeof (window as unknown as { api?: { teams?: { getSession?: unknown } } }).api?.teams?.getSession === "function"
+  if (isDesktop) {
+    return (window as unknown as {
+      api: {
+        teams: {
+          getSession: (
+            id: string,
+            sid: string,
+          ) => Promise<{ state: unknown; host_customer_id: string } | null>
+        }
+      }
+    }).api.teams
+      .getSession(teamId, sessionId)
+      .then((r) => (r ? { state: (r.state as SharedWorkspaceState | null) ?? null, host_customer_id: r.host_customer_id } : null))
+      .catch(() => null)
+  }
+  const headers: Record<string, string> = {}
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem("crimecode.session") : null
+    if (raw) {
+      const parsed = JSON.parse(raw) as { token?: string }
+      if (parsed.token) headers.Authorization = `Bearer ${parsed.token}`
+    }
+  } catch {
+    /* private mode or corrupt JSON — fall through with empty headers */
+  }
+  const session = await fetch(
+    `https://api.crimecode.cc/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sessionId)}`,
+    { headers },
+  ).then((r) => (r.ok ? r.json() : null))
+  if (!session) return null
+  return { state: (session.state as SharedWorkspaceState | null) ?? null, host_customer_id: session.host_customer_id }
+}
+
 /**
  * Hydrate this module from localStorage on app boot. Called once from
  * the app entry so a page reload re-attaches to the same session and

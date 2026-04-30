@@ -1,56 +1,100 @@
 Run any tool in the local Burp Suite-style Security Toolkit. The toolkit
 mirrors what you'd reach for inside Burp Suite Pro:
 
-- proxy        : start/control the local MITM proxy, list flows, send-to-repeater
-- repeater     : send / replay HTTP requests, parse curl
-- intruder     : payload-driven fuzzer (sniper / battering / pitchfork / clusterbomb)
-- decoder      : encode / decode / smart-detect / JWT decode
-- comparer     : diff two requests/responses (line, word, byte, JSON, headers)
-- sequencer    : analyse token randomness (Shannon, FIPS-loose, structural)
-- scanner      : passive + active vulnerability scanning
-- crawler      : site map + parameter / form discovery
-- param-miner  : hidden query/header/cookie/body parameter discovery
+Core (passive, always safe):
+- proxy             : start/control the local MITM proxy, list flows, send-to-repeater,
+                      intercept queue, match-and-replace, control HTTP API
+- repeater          : send / replay HTTP requests, parse curl, replay HAR / flow
+- decoder           : encode / decode / smart-detect / JWT decode/tamper/verify
+- comparer          : diff two requests/responses (line, word, byte, JSON, headers)
+- engagement-notes  : persistent notes + findings store with Markdown report export
+- csrf-poc          : generate an HTML CSRF Proof-of-Concept from a flow / curl / raw
+- hackvertor        : tag-based chained encode / decode / hash / compress
+
+Active (probe targets — requires permission / engagement):
+- intruder          : payload-driven fuzzer (sniper / battering / pitchfork / clusterbomb)
+- scanner           : passive + active vulnerability scanning
+- crawler           : site map + parameter / form discovery
+- param-miner       : hidden query/header/cookie/body parameter discovery
+- content-discovery : directory / file brute-force (gobuster-style) with calibration
+- sequencer         : analyse token randomness (Shannon, FIPS-loose, structural)
+- auth-matrix       : replay requests as multiple identities, detect missing authz
+- collaborator      : OOB callback HTTP/DNS server (Burp Collaborator equivalent)
+- smuggler          : HTTP request smuggling probe (CL.TE / TE.CL / TE.TE)
 
 USE THIS TOOL WHEN:
 - The user asks you to test, audit, or attack a web application's security
-- You are debugging an HTTP issue and need full request/response visibility
-- You need to inspect or replay a captured flow
+- You need to inspect or replay a captured flow through the local proxy
 - You need to compare two HTTP responses to spot a behavioural difference
 - You need to assess whether a token / cookie / session ID is well-randomised
-- You need to discover hidden parameters on an endpoint
+- You need to discover hidden parameters or hidden directories on an endpoint
 - You need to crawl a site to enumerate URLs / forms / params
+- You need to capture an out-of-band callback (SSRF / XXE / SSTI / log4shell / blind XSS)
+- You need to record findings during an engagement and export a final report
+- You want to demonstrate a CSRF vulnerability with a self-contained HTML PoC
+- You want to test for authorization flaws (BOLA / IDOR / privilege escalation)
 
-SAFETY RULES (the tool enforces these — your job is to respect them in your reasoning):
-- Active scanning + intruder + sequencer-collect refuse private/loopback targets
-  unless --allow-private is passed. Don't pass that flag without asking the user.
+SAFETY RULES (the tools enforce these — your job is to respect them in your reasoning):
+- Active probes refuse private/loopback targets unless --allow-private is passed.
+  Don't pass that flag without asking the user.
 - Active scanner needs --enable=class1,class2 — pick the smallest set that
   answers the question. Default to passive + crawler first.
 - The proxy's `start` command runs in the foreground. If you need a long-running
   proxy, ask the user to run it in their own shell — don't block your tool turn.
+- Collaborator's `start` is also long-running. Mint a payload with `payload`,
+  embed it in your attack, and `poll <token>` to fetch interactions.
+- Smuggler is destructive — it can corrupt the front-end queue and affect other
+  users. Run only with explicit authorisation.
 - Always ask the user before running any active probe against a host the user
   hasn't explicitly named.
 
-The full output of the underlying script is returned. Pass `as_json: true`
-to get the structured form (most tools support --json). For long-running
-modes (proxy start, intruder with many payloads, crawler with high
-max-pages), prefer `as_json: true` so the output is parseable.
+OUTPUT FORMAT:
+- The full text output is returned by default.
+- Pass `as_json: true` to get the structured form (most tools support --json).
+- For long-running modes prefer `as_json: true` so the output is parseable.
 
-Examples:
+EXAMPLES:
 
-# List captured flows from the proxy
+# Captured flow inspection
 { "subtool": "proxy", "args": ["list", "--limit", "20"], "as_json": true }
 
-# Send a single request via the repeater
-{ "subtool": "repeater", "args": ["send", "--url", "https://example.com", "--json"], "as_json": true }
+# Single request via the repeater
+{ "subtool": "repeater", "args": ["send", "--url", "https://example.com"], "as_json": true }
 
-# JWT decode a token
+# JWT decode
 { "subtool": "decoder", "args": ["jwt-decode"], "stdin": "<jwt>" }
 
 # Compare two captured flows
-{ "subtool": "comparer", "args": ["from-flows", "12", "14", "--json"], "as_json": true }
+{ "subtool": "comparer", "args": ["from-flows", "12", "14"], "as_json": true }
+
+# Generate a CSRF PoC for flow #42
+{ "subtool": "csrf-poc", "args": ["from-flow", "42", "--include-cookies"] }
+
+# Mint an OOB callback token, embed it, then poll
+{ "subtool": "collaborator", "args": ["payload", "--type", "http"], "as_json": true }
+{ "subtool": "collaborator", "args": ["poll", "<token>"], "as_json": true }
+
+# Record a finding
+{ "subtool": "engagement-notes", "args": ["add-finding", "--project", "acme",
+  "--severity", "high", "--cwe", "CWE-79", "--title", "Reflected XSS on /search",
+  "--description", "...", "--impact", "...", "--recommendation", "...",
+  "--refs", "{\"url\":\"...\",\"flowId\":42}"], "as_json": true }
+
+# Export the engagement as Markdown
+{ "subtool": "engagement-notes", "args": ["report", "--project", "acme"] }
+
+# Hackvertor: chained base64 ← hex
+{ "subtool": "hackvertor", "args": ["encode"],
+  "stdin": "<@base64><@hex>hello<@/hex><@/base64>" }
+
+# Authorization matrix
+{ "subtool": "auth-matrix", "args": ["run", "--config", "matrix.json", "--baseline", "admin"], "as_json": true }
+
+# Content discovery with built-in API wordlist
+{ "subtool": "content-discovery", "args": ["--url", "https://target/", "--builtin", "api", "--ext", "php,bak"], "as_json": true }
 
 # Passive scan a single response saved as raw HTTP
-{ "subtool": "scanner", "args": ["passive", "--file", "/tmp/resp.txt", "--json"], "as_json": true }
+{ "subtool": "scanner", "args": ["passive", "--file", "/tmp/resp.txt"], "as_json": true }
 
-# Crawl
-{ "subtool": "crawler", "args": ["--url", "https://target/", "--max-pages", "50", "--json"], "as_json": true }
+# HTTP smuggling probe (DESTRUCTIVE — engagement required)
+{ "subtool": "smuggler", "args": ["probe", "--url", "https://target/path"], "as_json": true }

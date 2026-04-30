@@ -315,6 +315,27 @@ function runMigrations(db: Database): void {
       "v3.payment_offers.notified_seen_at",
       "ALTER TABLE payment_offers ADD COLUMN notified_seen_at INTEGER",
     ],
+    // v2.22.47: real-time team chat. Messages persist for the last
+    // 200 entries per team so that members joining a workspace can
+    // scroll back to recent context. The pruning happens on insert,
+    // so we keep the table indexed by (team_id, ts DESC).
+    [
+      "v4.team_chat_messages",
+      `CREATE TABLE IF NOT EXISTS team_chat_messages (
+         id            INTEGER PRIMARY KEY AUTOINCREMENT,
+         team_id       TEXT NOT NULL,
+         customer_id   TEXT NOT NULL,
+         author_name   TEXT,
+         text          TEXT NOT NULL,
+         ts            INTEGER NOT NULL,
+         FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+         FOREIGN KEY (customer_id) REFERENCES customers(id)
+       )`,
+    ],
+    [
+      "v4.team_chat_messages_team_ts_idx",
+      "CREATE INDEX IF NOT EXISTS team_chat_messages_team_ts_idx ON team_chat_messages(team_id, ts DESC)",
+    ],
   ]
   for (const [name, sql] of ops) {
     try {
