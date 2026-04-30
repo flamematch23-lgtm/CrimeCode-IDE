@@ -1671,6 +1671,111 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ===== Team Sidebar Banner ===== */
+[data-component="team-sidebar-banner"] {
+  margin: 0 -4px 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.08), rgba(99, 102, 241, 0.06));
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+[data-component="team-sidebar-banner"] [data-slot="team-header"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+[data-component="team-sidebar-banner"] [data-slot="team-icon"] {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.2), rgba(74, 222, 128, 0.08));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-component="team-sidebar-banner"] [data-slot="team-dot"] {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+[data-component="team-sidebar-banner"] [data-slot="team-info"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+[data-component="team-sidebar-banner"] [data-slot="team-name"] {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f5f5f5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-component="team-sidebar-banner"] [data-slot="team-meta"] {
+  font-size: 11px;
+  color: #4ade80;
+  font-weight: 600;
+}
+[data-component="team-sidebar-banner"] [data-slot="live-members"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+[data-component="team-sidebar-banner"] [data-slot="live-member"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+[data-component="team-sidebar-banner"] [data-slot="live-member"]:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+[data-component="team-sidebar-banner"] [data-slot="live-avatar"] {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--avatar-color, #4ade80);
+  color: #0b0d12;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-component="team-sidebar-banner"] [data-slot="live-name"] {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-component="team-sidebar-banner"] [data-slot="live-status"] {
+  font-size: 10px;
+  font-weight: 600;
+  color: #4ade80;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+[data-component="team-sidebar-banner"] [data-slot="no-live"] {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 4px 0;
+}
+
 /* ===== Workspace switcher ===== */
 [data-component="workspace-switcher"] {
   position: relative;

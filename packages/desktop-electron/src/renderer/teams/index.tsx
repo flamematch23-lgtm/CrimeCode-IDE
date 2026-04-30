@@ -58,7 +58,7 @@ function readSelfCustomerId(): string | null {
 export function TeamPresenceBadge() {
   const [ws, setWs] = createSignal<ActiveWorkspace>(readActive())
   const [open, setOpen] = createSignal(false)
-  const [pos, setPos] = createSignal<{ top: number; right: number } | null>(null)
+  const [pos, setPos] = createSignal<{ bottom: number; left: number } | null>(null)
   const [selfCid, setSelfCid] = createSignal<string | null>(readSelfCustomerId())
 
   let triggerRef: HTMLButtonElement | undefined
@@ -93,8 +93,8 @@ export function TeamPresenceBadge() {
     if (!triggerRef) return
     const rect = triggerRef.getBoundingClientRect()
     setPos({
-      top: rect.bottom + 6,
-      right: Math.max(12, window.innerWidth - rect.right),
+      bottom: window.innerHeight - rect.top + 6,
+      left: rect.left,
     })
     setOpen(true)
   }
@@ -156,8 +156,8 @@ export function TeamPresenceBadge() {
               aria-label="Membri del team in live"
               style={{
                 position: "fixed",
-                top: `${p().top}px`,
-                right: `${p().right}px`,
+                bottom: `${p().bottom}px`,
+                left: `${p().left}px`,
                 "z-index": 10001,
               }}
             >
@@ -183,7 +183,7 @@ export function TeamChatTrigger() {
   const [ws, setWs] = createSignal<ActiveWorkspace>(readActive())
   const [open, setOpen] = createSignal(false)
   const [unread, setUnread] = createSignal(0)
-  const [pos, setPos] = createSignal<{ top: number; right: number } | null>(null)
+  const [pos, setPos] = createSignal<{ bottom: number; left: number } | null>(null)
   const [selfCid, setSelfCid] = createSignal<string | null>(readSelfCustomerId())
   let triggerRef: HTMLButtonElement | undefined
 
@@ -234,7 +234,7 @@ export function TeamChatTrigger() {
     }
     if (!triggerRef) return
     const rect = triggerRef.getBoundingClientRect()
-    setPos({ top: rect.bottom + 6, right: Math.max(12, window.innerWidth - rect.right) })
+    setPos({ bottom: window.innerHeight - rect.top + 6, left: rect.left })
     setOpen(true)
   }
 
@@ -277,8 +277,8 @@ export function TeamChatTrigger() {
               aria-label="Chat del team"
               style={{
                 position: "fixed",
-                top: `${p().top}px`,
-                right: `${p().right}px`,
+                bottom: `${p().bottom}px`,
+                left: `${p().left}px`,
                 "z-index": 10001,
               }}
             >

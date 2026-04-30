@@ -86,12 +86,21 @@ export function WorkspaceSwitcher() {
     if (api?.account?.get) return api.account.get()
     return readWebSession()
   })
-  const [teams, { refetch: refetchTeams }] = createResource(async () => {
-    const acc = await account()
-    if (!acc) return []
-    const r = await client.list()
-    return r.teams
-  })
+  // The teams list MUST react to `account` resolving — using the two-arg
+  // form of createResource makes Solid track the source signal and re-run
+  // the fetcher whenever account changes (e.g. once the persisted session
+  // loads from electron-store / localStorage on app boot). With the
+  // previous single-arg form, teams resolved to [] before account was
+  // ready and never refetched, so on every restart the user saw an empty
+  // teams panel even though their session was perfectly intact.
+  const [teams, { refetch: refetchTeams }] = createResource(
+    () => account() ?? null,
+    async (acc) => {
+      if (!acc) return []
+      const r = await client.list()
+      return r.teams
+    },
+  )
   const [showCreate, setShowCreate] = createSignal(false)
   const [manageId, setManageId] = createSignal<string | null>(null)
 

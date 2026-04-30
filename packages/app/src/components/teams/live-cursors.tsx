@@ -150,10 +150,16 @@ export function LiveCursors() {
         publishTimer = setTimeout(() => {
           publishTimer = null
           if (!pendingCoords) return
+          const tidNow = teamId()
+          const sidNow = sessionId()
+          if (!tidNow || !sidNow) {
+            pendingCoords = null
+            return
+          }
           lastPublish = Date.now()
           const { x, y } = pendingCoords
           pendingCoords = null
-          safePublishCursor(teamId() ?? "", sessionId() ?? "", x, y)
+          safePublishCursor(tidNow, sidNow, x, y)
         }, 100 - since)
       }
     }

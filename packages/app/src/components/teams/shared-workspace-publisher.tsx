@@ -127,52 +127,36 @@ export function SharedWorkspacePublisher() {
   }
 
   onMount(() => {
-    const teamId = readActiveTeamId()
-    const followedCid = getFollowedCustomer()
-    if (!teamId || !followedCid) return
+    const tid = readActiveTeamId()
+    if (!tid) return
+    const teamId: string = tid
 
     let unsubscribe: (() => void) | null = null
-
-    // Hydrate via REST so we apply immediately — useful when the user
-    // refreshes the app or starts following somebody who's been live for
-    // a while.
-    void (async () => {
-      const client = getTeamsClient()
-      const sessions = await client.listSessions(teamId).catch(() => null)
-      const hostSession = sessions?.sessions?.find((s) => s.host_customer_id === followedCid && !s.ended_at)
-      if (hostSession) {
-        const snapshot = await fetchSharedState(teamId, hostSession.id)
-        if (snapshot?.state) maybeApply(snapshot.state as SharedWorkspaceState)
-      }
-    })()
-
-    // Subscribe to live updates
+    // Generation counter prevents a stale async hydrate-then-subscribe from
+    // overwriting the current subscription when the user switches who they
+    // follow rapidly (e.g. follow A → unfollow → follow B).
+    let gen = 0
     const client = getTeamsClient()
-    unsubscribe = client.subscribe(teamId, (ev: TeamEvent) => {
-      if (ev.type !== "session_state") return
-      const fromHost = (ev as { host_customer_id?: string }).host_customer_id
-      if (fromHost !== followedCid) return
-      const state = (ev as { state?: SharedWorkspaceState }).state
-      if (state) maybeApply(state)
-    })
 
-    // React to follow changes from the UI
-    const onFollowChange = (e: Event) => {
-      const cid = (e as CustomEvent<string | null>).detail
+    function attachFor(cid: string | null) {
+      const myGen = ++gen
       if (unsubscribe) {
         unsubscribe()
         unsubscribe = null
       }
       lastNavigatedTo = null
       if (!cid) return
-      // Reuse the same hydrate-then-subscribe sequence
+
       void (async () => {
         const sessions = await client.listSessions(teamId).catch(() => null)
+        if (gen !== myGen) return // a newer follow change superseded us
         const hostSession = sessions?.sessions?.find((s) => s.host_customer_id === cid && !s.ended_at)
         if (hostSession) {
           const snapshot = await fetchSharedState(teamId, hostSession.id)
+          if (gen !== myGen) return
           if (snapshot?.state) maybeApply(snapshot.state as SharedWorkspaceState)
         }
+        if (gen !== myGen) return
         unsubscribe = client.subscribe(teamId, (ev: TeamEvent) => {
           if (ev.type !== "session_state") return
           const fromHost = (ev as { host_customer_id?: string }).host_customer_id
@@ -182,10 +166,19 @@ export function SharedWorkspacePublisher() {
         })
       })()
     }
+
+    // Initial attachment based on stored follow target.
+    attachFor(getFollowedCustomer())
+
+    // React to follow changes from the UI.
+    const onFollowChange = (e: Event) => {
+      attachFor((e as CustomEvent<string | null>).detail)
+    }
     window.addEventListener("team-following-changed", onFollowChange)
 
     onCleanup(() => {
       window.removeEventListener("team-following-changed", onFollowChange)
+      gen++ // invalidate any in-flight async work
       if (unsubscribe) unsubscribe()
     })
   })
