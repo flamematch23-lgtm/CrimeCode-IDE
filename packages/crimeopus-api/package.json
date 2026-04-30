@@ -12,7 +12,8 @@
     "compile": "bun build src/index.ts --compile --outfile=dist/crimeopus-api",
     "install-models": "bun run scripts/install-models.ts",
     "issue-jwt": "bun run scripts/issue-jwt.ts",
-    "setup": "bun run scripts/setup.ts"
+    "setup": "bun run scripts/setup.ts",
+    "provision:hetzner": "bun run scripts/provision-hetzner.ts"
   },
   "dependencies": {
     "hono": "^4"
