@@ -89,6 +89,7 @@ import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from 
 import { SidebarContent } from "./layout/sidebar-shell"
 import { LiveShareSidebarItem } from "./layout/sidebar-liveshare"
 import { useLiveShareState } from "@/context/liveshare-state"
+import { TeamSidebarBanner } from "@/components/teams/team-sidebar-banner"
 import { setBrowserUrl, browserUrl } from "@/components/browser-preview"
 
 export default function Layout(props: ParentProps) {
@@ -2292,6 +2293,7 @@ export default function Layout(props: ParentProps) {
               </div>
             </div>
 
+            <TeamSidebarBanner />
             <div class="flex-1 min-h-0 flex flex-col">
               <Show
                 when={workspacesEnabled()}

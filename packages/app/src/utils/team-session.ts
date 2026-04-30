@@ -59,15 +59,20 @@ function startHeartbeat(teamId: string, sessionId: string): void {
   // already has a fresh last_heartbeat_at, no need to wait the full
   // interval before the first refresh.
   void client.heartbeatSession(teamId, sessionId, undefined).catch(() => undefined)
-  heartbeatTimer = setInterval(() => {
+  // Snapshot the local timer ref so a rapid re-entry (clearHeartbeat +
+  // startHeartbeat from a switch) can't mistake the new timer for the old.
+  const myTimer = setInterval(() => {
+    if (heartbeatTimer !== myTimer) {
+      clearInterval(myTimer)
+      return
+    }
     if (activeSessionId !== sessionId || activeTeamId !== teamId) {
-      // Active changed under us — bail; the new caller's startHeartbeat
-      // will replace this timer.
       clearHeartbeat()
       return
     }
     void client.heartbeatSession(teamId, sessionId, undefined).catch(() => undefined)
   }, HEARTBEAT_INTERVAL_MS)
+  heartbeatTimer = myTimer
 }
 
 /**
@@ -118,6 +123,14 @@ export async function leaveActiveTeamSession(opts: { endRemote?: boolean } = {})
   activeTeamId = null
   activeSessionId = null
   clearHeartbeat()
+  // Drop any pending shared-state push — once we leave, the publisher would
+  // either no-op (gated on activeTeamId) or, worse, race with a re-join and
+  // push state to the wrong session. Easier to cancel up-front.
+  if (pushDebounceTimer) {
+    clearTimeout(pushDebounceTimer)
+    pushDebounceTimer = null
+    pendingState = null
+  }
   writeSessionId(null)
   if (opts.endRemote && teamId && sid) {
     try {
@@ -186,15 +199,20 @@ let pendingState: SharedWorkspaceState | null = null
  */
 export function pushSharedState(state: SharedWorkspaceState): void {
   if (!activeTeamId || !activeSessionId) return
+  // Capture the team+session at schedule time so a session switch during the
+  // debounce window doesn't push state into the new session.
+  const scheduledTeam = activeTeamId
+  const scheduledSession = activeSessionId
   pendingState = { ...state, version: 1, ts: Date.now() }
   if (pushDebounceTimer) clearTimeout(pushDebounceTimer)
   pushDebounceTimer = setTimeout(() => {
     pushDebounceTimer = null
     const out = pendingState
     pendingState = null
-    if (!out || !activeTeamId || !activeSessionId) return
+    if (!out) return
+    if (activeTeamId !== scheduledTeam || activeSessionId !== scheduledSession) return
     void getTeamsClient()
-      .heartbeatSession(activeTeamId, activeSessionId, out)
+      .heartbeatSession(scheduledTeam, scheduledSession, out)
       .catch(() => undefined)
   }, 250)
 }
