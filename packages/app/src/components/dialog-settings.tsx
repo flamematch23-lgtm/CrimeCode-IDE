@@ -1,10 +1,11 @@
-import { Component } from "solid-js"
+import { Component, Show } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { SettingsAccount } from "./settings-account"
+import { SettingsAutomation } from "./settings-automation"
 import { SettingsGeneral } from "./settings-general"
 import { SettingsKeybinds } from "./settings-keybinds"
 import { SettingsProviders } from "./settings-providers"
@@ -36,6 +37,12 @@ export const DialogSettings: Component = () => {
                       <Icon name="keyboard" />
                       {language.t("settings.tab.shortcuts")}
                     </Tabs.Trigger>
+                    <Show when={!!platform.automation}>
+                      <Tabs.Trigger value="automation">
+                        <Icon name="brain" />
+                        {language.t("settings.tab.automation")}
+                      </Tabs.Trigger>
+                    </Show>
                   </div>
                 </div>
 
@@ -70,6 +77,11 @@ export const DialogSettings: Component = () => {
         <Tabs.Content value="shortcuts" class="no-scrollbar">
           <SettingsKeybinds />
         </Tabs.Content>
+        <Show when={!!platform.automation}>
+          <Tabs.Content value="automation" class="no-scrollbar">
+            <SettingsAutomation />
+          </Tabs.Content>
+        </Show>
         <Tabs.Content value="providers" class="no-scrollbar">
           <SettingsProviders />
         </Tabs.Content>

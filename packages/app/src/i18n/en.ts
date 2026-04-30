@@ -745,6 +745,58 @@ export const dict = {
   "settings.section.server": "Server",
   "settings.tab.general": "General",
   "settings.tab.shortcuts": "Shortcuts",
+  "settings.tab.automation": "Automation",
+
+  "settings.automation.tagline":
+    "Let Claude drive a real browser or your desktop. Each capability is opt-in and can be revoked any time.",
+  "settings.automation.section.browser": "Browser usage",
+  "settings.automation.section.computerUse": "Computer use",
+  "settings.automation.row.browserAllowAll.title": "Allow all browser actions",
+  "settings.automation.row.browserAllowAll.description":
+    "Claude will navigate and interact with any website in Chrome without asking. Applies to new sessions. Can put your data at risk.",
+  "settings.automation.row.computerUse.title": "Computer use",
+  "settings.automation.row.computerUse.description":
+    "Allow Claude to take screenshots and control keyboard and mouse in apps you authorize.",
+  "settings.automation.row.restoreApps.title": "Show apps when Claude finishes",
+  "settings.automation.row.restoreApps.description":
+    "Apps hidden during a Claude run are restored when Claude stops.",
+  "settings.automation.connectedBrowsers.title": "Connected browsers",
+  "settings.automation.connectedBrowsers.description":
+    "Chrome instances connected to your account that Claude can automate.",
+  "settings.automation.connectedBrowsers.empty":
+    "No browsers connected. Open Chrome with the OpenCode extension and sign in.",
+  "settings.automation.connectedBrowsers.refresh": "Re-check",
+  "settings.automation.connectedBrowsers.refreshing": "Checking…",
+  "settings.automation.unsupported.title": "Automation is desktop-only",
+  "settings.automation.unsupported.description":
+    "These controls are available on the OpenCode desktop app. Install it to drive browsers and your computer with Claude.",
+  "settings.automation.browserAllowAll.failed": "Could not update browser permission",
+  "settings.automation.computerUse.failed": "Could not update computer use",
+  "settings.automation.restoreApps.failed": "Could not update app restore preference",
+  "settings.automation.computerUse.activationDenied.title": "Computer use was not activated",
+  "settings.automation.computerUse.activationDenied.platform":
+    "Your platform does not currently support computer use (Wayland sessions are not yet supported).",
+  "settings.automation.computerUse.activationDenied.permission":
+    "OS permissions for screen recording or accessibility were not granted. Open System Settings and try again.",
+  "settings.automation.computerUse.activationDenied.generic": "Activation was refused. Try again in a moment.",
+  "settings.automation.computerUse.confirm.title": "Activate computer use?",
+  "settings.automation.computerUse.confirm.body":
+    "Claude will take screenshots of your screen and control mouse and keyboard. You'll approve each app, but you won't confirm every step Claude takes.",
+  "settings.automation.computerUse.confirm.warningHeader": "Keep in mind:",
+  "settings.automation.computerUse.confirm.warning1": "Some actions cannot be undone.",
+  "settings.automation.computerUse.confirm.warning2":
+    "Apps you approve might open other apps you haven't approved.",
+  "settings.automation.computerUse.confirm.warning3":
+    "Websites and documents may contain harmful instructions that mislead Claude.",
+  "settings.automation.computerUse.confirm.warning4":
+    "Close sensitive content. Claude can see your screen.",
+  "settings.automation.computerUse.confirm.disclaimer":
+    "This is an experimental preview. Start with tasks where mistakes are easy to fix.",
+  "settings.automation.computerUse.confirm.safetyLink": "Read tips for safe use",
+  "settings.automation.computerUse.confirm.activate": "Activate",
+  "settings.automation.computerUse.confirm.activating": "Activating…",
+
+  "common.beta": "Beta",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL integration",
   "settings.desktop.wsl.description": "Run the OpenCode server inside WSL on Windows.",

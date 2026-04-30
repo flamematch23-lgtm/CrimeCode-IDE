@@ -370,6 +370,58 @@ export const dict = {
   "settings.section.server": "Server",
   "settings.tab.general": "Generale",
   "settings.tab.shortcuts": "Scorciatoie",
+  "settings.tab.automation": "Automazione",
+
+  "settings.automation.tagline":
+    "Lascia che Claude controlli un browser reale o il tuo computer. Ogni capacità è opt-in e revocabile in qualsiasi momento.",
+  "settings.automation.section.browser": "Utilizzo del browser",
+  "settings.automation.section.computerUse": "Uso del computer",
+  "settings.automation.row.browserAllowAll.title": "Consenti tutte le azioni del browser",
+  "settings.automation.row.browserAllowAll.description":
+    "Claude navigherà e interagirà con qualsiasi sito web in Chrome senza chiedere. Si applica alle nuove sessioni. Questa impostazione può mettere a rischio i tuoi dati.",
+  "settings.automation.row.computerUse.title": "Uso del computer",
+  "settings.automation.row.computerUse.description":
+    "Consenti a Claude di acquisire screenshot e controllare tastiera e mouse nelle app che autorizzi.",
+  "settings.automation.row.restoreApps.title": "Mostra le app quando Claude termina",
+  "settings.automation.row.restoreApps.description":
+    "Le app nascoste durante un'attività vengono ripristinate quando Claude si ferma.",
+  "settings.automation.connectedBrowsers.title": "Browser connessi",
+  "settings.automation.connectedBrowsers.description":
+    "Istanze di Chrome connesse al tuo account che Claude può automatizzare.",
+  "settings.automation.connectedBrowsers.empty":
+    "Nessuna istanza di Chrome è connessa. Apri Chrome con l'estensione Claude e accedi.",
+  "settings.automation.connectedBrowsers.refresh": "Ricontrolla",
+  "settings.automation.connectedBrowsers.refreshing": "Verifica in corso…",
+  "settings.automation.unsupported.title": "L'automazione è disponibile solo su desktop",
+  "settings.automation.unsupported.description":
+    "Questi controlli sono disponibili nell'app desktop di OpenCode. Installala per controllare browser e computer con Claude.",
+  "settings.automation.browserAllowAll.failed": "Impossibile aggiornare il permesso del browser",
+  "settings.automation.computerUse.failed": "Impossibile aggiornare l'uso del computer",
+  "settings.automation.restoreApps.failed": "Impossibile aggiornare la preferenza di ripristino delle app",
+  "settings.automation.computerUse.activationDenied.title": "L'uso del computer non è stato attivato",
+  "settings.automation.computerUse.activationDenied.platform":
+    "La tua piattaforma non supporta ancora l'uso del computer (le sessioni Wayland non sono ancora supportate).",
+  "settings.automation.computerUse.activationDenied.permission":
+    "I permessi del sistema operativo per la registrazione dello schermo o l'accessibilità non sono stati concessi. Apri Impostazioni di sistema e riprova.",
+  "settings.automation.computerUse.activationDenied.generic": "Attivazione rifiutata. Riprova fra un momento.",
+  "settings.automation.computerUse.confirm.title": "Attivare l'uso del computer?",
+  "settings.automation.computerUse.confirm.body":
+    "Claude farà screenshot del tuo schermo e controllerà mouse e tastiera. Approverai ogni app, ma non confermerai ogni passaggio eseguito da Claude.",
+  "settings.automation.computerUse.confirm.warningHeader": "Tieni presente:",
+  "settings.automation.computerUse.confirm.warning1": "Alcune azioni non possono essere annullate.",
+  "settings.automation.computerUse.confirm.warning2":
+    "Le app che approvi potrebbero aprire altre app che non hai approvato.",
+  "settings.automation.computerUse.confirm.warning3":
+    "Siti web e documenti potrebbero contenere istruzioni dannose che disorientano Claude.",
+  "settings.automation.computerUse.confirm.warning4":
+    "Chiudi contenuti sensibili. Claude può vedere il tuo schermo.",
+  "settings.automation.computerUse.confirm.disclaimer":
+    "Questa è un'anteprima sperimentale. Inizia con attività in cui gli errori sono facili da correggere.",
+  "settings.automation.computerUse.confirm.safetyLink": "Leggi i consigli per un uso sicuro",
+  "settings.automation.computerUse.confirm.activate": "Attiva",
+  "settings.automation.computerUse.confirm.activating": "Attivazione in corso…",
+
+  "common.beta": "Beta",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "Integrazione WSL",
   "settings.desktop.wsl.description": "Esegui il server OpenCode dentro WSL su Windows.",
