@@ -2,7 +2,12 @@ import { randomBytes } from "node:crypto"
 import { getDb } from "./db"
 import { emitTeamEvent } from "./team-events"
 
-type Role = "owner" | "admin" | "member"
+type Role = "owner" | "admin" | "member" | "viewer"
+
+/** Roles that can post chat / publish session state. Viewers are read-only. */
+function canWrite(role: Role | null | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "member"
+}
 
 export interface TeamRow {
   id: string
@@ -247,7 +252,7 @@ export function setMemberRole(
   if (!team) throw new Error("not_found")
   if (team.owner_customer_id !== actor) throw new Error("only_owner")
   if (customerId === team.owner_customer_id) throw new Error("cannot_change_owner_role")
-  if (newRole !== "admin" && newRole !== "member") throw new Error("invalid_role")
+  if (newRole !== "admin" && newRole !== "member" && newRole !== "viewer") throw new Error("invalid_role")
   const current = getMemberRole(teamId, customerId)
   if (!current) throw new Error("not_member")
   getDb().prepare("UPDATE team_members SET role = ? WHERE team_id = ? AND customer_id = ?").run(newRole, teamId, customerId)
@@ -524,7 +529,8 @@ export function postChatMessage(args: {
   author_name: string | null
   text: string
 }): TeamChatRow | null {
-  if (!getMemberRole(args.team_id, args.author)) return null
+  // Viewers (read-only role) cannot post chat — only owner/admin/member can.
+  if (!canWrite(getMemberRole(args.team_id, args.author))) return null
   const text = args.text.trim()
   if (!text) return null
   if (text.length > 2000) return null

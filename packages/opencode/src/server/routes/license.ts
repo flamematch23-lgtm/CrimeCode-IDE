@@ -918,7 +918,7 @@ export const LicenseRoutes = lazy(() => {
     const sess = sessionGuard(c as never)
     if (!sess) return c.json({ error: "unauthorized" }, 401)
     const body = (await c.req.json().catch(() => ({}))) as { role?: string }
-    if (body.role !== "admin" && body.role !== "member") {
+    if (body.role !== "admin" && body.role !== "member" && body.role !== "viewer") {
       return c.json({ error: "invalid_role" }, 400)
     }
     try {
