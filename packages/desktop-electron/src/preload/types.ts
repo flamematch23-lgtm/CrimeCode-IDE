@@ -206,6 +206,15 @@ export type ElectronAPI = {
   project: {
     readonly create: () => Promise<{ directory: string } | null>
   }
+  proxy: {
+    /** Start the local Burp-style MITM proxy + REST API as a child process.
+     *  Resolves once the API is reachable on /health (~1-3 s) or returns an error. */
+    readonly startBurp: (port: number) => Promise<{ ok: boolean; error?: string; pid?: number }>
+    /** Stop the running proxy child process if any. */
+    readonly stopBurp: () => Promise<{ ok: boolean }>
+    /** Current proxy status: { running, port, pid } */
+    readonly statusBurp: () => Promise<{ running: boolean; port?: number; pid?: number }>
+  }
   teams: {
     readonly list: () => Promise<{ teams: Array<TeamSummary> }>
     readonly create: (name: string) => Promise<{ team: TeamSummary }>

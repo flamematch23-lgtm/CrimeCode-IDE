@@ -106,6 +106,14 @@ const api: ElectronAPI = {
   project: {
     create: () => ipcRenderer.invoke("project-create"),
   },
+  proxy: {
+    // Start the local Burp-style HTTP proxy + control REST API as a child
+    // process. Returns { ok: true } once the API responds on /health, or
+    // { ok: false, error } if it fails to start within the timeout.
+    startBurp: (port: number) => ipcRenderer.invoke("proxy-start-burp", port),
+    stopBurp: () => ipcRenderer.invoke("proxy-stop-burp"),
+    statusBurp: () => ipcRenderer.invoke("proxy-status-burp"),
+  },
   teams: {
     list: () => ipcRenderer.invoke("teams-list"),
     create: (name: string) => ipcRenderer.invoke("teams-create", name),

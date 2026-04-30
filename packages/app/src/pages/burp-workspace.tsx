@@ -145,65 +145,163 @@ export default function BurpWorkspace() {
   const [flows, setFlows] = createSignal<FlowSummary[]>([])
   const [pending, setPending] = createSignal<PendingItem[]>([])
   const [rules, setRules] = createSignal<RuleRow[]>([])
+  const [startingProxy, setStartingProxy] = createSignal(false)
+  const [startError, setStartError] = createSignal<string | null>(null)
 
-  // Initial load + polling/SSE
-  const refreshAll = async () => {
-    try {
-      const [s, f, p, r] = await Promise.all([api().settings(), api().flows({ limit: 200 }), api().pending(), api().rules()])
-      setSettings(s)
-      setFlows(f)
-      setPending(p)
-      setRules(r)
-      setConnected(true)
-    } catch (e) {
-      setConnected(false)
-    }
-  }
-
+  // Connection lifecycle:
+  //   - while connected: SSE stream + a 4 s settings poll
+  //   - while disconnected: NO continuous polling. We schedule a single
+  //     retry with exponential backoff (2s → 4s → 8s → 16s → max 30s) so
+  //     the diagnostic console doesn't get spammed when the proxy isn't
+  //     running. The user can also click "Riprova" or "Avvia proxy" to
+  //     retry on demand.
   let evtSource: EventSource | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let retryDelayMs = 2000
+  let settingsTimer: ReturnType<typeof setInterval> | null = null
 
-  const connectEvents = () => {
+  const stopPollingAndSse = () => {
     if (evtSource) {
       evtSource.close()
       evtSource = null
     }
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+    if (settingsTimer) {
+      clearInterval(settingsTimer)
+      settingsTimer = null
+    }
+  }
+
+  const cancelRetry = () => {
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
+  }
+
+  const scheduleRetry = () => {
+    cancelRetry()
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      void refreshAll()
+    }, retryDelayMs)
+    retryDelayMs = Math.min(retryDelayMs * 2, 30_000)
+  }
+
+  // Initial load + polling/SSE
+  const refreshAll = async (): Promise<boolean> => {
+    try {
+      const [s, f, p, r] = await Promise.all([
+        api().settings(),
+        api().flows({ limit: 200 }),
+        api().pending(),
+        api().rules(),
+      ])
+      setSettings(s)
+      setFlows(f)
+      setPending(p)
+      setRules(r)
+      const wasConnected = connected()
+      setConnected(true)
+      retryDelayMs = 2000 // reset backoff
+      cancelRetry()
+      if (!wasConnected) startLiveSubscriptions()
+      return true
+    } catch (e) {
+      const wasConnected = connected()
+      setConnected(false)
+      if (wasConnected) {
+        // Lost connection mid-session — tear down active subs and
+        // schedule a fresh retry (backoff resets on next success).
+        stopPollingAndSse()
+      }
+      scheduleRetry()
+      return false
+    }
+  }
+
+  const startLiveSubscriptions = () => {
+    stopPollingAndSse()
     try {
       evtSource = new EventSource(api().eventsUrl())
       evtSource.addEventListener("flow", () => void api().flows({ limit: 200 }).then(setFlows).catch(() => undefined))
       evtSource.addEventListener("pending", () => void api().pending().then(setPending).catch(() => undefined))
       evtSource.addEventListener("resolved", () => void api().pending().then(setPending).catch(() => undefined))
       evtSource.onerror = () => {
-        // SSE failed — fall back to polling
-        if (pollTimer) clearInterval(pollTimer)
-        pollTimer = setInterval(refreshAll, 3000)
+        // SSE dropped after a successful initial connect — kick off a
+        // refreshAll cycle which will either re-establish or transition
+        // us back to the disconnected backoff state.
+        if (evtSource) {
+          evtSource.close()
+          evtSource = null
+        }
+        void refreshAll()
       }
     } catch {
-      pollTimer = setInterval(refreshAll, 3000)
+      // EventSource constructor failure is rare (usually CSP). Fall back
+      // to a slow poll while we're connected, just to keep state fresh.
+      pollTimer = setInterval(() => void refreshAll(), 5000)
     }
+    // Lightweight settings poll to refresh "intercept" + "pendingCount"
+    // pill in the header. Cheap (~few hundred bytes), 4 s cadence.
+    settingsTimer = setInterval(() => {
+      void api()
+        .settings()
+        .then(setSettings)
+        .catch(() => {
+          // Single failure → trigger a full refresh which will detect
+          // the disconnect and transition state cleanly.
+          void refreshAll()
+        })
+    }, 4000)
   }
 
   onMount(() => {
     void refreshAll()
-    connectEvents()
-    const settingsTimer = setInterval(() => {
-      void api()
-        .settings()
-        .then(setSettings)
-        .catch(() => setConnected(false))
-    }, 4000)
     onCleanup(() => {
-      if (evtSource) evtSource.close()
-      if (pollTimer) clearInterval(pollTimer)
-      clearInterval(settingsTimer)
+      stopPollingAndSse()
+      cancelRetry()
     })
   })
 
   const persistApiBase = (v: string) => {
     setApiBase(v)
     localStorage.setItem("burp.apiBase", v)
+    retryDelayMs = 2000
+    cancelRetry()
     void refreshAll()
-    connectEvents()
+  }
+
+  const startProxy = async () => {
+    setStartingProxy(true)
+    setStartError(null)
+    try {
+      const proxy = (window as { api?: { proxy?: { startBurp?: (port: number) => Promise<{ ok: boolean; error?: string }> } } }).api?.proxy
+      if (!proxy?.startBurp) {
+        setStartError("Avvio automatico non disponibile in questa build. Avvialo manualmente con il comando mostrato sopra.")
+        return
+      }
+      const port = Number(new URL(apiBase()).port || "8182")
+      const result = await proxy.startBurp(port)
+      if (!result.ok) {
+        setStartError(result.error ?? "Avvio fallito")
+        return
+      }
+      // Give the proxy ~1 s to bind, then trigger a refresh
+      setTimeout(() => {
+        retryDelayMs = 2000
+        cancelRetry()
+        void refreshAll()
+      }, 1000)
+    } catch (e) {
+      setStartError((e as Error).message)
+    } finally {
+      setStartingProxy(false)
+    }
   }
 
   const toggleIntercept = async () => {
@@ -281,12 +379,20 @@ export default function BurpWorkspace() {
           <div class="text-12-regular">
             Impossibile contattare il Control API del proxy a <code class="text-text-strong">{apiBase()}</code>.
             <br />
-            Avvia il proxy con:
+            Puoi avviarlo direttamente da qui (consigliato) oppure manualmente con:
             <code class="block mt-2 px-3 py-2 bg-surface-base rounded text-12-mono text-text-strong">
               bun packages/opencode/script/agent-tools/security/http-proxy.ts start --intercept --api-port 8182
             </code>
           </div>
-          <div class="flex gap-2 items-center">
+          <Show when={startError()}>
+            <div class="text-11-regular text-text-on-critical-base bg-surface-critical-weak px-3 py-1.5 rounded">
+              {startError()}
+            </div>
+          </Show>
+          <div class="flex gap-2 items-center flex-wrap justify-center">
+            <Button variant="primary" size="small" onClick={startProxy} disabled={startingProxy()}>
+              {startingProxy() ? "Avvio…" : "Avvia proxy ora"}
+            </Button>
             <TextField
               type="text"
               label="API URL"
@@ -294,9 +400,13 @@ export default function BurpWorkspace() {
               onChange={persistApiBase}
               placeholder="http://127.0.0.1:8182"
             />
-            <Button size="small" onClick={() => void refreshAll()}>
+            <Button variant="secondary" size="small" onClick={() => void refreshAll()}>
               Riprova
             </Button>
+          </div>
+          <div class="text-10-regular text-text-weak">
+            Mentre offline il polling è disabilitato per evitare flood di richieste — la UI ritenta automaticamente con
+            backoff esponenziale (2s → 30s).
           </div>
         </div>
       </Show>

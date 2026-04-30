@@ -680,6 +680,142 @@ export function registerIpcHandlers(deps: Deps) {
     }),
   )
 
+  // ── Burp proxy lifecycle ──
+  // We track a single child process per main, restart-on-demand via the
+  // workspace UI. Spawned with the bundled Bun runtime + the http-proxy.ts
+  // script that ships inside the asar.unpacked tree (electron-builder is
+  // configured to keep .ts scripts unpacked so Bun can read them).
+  let burpProxyChild: import("node:child_process").ChildProcess | null = null
+  let burpProxyPort = 0
+
+  const findBurpScript = (): string | null => {
+    // Resolution order:
+    //   1. Repo path during dev (parents of __dirname)
+    //   2. asar.unpacked layout in production
+    const fs = require("node:fs") as typeof import("node:fs")
+    const path = require("node:path") as typeof import("node:path")
+    const candidates = [
+      path.join(__dirname, "..", "..", "..", "opencode", "script", "agent-tools", "security", "http-proxy.ts"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "out", "main", "http-proxy.ts"),
+      path.join(__dirname, "..", "..", "out", "main", "http-proxy.ts"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "packages", "opencode", "script", "agent-tools", "security", "http-proxy.ts"),
+    ]
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c
+      } catch {
+        /* ignore */
+      }
+    }
+    return null
+  }
+
+  const findBunBin = (): string | null => {
+    const fs = require("node:fs") as typeof import("node:fs")
+    const path = require("node:path") as typeof import("node:path")
+    // Prefer the bundled Bun that ships next to electron's resources.
+    const candidates = [
+      path.join(process.resourcesPath ?? "", "bun.exe"),
+      path.join(process.resourcesPath ?? "", "bun"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "bun.exe"),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "bun"),
+    ]
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c
+      } catch {
+        /* ignore */
+      }
+    }
+    // Fall back to whatever 'bun' is on PATH (works in dev mode).
+    return "bun"
+  }
+
+  const checkProxyHealth = async (port: number): Promise<boolean> => {
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 1500)
+      const r = await fetch(`http://127.0.0.1:${port}/health`, { signal: ctrl.signal })
+      clearTimeout(t)
+      return r.ok
+    } catch {
+      return false
+    }
+  }
+
+  ipcMain.handle("proxy-start-burp", async (_e, port: number) => {
+    if (burpProxyChild && !burpProxyChild.killed) {
+      // Already running. If it's the same port we're done; if different,
+      // tell the caller so they can stop+restart explicitly.
+      if (burpProxyPort === port) return { ok: true, pid: burpProxyChild.pid }
+      return { ok: false, error: `proxy già in esecuzione su porta ${burpProxyPort}` }
+    }
+    const script = findBurpScript()
+    if (!script) {
+      return {
+        ok: false,
+        error:
+          "Script http-proxy.ts non trovato nel pacchetto installato. Avvia manualmente con il comando indicato.",
+      }
+    }
+    const bun = findBunBin()
+    if (!bun) {
+      return { ok: false, error: "Runtime Bun non disponibile per spawnare il proxy." }
+    }
+    const { spawn } = require("node:child_process") as typeof import("node:child_process")
+    try {
+      const child = spawn(bun, [script, "start", "--intercept", "--api-port", String(port)], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: false,
+      })
+      burpProxyChild = child
+      burpProxyPort = port
+      child.on("exit", () => {
+        if (burpProxyChild === child) {
+          burpProxyChild = null
+          burpProxyPort = 0
+        }
+      })
+      child.on("error", () => {
+        if (burpProxyChild === child) {
+          burpProxyChild = null
+          burpProxyPort = 0
+        }
+      })
+      // Wait up to 5 s for the API to be ready
+      const startAt = Date.now()
+      while (Date.now() - startAt < 5000) {
+        await new Promise((r) => setTimeout(r, 250))
+        if (await checkProxyHealth(port)) {
+          return { ok: true, pid: child.pid ?? undefined }
+        }
+      }
+      return { ok: false, error: "Il proxy non risponde su /health entro 5 s." }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle("proxy-stop-burp", async () => {
+    if (burpProxyChild && !burpProxyChild.killed) {
+      try {
+        burpProxyChild.kill("SIGTERM")
+      } catch {
+        /* ignore */
+      }
+      burpProxyChild = null
+      burpProxyPort = 0
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle("proxy-status-burp", () => ({
+    running: !!burpProxyChild && !burpProxyChild.killed,
+    port: burpProxyPort || undefined,
+    pid: burpProxyChild?.pid,
+  }))
+
   // ── Shared workspace state ──
   ipcMain.handle("teams-get-session", async (_e, teamId: string, sid: string) => {
     try {
