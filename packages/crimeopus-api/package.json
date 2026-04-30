@@ -13,7 +13,8 @@
     "install-models": "bun run scripts/install-models.ts",
     "issue-jwt": "bun run scripts/issue-jwt.ts",
     "setup": "bun run scripts/setup.ts",
-    "provision:hetzner": "bun run scripts/provision-hetzner.ts"
+    "provision:hetzner": "bun run scripts/provision-hetzner.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "hono": "^4"

@@ -112,7 +112,12 @@ export function makeSessionToken(payload: { sub: string; tg: number | null; sid:
   return { token: `S1.${payloadB64}.${sig}`, exp }
 }
 
-export function verifySessionToken(
+/**
+ * Verify the token cryptographically (HMAC + expiry) WITHOUT hitting the DB.
+ * Use this when you have your own DB handle and want to do the session
+ * lookup separately (e.g. in the user-auth middleware).
+ */
+export function verifyTokenCrypto(
   token: string,
 ): { ok: true; payload: SessionPayload } | { ok: false; reason: string } {
   if (!token.startsWith("S1.")) return { ok: false, reason: "bad_prefix" }
@@ -136,15 +141,26 @@ export function verifySessionToken(
   }
   if (!payload.sub || !payload.sid) return { ok: false, reason: "missing_fields" }
   if (payload.exp < Math.floor(Date.now() / 1000)) return { ok: false, reason: "expired" }
+  return { ok: true, payload }
+}
+
+/**
+ * Full verification: crypto + DB session lookup against the production license DB.
+ */
+export function verifySessionToken(
+  token: string,
+): { ok: true; payload: SessionPayload } | { ok: false; reason: string } {
+  const result = verifyTokenCrypto(token)
+  if (!result.ok) return result
   const row = getLicenseDb()
     .prepare<
       { id: string; revoked_at: number | null },
       [string]
     >("SELECT id, revoked_at FROM auth_sessions WHERE id = ?")
-    .get(payload.sid)
+    .get(result.payload.sid)
   if (!row) return { ok: false, reason: "session_not_found" }
   if (row.revoked_at) return { ok: false, reason: "session_revoked" }
-  return { ok: true, payload }
+  return { ok: true, payload: result.payload }
 }
 
 // ─── PIN flow ─────────────────────────────────────────────────────────
