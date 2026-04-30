@@ -1,51 +1,78 @@
 {
-  "_comment": "Public model id → upstream Ollama tag mapping. Only models listed here appear in /v1/models when this catalog is loaded. Hidden:true models are still callable by id but don't show up in the public listing.",
+  "_comment": "Public model id → provider routes. Ogni modello pubblico può avere multipli provider come failover. Il primo healthy con slot libero vince. Spostare il PROPRIO PC dalla lista (o lasciarlo come ultimo fallback in dev) significa che gli utenti NON consumano la tua GPU.",
+
+  "_provider_setup": "Definisci i provider in env UPSTREAM_PROVIDERS (vedi .env.example). Esempio production: solo cloud (Together + Fireworks come fallback) + Whisper su faster-whisper-server cloud.",
 
   "crimeopus-default": {
-    "upstream": "crimeopus-default:latest",
     "display": "CrimeOpus 4.7 Code Elite",
-    "description": "General-purpose flagship: code, reasoning, multilingual.",
-    "maxContext": 8192
+    "description": "General-purpose flagship: code, reasoning, multilingue.",
+    "providers": [
+      { "provider": "together",  "model": "Qwen/Qwen2.5-72B-Instruct-Turbo" },
+      { "provider": "fireworks", "model": "accounts/fireworks/models/qwen2p5-72b-instruct" },
+      { "provider": "openrouter","model": "qwen/qwen-2.5-72b-instruct" }
+    ]
   },
+
   "crimeopus-fast": {
-    "upstream": "crimeopus-fast:latest",
     "display": "CrimeOpus 4.7 FAST",
-    "description": "IQ3_M quant — quick replies, lower precision."
+    "description": "Latency-optimized via Groq LPU.",
+    "providers": [
+      { "provider": "groq",      "model": "llama-3.3-70b-versatile" },
+      { "provider": "together",  "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo" }
+    ]
   },
+
   "crimeopus-coder": {
-    "upstream": "crimeopus-coder:latest",
     "display": "CrimeOpus 4.7 CODER",
-    "description": "Tuned for code generation and refactoring tasks.",
-    "systemPrefix": "You are CrimeOpus CODER, an expert software engineer. Prefer concise, idiomatic code. Always explain non-obvious decisions in 1-2 lines."
+    "description": "Tuned for code generation and refactoring.",
+    "systemPrefix": "Sei CrimeOpus CODER, un esperto sviluppatore software. Genera codice idiomatico, conciso e ben commentato. Spiega le decisioni non ovvie in 1-2 righe.",
+    "providers": [
+      { "provider": "together",  "model": "Qwen/Qwen2.5-Coder-32B-Instruct" },
+      { "provider": "fireworks", "model": "accounts/fireworks/models/qwen2p5-coder-32b-instruct" }
+    ]
   },
+
   "crimeopus-think-low": {
-    "upstream": "crimeopus-think-low:latest",
     "display": "CrimeOpus 4.7 Reasoning · Low",
-    "description": "Reasoning effort: low. Faster, cheaper."
+    "providers": [
+      { "provider": "openrouter", "model": "deepseek/deepseek-r1-distill-llama-70b" }
+    ]
   },
-  "crimeopus-think-med": {
-    "upstream": "crimeopus-think-med:latest",
-    "display": "CrimeOpus 4.7 Reasoning · Medium"
-  },
+
   "crimeopus-think-high": {
-    "upstream": "crimeopus-think-high:latest",
     "display": "CrimeOpus 4.7 Reasoning · High",
     "description": "Maximum reasoning effort. Higher latency, sharper conclusions.",
-    "maxContext": 16384
+    "providers": [
+      { "provider": "openrouter", "model": "deepseek/deepseek-r1" },
+      { "provider": "together",   "model": "deepseek-ai/DeepSeek-R1" }
+    ]
   },
-  "crimeopus-research": {
-    "upstream": "crimeopus-research:latest",
-    "display": "CrimeOpus 4.7 RESEARCH"
-  },
+
   "crimeopus-italian": {
-    "upstream": "crimeopus-italian:latest",
     "display": "CrimeOpus 4.7 Italiano",
-    "description": "Italian-tuned dialect, formal/informal blend."
+    "description": "Italian-tuned dialect, formal/informal blend.",
+    "systemPrefix": "Rispondi sempre in italiano fluente.",
+    "providers": [
+      { "provider": "openrouter", "model": "anthropic/claude-3.5-haiku" },
+      { "provider": "together",   "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo" }
+    ]
   },
 
   "crimeopus-embed": {
-    "upstream": "nomic-embed-text:latest",
     "display": "CrimeOpus Embeddings",
-    "description": "768-d sentence embeddings (nomic-embed-text)."
+    "description": "768-d sentence embeddings.",
+    "providers": [
+      { "provider": "together", "model": "BAAI/bge-large-en-v1.5" },
+      { "provider": "openrouter", "model": "openai/text-embedding-3-small" }
+    ]
+  },
+
+  "_local_dev_only_legacy": {
+    "_": "Esempio: per dev locale puoi mantenere ollama come fallback. Sposta in fondo alla lista provider — viene scelto solo se gli altri sono saturi/down.",
+    "display": "Local Dev Test",
+    "hidden": true,
+    "providers": [
+      { "provider": "local-ollama", "model": "qwen2.5-coder:7b" }
+    ]
   }
 }

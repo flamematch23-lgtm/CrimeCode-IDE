@@ -21,6 +21,7 @@ import { getDb } from "./db.ts"
 import { signJwt } from "./auth.ts"
 import { listWebhooks, createWebhook, deleteWebhook, toggleWebhook, recentDeliveries } from "./webhooks.ts"
 import { resetCurrentPeriod, getQuotaStatus } from "./quota.ts"
+import { getProviderStats } from "./upstream.ts"
 
 export function adminRouter() {
   const r = new Hono()
@@ -94,6 +95,9 @@ export function adminRouter() {
     }
     return c.json({ buckets })
   })
+
+  // Provider pool stats — visibile in dashboard come la card "Backends"
+  r.get("/api/providers", (c) => c.json(getProviderStats()))
 
   // Keys CRUD
   r.get("/api/keys", (c) => {

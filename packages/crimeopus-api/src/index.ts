@@ -27,65 +27,36 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { stream } from "hono/streaming"
-import { existsSync, readFileSync } from "node:fs"
 import { getDb } from "./db.ts"
 import { syncEnvApiKeys, resolveAuth, type AuthContext } from "./auth.ts"
 import { checkQuota, recordUsage } from "./quota.ts"
 import { emitWebhook } from "./webhooks.ts"
 import { audioRouter } from "./audio.ts"
 import { adminRouter } from "./admin.ts"
+import {
+  acquireSlot,
+  buildUpstreamFetch,
+  startHealthChecks,
+  UpstreamError,
+  listPublicModels,
+  getCatalogEntry,
+  catalog,
+} from "./upstream.ts"
 
 // ─── Config ───────────────────────────────────────────────────────────
 
 const PORT = Number(process.env.PORT ?? 8787)
 const BIND = process.env.BIND ?? "0.0.0.0"
-const OLLAMA_URL = (process.env.OLLAMA_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, "")
 const ALLOW_ANON = process.env.ALLOW_ANON === "1"
 const RATE_LIMIT_RPM = Number(process.env.RATE_LIMIT_RPM ?? 60)
 const RATE_LIMIT_BURST = Number(process.env.RATE_LIMIT_BURST ?? 10)
 const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? "*").split(",").map((s) => s.trim())
-const CATALOG_PATH = process.env.CATALOG_PATH ?? "./catalog.json"
 
-// Boot: open the DB so the schema is in place, then sync env keys.
+// Boot: open the DB so the schema is in place, then sync env keys
+// and start the upstream health-check loop.
 getDb()
 syncEnvApiKeys()
-
-// ─── Catalog: public model id → upstream Ollama tag ────────────────────
-
-interface CatalogEntry {
-  upstream: string
-  display?: string
-  description?: string
-  hidden?: boolean
-  maxContext?: number
-  systemPrefix?: string
-}
-
-const catalog: Map<string, CatalogEntry> = (() => {
-  const m = new Map<string, CatalogEntry>()
-  if (!existsSync(CATALOG_PATH)) {
-    console.warn(`ℹ no catalog at ${CATALOG_PATH} — passing all Ollama models through unchanged`)
-    return m
-  }
-  try {
-    const raw = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as Record<string, CatalogEntry>
-    for (const [id, e] of Object.entries(raw)) {
-      if (id.startsWith("_")) continue // comments
-      m.set(id, e)
-    }
-    console.log(`✓ loaded catalog with ${m.size} model(s) from ${CATALOG_PATH}`)
-    return m
-  } catch (e) {
-    console.error(`✗ failed to parse catalog ${CATALOG_PATH}: ${(e as Error).message}`)
-    return m
-  }
-})()
-
-function resolveUpstream(publicId: string): { upstreamId: string; entry: CatalogEntry | null } {
-  const entry = catalog.get(publicId) ?? null
-  if (entry) return { upstreamId: entry.upstream, entry }
-  return { upstreamId: publicId, entry: null }
-}
+startHealthChecks()
 
 // ─── Rate limit (token bucket per key) ─────────────────────────────────
 
@@ -156,15 +127,10 @@ app.use("*", cors({ origin: CORS_ORIGINS, allowHeaders: ["Authorization", "Conte
 app.route("/admin", adminRouter())
 
 // Public health
-app.get("/healthz", async (c) => {
-  let upstreamOk = false
-  try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(2000) })
-    upstreamOk = r.ok
-  } catch {
-    /* down */
-  }
-  return c.json({ ok: true, upstream: upstreamOk, version: "0.2.0" })
+app.get("/healthz", (c) => {
+  // Healthcheck loop in upstream.ts already pings every 30s. Just
+  // report the current snapshot.
+  return c.json({ ok: true, version: "0.3.0" })
 })
 
 app.get("/", (c) =>
@@ -247,44 +213,22 @@ function requireScope(c: import("hono").Context<{ Variables: { auth: AuthContext
 
 // ─── /v1/models ────────────────────────────────────────────────────────
 
-app.get("/v1/models", async (c) => {
+app.get("/v1/models", (c) => {
   const t0 = Date.now()
   const auth = c.get("auth")
   const scopeFail = requireScope(c, "models:list")
   if (scopeFail) return scopeFail
   const ip = ipOf(c)
-
-  if (catalog.size > 0) {
-    const data = [...catalog.entries()]
-      .filter(([, e]) => !e.hidden)
-      .map(([id, e]) => ({
-        id,
-        object: "model",
-        created: 0,
-        owned_by: "crimeopus",
-        display: e.display ?? id,
-        description: e.description,
-      }))
-    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
-    return c.json({ object: "list", data })
-  }
-  try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`)
-    const body = (await r.json()) as { models?: Array<{ name: string; modified_at?: string }> }
-    const data = (body.models ?? []).map((m) => ({
-      id: m.name,
-      object: "model",
-      created: m.modified_at ? Math.floor(new Date(m.modified_at).getTime() / 1000) : 0,
-      owned_by: "ollama",
-    }))
-    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
-    return c.json({ object: "list", data })
-  } catch (e) {
-    const err = (e as Error).message
-    emitWebhook("upstream.error", { endpoint: "/v1/models", error: err })
-    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 502, latencyMs: Date.now() - t0, error: err })
-    return c.json({ error: { message: `upstream Ollama unavailable: ${err}`, type: "upstream" } }, 502)
-  }
+  const data = listPublicModels().map((m) => ({
+    id: m.id,
+    object: "model",
+    created: 0,
+    owned_by: "crimeopus",
+    display: m.display,
+    description: m.description,
+  }))
+  logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
+  return c.json({ object: "list", data })
 })
 
 // ─── /v1/chat/completions ──────────────────────────────────────────────
@@ -330,7 +274,19 @@ app.post("/v1/chat/completions", async (c) => {
     return c.json({ error: { message: "missing model or messages", type: "request" } }, 400)
   }
 
-  const { upstreamId, entry } = resolveUpstream(body.model)
+  // Reserve a slot on the upstream provider pool. acquireSlot picks the
+  // first healthy provider in the catalog's failover list with a free slot.
+  let slot
+  try {
+    slot = await acquireSlot(body.model, auth.label)
+  } catch (e) {
+    const err = e as UpstreamError
+    logUsage({ keyLabel: auth.label, ip, model: body.model, endpoint: "/v1/chat/completions", status: err.httpStatus ?? 503, latencyMs: Date.now() - startedAt, error: err.code })
+    return c.json({ error: { message: err.code, type: "upstream" } }, (err.httpStatus ?? 503) as 503)
+  }
+
+  // Apply system prompt prefix from catalog (if any).
+  const entry = getCatalogEntry(body.model)
   if (entry?.systemPrefix) {
     const first = body.messages[0]
     if (first && first.role === "system" && typeof first.content === "string") {
@@ -340,23 +296,28 @@ app.post("/v1/chat/completions", async (c) => {
     }
   }
 
-  const upstreamBody = { ...body, model: upstreamId }
+  const upstreamBody = { ...body, model: slot.upstreamModel }
   const isStream = body.stream === true
+  const release = slot.release
+  const { url, headers } = buildUpstreamFetch(slot.provider, "/v1/chat/completions")
+
   let upstreamResp: Response
   try {
-    upstreamResp = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+    upstreamResp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(upstreamBody),
     })
   } catch (e) {
+    release()
     const msg = (e as Error).message
-    emitWebhook("upstream.error", { endpoint: "/v1/chat/completions", model: body.model, error: msg })
+    emitWebhook("upstream.error", { provider: slot.provider.id, model: body.model, error: msg })
     logUsage({ keyLabel: auth.label, ip, model: body.model, endpoint: "/v1/chat/completions", status: 502, latencyMs: Date.now() - startedAt, error: msg })
-    return c.json({ error: { message: `upstream Ollama unreachable: ${msg}`, type: "upstream" } }, 502)
+    return c.json({ error: { message: `upstream unreachable: ${msg}`, type: "upstream" } }, 502)
   }
 
   if (!upstreamResp.ok) {
+    release()
     const txt = await upstreamResp.text().catch(() => "")
     emitWebhook("upstream.error", { endpoint: "/v1/chat/completions", model: body.model, status: upstreamResp.status })
     logUsage({
@@ -372,25 +333,29 @@ app.post("/v1/chat/completions", async (c) => {
   }
 
   if (!isStream) {
-    const json = (await upstreamResp.json()) as {
-      usage?: { prompt_tokens?: number; completion_tokens?: number }
-      [k: string]: unknown
+    try {
+      const json = (await upstreamResp.json()) as {
+        usage?: { prompt_tokens?: number; completion_tokens?: number }
+        [k: string]: unknown
+      }
+      if (typeof (json as { model?: string }).model === "string") (json as { model: string }).model = body.model
+      const promptTokens = json.usage?.prompt_tokens ?? 0
+      const completionTokens = json.usage?.completion_tokens ?? 0
+      recordUsage({ ctx: auth, promptTokens, completionTokens })
+      logUsage({
+        keyLabel: auth.label,
+        ip,
+        model: body.model,
+        endpoint: "/v1/chat/completions",
+        status: 200,
+        promptTokens,
+        completionTokens,
+        latencyMs: Date.now() - startedAt,
+      })
+      return c.json(json)
+    } finally {
+      release()
     }
-    if (typeof (json as { model?: string }).model === "string") (json as { model: string }).model = body.model
-    const promptTokens = json.usage?.prompt_tokens ?? 0
-    const completionTokens = json.usage?.completion_tokens ?? 0
-    recordUsage({ ctx: auth, promptTokens, completionTokens })
-    logUsage({
-      keyLabel: auth.label,
-      ip,
-      model: body.model,
-      endpoint: "/v1/chat/completions",
-      status: 200,
-      promptTokens,
-      completionTokens,
-      latencyMs: Date.now() - startedAt,
-    })
-    return c.json(json)
   }
 
   // Streaming SSE pipe-through with model rewrite + post-stream usage
@@ -437,6 +402,7 @@ app.post("/v1/chat/completions", async (c) => {
         }
       }
     } finally {
+      release()
       recordUsage({ ctx: auth, promptTokens, completionTokens })
       logUsage({
         keyLabel: auth.label,
@@ -468,16 +434,23 @@ app.post("/v1/embeddings", async (c) => {
   if (!body.model || body.input === undefined) {
     return c.json({ error: { message: "missing model or input", type: "request" } }, 400)
   }
-  const { upstreamId } = resolveUpstream(body.model)
+  let slot
   try {
-    const r = await fetch(`${OLLAMA_URL}/v1/embeddings`, {
+    slot = await acquireSlot(body.model, auth.label)
+  } catch (e) {
+    const err = e as UpstreamError
+    return c.json({ error: { message: err.code, type: "upstream" } }, (err.httpStatus ?? 503) as 503)
+  }
+  const { url, headers } = buildUpstreamFetch(slot.provider, "/v1/embeddings")
+  try {
+    const r = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: upstreamId, input: body.input }),
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ model: slot.upstreamModel, input: body.input }),
     })
     if (!r.ok) {
       const t = await r.text().catch(() => "")
-      emitWebhook("upstream.error", { endpoint: "/v1/embeddings", status: r.status })
+      emitWebhook("upstream.error", { provider: slot.provider.id, endpoint: "/v1/embeddings", status: r.status })
       logUsage({
         keyLabel: auth.label,
         ip,
@@ -505,8 +478,10 @@ app.post("/v1/embeddings", async (c) => {
     return c.json(json)
   } catch (e) {
     const err = (e as Error).message
-    emitWebhook("upstream.error", { endpoint: "/v1/embeddings", error: err })
+    emitWebhook("upstream.error", { provider: slot.provider.id, error: err })
     return c.json({ error: { message: `upstream unreachable: ${err}`, type: "upstream" } }, 502)
+  } finally {
+    slot.release()
   }
 })
 
@@ -517,12 +492,18 @@ app.route("/v1/audio", audioRouter())
 // ─── Boot ──────────────────────────────────────────────────────────────
 
 const keyCount = (getDb().query("SELECT COUNT(*) AS c FROM keys WHERE disabled = 0").get() as { c: number }).c
+const { providers } = await import("./upstream.ts")
 console.log(`✓ CrimeOpus API listening on http://${BIND}:${PORT}`)
-console.log(`  upstream Ollama: ${OLLAMA_URL}`)
+console.log(`  upstream providers: ${providers.length}`)
+for (const p of providers) {
+  console.log(`    - ${p.id} (${p.kind}) → ${p.url}  slots:${p.maxInflight}  weight:${p.weight}`)
+}
+console.log(`  catalog: ${catalog.size} model(s)`)
 console.log(`  upstream Whisper: ${process.env.WHISPER_URL ?? "http://127.0.0.1:9000"}`)
 console.log(`  active keys: ${keyCount}${ALLOW_ANON ? " (+ anonymous allowed)" : ""}`)
 console.log(`  rate limit: ${RATE_LIMIT_RPM} rpm / burst ${RATE_LIMIT_BURST}`)
-console.log(`  catalog: ${catalog.size} model(s)`)
+console.log(`  per-key concurrency: ${process.env.PER_KEY_CONCURRENCY ?? "2"}`)
+console.log(`  queue: max ${process.env.QUEUE_MAX ?? "50"}, timeout ${process.env.QUEUE_TIMEOUT_MS ?? "30000"}ms`)
 console.log(`  usage log: ${process.env.LOG_DB ?? "./usage.db"}`)
 console.log(`  admin dashboard: ${process.env.ADMIN_PASSWORD ? "enabled at /admin" : "DISABLED (set ADMIN_PASSWORD)"}`)
 console.log(`  jwt: ${process.env.JWT_SECRET ? "HS256" : process.env.JWT_PUBLIC_KEY ? "RS256" : "disabled"}`)
