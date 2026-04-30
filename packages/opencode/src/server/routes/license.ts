@@ -1042,6 +1042,48 @@ export const LicenseRoutes = lazy(() => {
     return c.json({ ok: true })
   })
 
+  // CRDT broadcast — thin passthrough: validate membership + session, then
+  // re-emit the blob on the team SSE channel. Payload is never persisted.
+  app.post("/teams/:id/sessions/:sid/crdt", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const sid = c.req.param("sid")
+    if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    const { isActiveSessionInTeam } = await import("../../license/teams")
+    if (!isActiveSessionInTeam(teamId, sid)) return c.json({ error: "session_not_in_team" }, 404)
+    const body = (await c.req.json().catch(() => ({}))) as {
+      type?: string
+      doc_id?: string
+      update_b64?: string
+      awareness_b64?: string
+    }
+    if (typeof body.doc_id !== "string" || !body.doc_id) return c.json({ error: "missing_doc_id" }, 400)
+    const { emitTeamEvent } = await import("../../license/team-events")
+    if (body.type === "crdt.sync" && typeof body.update_b64 === "string") {
+      emitTeamEvent({
+        type: "crdt_sync",
+        team_id: teamId,
+        session_id: sid,
+        doc_id: body.doc_id,
+        update_b64: body.update_b64,
+        from_customer_id: sess.sub,
+      })
+    } else if (body.type === "crdt.awareness" && typeof body.awareness_b64 === "string") {
+      emitTeamEvent({
+        type: "crdt_awareness",
+        team_id: teamId,
+        session_id: sid,
+        doc_id: body.doc_id,
+        awareness_b64: body.awareness_b64,
+        from_customer_id: sess.sub,
+      })
+    } else {
+      return c.json({ error: "unknown_crdt_type" }, 400)
+    }
+    return c.json({ ok: true })
+  })
+
   // Read the current shared workspace state for a live session. Used by
   // guests when they decide to "follow" a host — they hydrate from this
   // before the next session_state event arrives.

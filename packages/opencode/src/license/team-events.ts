@@ -54,6 +54,22 @@ export type TeamEvent =
       state: unknown
       ts: number
     }
+  | {
+      type: "crdt_sync"
+      team_id: string
+      session_id: string
+      doc_id: string
+      update_b64: string
+      from_customer_id: string
+    }
+  | {
+      type: "crdt_awareness"
+      team_id: string
+      session_id: string
+      doc_id: string
+      awareness_b64: string
+      from_customer_id: string
+    }
 
 type Listener = (event: TeamEvent) => void
 

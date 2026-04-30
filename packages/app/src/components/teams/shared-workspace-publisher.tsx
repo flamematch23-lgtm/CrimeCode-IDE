@@ -26,7 +26,9 @@ import {
   fetchSharedState,
   type SharedWorkspaceState,
 } from "@/utils/team-session"
-import { getTeamsClient, type TeamEvent } from "@/utils/teams-client"
+import { getTeamsClient, readWebSession, type TeamEvent } from "@/utils/teams-client"
+import { SharedEditorProvider, type CrdtTransport, type CrdtMessage } from "./shared-editor-protocol"
+import { bindPromptEditor, findPromptEl } from "./bind-prompt-editor"
 
 function readActiveTeamId(): string | null {
   try {
@@ -126,6 +128,99 @@ export function SharedWorkspacePublisher() {
     // server — they can add the host's server manually from the dialog.
   }
 
+  // ── CRDT shared prompt editor ─────────────────────────────────────────
+  // When a team session is active, create a SharedEditorProvider backed by
+  // the teams HTTP+SSE transport. Bind it to the prompt contenteditable so
+  // all session members can co-author a message in real time.
+  onMount(() => {
+    let crdtProvider: SharedEditorProvider | null = null
+    let crdtCleanup: (() => void) | null = null
+    let crdtSessionId: string | null = null
+    let bindInterval: ReturnType<typeof setInterval> | null = null
+
+    const selfId = readWebSession()?.customer_id ?? null
+
+    function teardownCrdt() {
+      if (bindInterval !== null) {
+        clearInterval(bindInterval)
+        bindInterval = null
+      }
+      crdtCleanup?.()
+      crdtCleanup = null
+      crdtProvider?.destroy()
+      crdtProvider = null
+      crdtSessionId = null
+    }
+
+    function setupCrdt(teamId: string, sessionId: string) {
+      if (crdtSessionId === sessionId) return // already wired
+      teardownCrdt()
+
+      const client = getTeamsClient()
+      const docId = `${teamId}:${sessionId}:draft`
+
+      const transport: CrdtTransport = {
+        send(msg: CrdtMessage) {
+          void client.postCrdt(teamId, sessionId, msg as { type: string; doc_id: string; update_b64?: string; awareness_b64?: string }).catch(() => undefined)
+        },
+        onMessage(cb) {
+          return client.subscribe(teamId, (ev: TeamEvent) => {
+            if (ev.from_customer_id && ev.from_customer_id === selfId) return
+            if (ev.type === "crdt_sync" && ev.doc_id === docId && ev.update_b64) {
+              cb({ type: "crdt.sync", doc_id: ev.doc_id, update_b64: ev.update_b64 })
+            } else if (ev.type === "crdt_awareness" && ev.doc_id === docId && ev.awareness_b64) {
+              cb({ type: "crdt.awareness", doc_id: ev.doc_id, awareness_b64: ev.awareness_b64 })
+            }
+          })
+        },
+      }
+
+      crdtSessionId = sessionId
+      crdtProvider = new SharedEditorProvider({
+        docId,
+        transport,
+        user: selfId ? { customer_id: selfId } : undefined,
+      })
+
+      // Poll for the prompt element: it may not be in the DOM yet when the
+      // team session starts (user is on the home page). Once found, bind and
+      // stop polling. Give up after 30 s.
+      let bindAttempts = 0
+      const providerRef = crdtProvider
+      bindInterval = setInterval(() => {
+        const el = findPromptEl()
+        if (el && !crdtCleanup) {
+          clearInterval(bindInterval!)
+          bindInterval = null
+          crdtCleanup = bindPromptEditor(providerRef.doc.getText("draft"), el)
+        }
+        if (++bindAttempts > 30) {
+          clearInterval(bindInterval!)
+          bindInterval = null
+        }
+      }, 1_000)
+    }
+
+    function onSessionChanged() {
+      const active = getActiveTeamSession()
+      if (active) {
+        setupCrdt(active.teamId, active.sessionId)
+      } else {
+        teardownCrdt()
+      }
+    }
+
+    onSessionChanged()
+    window.addEventListener("team-session-changed", onSessionChanged)
+    window.addEventListener("workspace-changed", onSessionChanged)
+    onCleanup(() => {
+      window.removeEventListener("team-session-changed", onSessionChanged)
+      window.removeEventListener("workspace-changed", onSessionChanged)
+      teardownCrdt()
+    })
+  })
+
+  // ── Guest follow / host broadcast ─────────────────────────────────────
   onMount(() => {
     const tid = readActiveTeamId()
     if (!tid) return

@@ -76,6 +76,8 @@ export interface TeamEvent {
     | "chat_message"
     | "chat_typing"
     | "session_state"
+    | "crdt_sync"
+    | "crdt_awareness"
   team_id?: string
   session_id?: string
   host?: string
@@ -99,6 +101,11 @@ export interface TeamEvent {
   attachment_type?: string | null
   attachment_size?: number | null
   attachment_name?: string | null
+  // crdt_sync / crdt_awareness
+  doc_id?: string
+  update_b64?: string
+  awareness_b64?: string
+  from_customer_id?: string
 }
 
 export interface TeamChatAttachment {
@@ -308,6 +315,8 @@ export interface TeamsClient {
   previewInviteLink(token: string): Promise<TeamInviteLinkPreview | null>
   /** Redeem an invite link as the current user. Returns the joined team. */
   redeemInviteLink(token: string): Promise<{ team: TeamSummary; role: TeamRole; already_member: boolean }>
+  /** Broadcast a CRDT update (sync or awareness) to all session members via SSE. Fire-and-forget. */
+  postCrdt(teamId: string, sessionId: string, msg: { type: string; doc_id: string; update_b64?: string; awareness_b64?: string }): Promise<void>
 }
 
 // ─── Desktop (IPC) ────────────────────────────────────────────────────────
@@ -396,15 +405,16 @@ function desktopClient(): TeamsClient {
       }
       return webClient().subscribe(id, onEvent)
     },
-    // Attachment upload + invite links go through the web client (fetch+Bearer)
-    // regardless of desktop mode — the desktop IPC layer doesn't yet have these
-    // handlers and they're infrequent enough that the bearer-via-fetch path is fine.
+    // Attachment upload + invite links + CRDT go through the web client
+    // (fetch+Bearer) regardless of desktop mode — the desktop IPC layer doesn't
+    // yet have these handlers and they're infrequent enough that Bearer-via-fetch is fine.
     uploadChatAttachment: (id, file) => webClient().uploadChatAttachment(id, file),
     createInviteLink: (id, opts) => webClient().createInviteLink(id, opts),
     listInviteLinks: (id) => webClient().listInviteLinks(id),
     revokeInviteLink: (id, token) => webClient().revokeInviteLink(id, token),
     previewInviteLink: (token) => webClient().previewInviteLink(token),
     redeemInviteLink: (token) => webClient().redeemInviteLink(token),
+    postCrdt: (teamId, sessionId, msg) => webClient().postCrdt(teamId, sessionId, msg),
   }
 }
 
@@ -615,6 +625,12 @@ function webClient(): TeamsClient {
     },
     redeemInviteLink: (token) =>
       json(`/license/invite-links/${encodeURIComponent(token)}/redeem`, { method: "POST" }),
+    postCrdt: async (teamId, sessionId, msg) => {
+      await apiFetch(
+        `/license/teams/${encodeURIComponent(teamId)}/sessions/${encodeURIComponent(sessionId)}/crdt`,
+        { method: "POST", body: JSON.stringify(msg) },
+      ).catch(() => undefined)
+    },
   }
 }
 
