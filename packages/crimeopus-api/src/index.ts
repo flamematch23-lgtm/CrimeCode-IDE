@@ -533,6 +533,67 @@ app.post("/v1/embeddings", async (c) => {
 
 app.route("/v1/audio", audioRouter())
 
+// ─── /v1/sandbox/run — isolated code execution ─────────────────────────
+// Spawns a one-shot Docker container (default backend) with strict
+// resource limits, no network, and read-only root FS. Returns stdout +
+// stderr + exit code. Languages: python, node, bash. Auth scope:
+// "sandbox". See ./sandbox.ts for backend selection (docker | e2b).
+
+import { runSandbox, isSupportedLanguage, ensureImagesAvailable, type SandboxLanguage } from "./sandbox.ts"
+
+app.post("/v1/sandbox/run", async (c) => {
+  const t0 = Date.now()
+  const auth = c.get("auth")
+  const scopeFail = requireScope(c, "sandbox")
+  if (scopeFail) return scopeFail
+  const ip = ipOf(c)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    language?: string
+    code?: string
+    timeout_ms?: number
+  }
+  if (typeof body.language !== "string" || typeof body.code !== "string") {
+    return c.json({ error: { message: "missing language or code", type: "bad_request" } }, 400)
+  }
+  if (!isSupportedLanguage(body.language)) {
+    return c.json(
+      { error: { message: `unsupported language: ${body.language}. Use python, node, or bash.`, type: "bad_request" } },
+      400,
+    )
+  }
+  try {
+    const result = await runSandbox({
+      language: body.language as SandboxLanguage,
+      code: body.code,
+      timeout_ms: typeof body.timeout_ms === "number" ? body.timeout_ms : undefined,
+    })
+    logUsage({
+      keyLabel: auth.label,
+      ip,
+      model: null,
+      endpoint: "/v1/sandbox/run",
+      status: 200,
+      latencyMs: Date.now() - t0,
+    })
+    return c.json(result)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logUsage({
+      keyLabel: auth.label,
+      ip,
+      model: null,
+      endpoint: "/v1/sandbox/run",
+      status: 400,
+      latencyMs: Date.now() - t0,
+    })
+    return c.json({ error: { message: msg, type: "sandbox" } }, 400)
+  }
+})
+
+// Pre-warm Docker images on boot so the first request doesn't pay the
+// pull cost (~30 s for python:3.12-slim). Does nothing on E2B backend.
+void ensureImagesAvailable()
+
 // ─── Boot ──────────────────────────────────────────────────────────────
 
 const keyCount = (getDb().query("SELECT COUNT(*) AS c FROM keys WHERE disabled = 0").get() as { c: number }).c

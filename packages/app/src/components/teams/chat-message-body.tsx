@@ -4,17 +4,16 @@
  *
  * Buttons rendered per code block:
  *   📋 Copia        → write the code to the system clipboard
+ *   ▶ Esegui        → POST the code to the CrimeOpus sandbox endpoint
+ *                    (Docker-isolated by default, optional E2B). The result
+ *                    (stdout / stderr / exit code) is rendered inline below
+ *                    the block, so the conversation stays compact.
  *   ⚡ Esegui (AI)  → injects the code into the active prompt input as a
- *                    request to the AI: "Esegui questo codice e mostra l'output"
- *                    The AI then runs it via its existing shell/python tools.
- *
- * Why route execution through the AI and not directly: a true cross-platform
- * sandbox (E2B / Daytona / Docker) is a separate effort. Routing through the
- * AI's existing tool calls works on day-one, picks up the user's environment
- * (project deps, env vars, files), and stays auditable in the session
- * timeline rather than opening a side-channel.
+ *                    request to the AI to run it. Useful when the local
+ *                    sandbox is offline or for code that needs project
+ *                    context (file reads, env vars, etc.).
  */
-import { For, Show } from "solid-js"
+import { For, Show, createSignal } from "solid-js"
 
 interface Block {
   kind: "text" | "code"
@@ -45,6 +44,64 @@ export function parseChatBody(text: string): Block[] {
 function copy(text: string) {
   if (typeof navigator === "undefined" || !navigator.clipboard) return
   void navigator.clipboard.writeText(text).catch(() => undefined)
+}
+
+interface SandboxResult {
+  stdout: string
+  stderr: string
+  exit_code: number
+  timed_out: boolean
+  duration_ms: number
+  truncated: boolean
+  backend: "docker" | "e2b"
+}
+
+const SANDBOX_BASE = (() => {
+  const meta = import.meta as unknown as { env?: Record<string, string | undefined> }
+  return (meta?.env?.VITE_SANDBOX_URL ?? "https://ai.crimecode.cc").replace(/\/+$/, "")
+})()
+
+const SANDBOX_LANGUAGE_MAP: Record<string, string> = {
+  python: "python",
+  py: "python",
+  python3: "python",
+  node: "node",
+  nodejs: "node",
+  javascript: "javascript",
+  js: "javascript",
+  bash: "bash",
+  sh: "sh",
+  shell: "bash",
+}
+
+function mapToSandboxLanguage(language: string | undefined): string | null {
+  if (!language) return null
+  return SANDBOX_LANGUAGE_MAP[language.toLowerCase()] ?? null
+}
+
+async function runInSandbox(language: string, code: string): Promise<SandboxResult> {
+  // The sandbox endpoint accepts a CrimeOpus API key. We read it from the
+  // localStorage profile written by settings → providers → CrimeOpus connect.
+  // Falls back to anonymous if the CrimeOpus instance has ALLOW_ANON=1.
+  let apiKey = ""
+  try {
+    const raw = localStorage.getItem("crimeopus.sandbox.api_key") ?? ""
+    apiKey = raw.trim()
+  } catch {
+    /* private mode */
+  }
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`
+  const res = await fetch(`${SANDBOX_BASE}/v1/sandbox/run`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ language, code, timeout_ms: 30_000 }),
+  })
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "")
+    throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200) || "sandbox call failed"}`)
+  }
+  return (await res.json()) as SandboxResult
 }
 
 /**
@@ -91,6 +148,105 @@ function sendToPromptForExecution(code: string, language: string | undefined) {
   }
 }
 
+function CodeBlockView(props: { block: Block }) {
+  const [running, setRunning] = createSignal(false)
+  const [result, setResult] = createSignal<SandboxResult | null>(null)
+  const [error, setError] = createSignal<string | null>(null)
+
+  const sandboxLang = () => mapToSandboxLanguage(props.block.language)
+  const canRun = () => sandboxLang() !== null
+
+  async function onRun() {
+    const lang = sandboxLang()
+    if (!lang) return
+    setRunning(true)
+    setError(null)
+    setResult(null)
+    try {
+      const r = await runInSandbox(lang, props.block.content)
+      setResult(r)
+    } catch (ex) {
+      setError(ex instanceof Error ? ex.message : String(ex))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div data-slot="code-block">
+      <div data-slot="code-header">
+        <span data-slot="code-lang">{props.block.language}</span>
+        <div data-slot="code-actions">
+          <button
+            type="button"
+            data-slot="code-action"
+            onClick={() => copy(props.block.content)}
+            title="Copia il codice negli appunti"
+          >
+            📋 Copia
+          </button>
+          <Show when={canRun()}>
+            <button
+              type="button"
+              data-slot="code-action"
+              data-variant="run"
+              onClick={onRun}
+              disabled={running()}
+              title="Esegue il codice in un container Docker isolato (no network, 30s, 256MB)"
+            >
+              {running() ? "⏳ In esecuzione…" : "▶ Esegui"}
+            </button>
+          </Show>
+          <button
+            type="button"
+            data-slot="code-action"
+            data-variant="ai"
+            onClick={() => sendToPromptForExecution(props.block.content, props.block.language)}
+            title="Inserisci nel prompt input per chiedere all'AI di eseguire (utile per codice che necessita del contesto del progetto)"
+          >
+            ⚡ Esegui via AI
+          </button>
+        </div>
+      </div>
+      <pre data-slot="code-content">
+        <code>{props.block.content}</code>
+      </pre>
+      <Show when={error()}>
+        <div data-slot="sandbox-error">
+          ⚠ {error()}
+        </div>
+      </Show>
+      <Show when={result()}>
+        {(r) => (
+          <div
+            data-slot="sandbox-result"
+            data-exit={r().exit_code === 0 ? "ok" : "fail"}
+            data-timeout={r().timed_out ? "true" : "false"}
+          >
+            <div data-slot="sandbox-meta">
+              <span data-slot="sandbox-backend">{r().backend}</span>
+              <span data-slot="sandbox-exit">exit {r().exit_code}</span>
+              <span data-slot="sandbox-time">{r().duration_ms} ms</span>
+              <Show when={r().timed_out}>
+                <span data-slot="sandbox-tag" data-kind="warn">timed out</span>
+              </Show>
+              <Show when={r().truncated}>
+                <span data-slot="sandbox-tag" data-kind="warn">output truncated</span>
+              </Show>
+            </div>
+            <Show when={r().stdout}>
+              <pre data-slot="sandbox-stream" data-stream="stdout">{r().stdout}</pre>
+            </Show>
+            <Show when={r().stderr}>
+              <pre data-slot="sandbox-stream" data-stream="stderr">{r().stderr}</pre>
+            </Show>
+          </div>
+        )}
+      </Show>
+    </div>
+  )
+}
+
 export function ChatMessageBody(props: { text: string }) {
   const blocks = () => parseChatBody(props.text)
   return (
@@ -101,33 +257,7 @@ export function ChatMessageBody(props: { text: string }) {
             when={b.kind === "code"}
             fallback={<div data-slot="text-fragment">{b.content}</div>}
           >
-            <div data-slot="code-block">
-              <div data-slot="code-header">
-                <span data-slot="code-lang">{b.language}</span>
-                <div data-slot="code-actions">
-                  <button
-                    type="button"
-                    data-slot="code-action"
-                    onClick={() => copy(b.content)}
-                    title="Copia il codice negli appunti"
-                  >
-                    📋 Copia
-                  </button>
-                  <button
-                    type="button"
-                    data-slot="code-action"
-                    data-variant="run"
-                    onClick={() => sendToPromptForExecution(b.content, b.language)}
-                    title="Inserisci nel prompt input come richiesta all'AI di eseguire e mostrare output"
-                  >
-                    ⚡ Esegui via AI
-                  </button>
-                </div>
-              </div>
-              <pre data-slot="code-content">
-                <code>{b.content}</code>
-              </pre>
-            </div>
+            <CodeBlockView block={b} />
           </Show>
         )}
       </For>

@@ -2548,3 +2548,75 @@
   color: inherit;
   padding: 0;
 }
+
+/* ── Sandbox execution result (v2.29.0) ─────────────────────────────── */
+[data-component="team-chat-panel"] [data-slot="code-action"][data-variant="ai"] {
+  background: rgba(99, 102, 241, 0.85);
+  border-color: rgba(99, 102, 241, 1);
+  color: #0b0d12;
+  font-weight: 600;
+}
+[data-component="team-chat-panel"] [data-slot="code-action"][data-variant="ai"]:hover {
+  background: rgba(99, 102, 241, 1);
+}
+[data-component="team-chat-panel"] [data-slot="code-action"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-error"] {
+  margin: 0;
+  padding: 6px 10px;
+  background: rgba(220, 38, 38, 0.18);
+  border-top: 1px solid rgba(220, 38, 38, 0.35);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #fca5a5;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-result"] {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.4);
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-meta"] {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.3px;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-result"][data-exit="ok"] [data-slot="sandbox-exit"] {
+  color: #4ade80;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-result"][data-exit="fail"] [data-slot="sandbox-exit"] {
+  color: #f87171;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-tag"][data-kind="warn"] {
+  background: rgba(234, 179, 8, 0.2);
+  color: #fde68a;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-stream"] {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 240px;
+  overflow-y: auto;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-stream"][data-stream="stdout"] {
+  color: #d1d5db;
+}
+[data-component="team-chat-panel"] [data-slot="sandbox-stream"][data-stream="stderr"] {
+  color: #fca5a5;
+  background: rgba(220, 38, 38, 0.06);
+  border-top: 1px solid rgba(220, 38, 38, 0.2);
+}

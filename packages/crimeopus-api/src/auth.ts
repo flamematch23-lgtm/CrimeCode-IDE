@@ -30,7 +30,7 @@ export interface AuthContext {
   scopes: Set<string>
 }
 
-const DEFAULT_SCOPES = new Set(["models:list", "chat", "embed", "audio"])
+const DEFAULT_SCOPES = new Set(["models:list", "chat", "embed", "audio", "sandbox"])
 
 interface KeyRow {
   id: number
