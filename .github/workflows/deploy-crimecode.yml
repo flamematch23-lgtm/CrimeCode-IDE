@@ -112,14 +112,23 @@ jobs:
           VITE_API_URL: https://api.crimecode.cc
         run: bun run --cwd packages/app build
 
+      # Install wrangler globally OUTSIDE the workspace so npm doesn't choke
+      # on the Bun `catalog:` protocol used by sibling package.jsons. Running
+      # `npm i wrangler` inside the repo root (which wrangler-action would do
+      # by default) fails with EUNSUPPORTEDPROTOCOL because npm cannot parse
+      # `catalog:` deps. The global install bypasses workspace resolution.
+      - name: Install Wrangler globally
+        run: npm install -g wrangler@3
+
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          packageManager: npm
-          wranglerVersion: "3"
-          command: pages deploy packages/app/dist --project-name=crimecode-web --branch=main --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          wrangler pages deploy packages/app/dist \
+            --project-name=crimecode-web \
+            --branch=main \
+            --commit-dirty=true
 
       - name: Show deploy URL
         run: echo "Web app live at https://crimecode-web.pages.dev"
