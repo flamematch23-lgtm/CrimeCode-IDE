@@ -130,6 +130,40 @@ function makeApi(base: string) {
 
 type Panel = "flows" | "intercept" | "rules" | "agent"
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B"
+  const k = 1024
+  const sizes = ["B", "KB", "MB"]
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
+  return `${(bytes / Math.pow(k, i)).toFixed(i > 0 ? 1 : 0)} ${sizes[i]}`
+}
+
+/** Shared method→color class mapping used by FlowsPanel and InterceptPanel. */
+function methodTextClass(method: string): string {
+  switch (method) {
+    case "GET": return "text-icon-success-base"
+    case "POST": case "PUT": case "PATCH": return "text-icon-warning-base"
+    case "DELETE": return "text-text-on-critical-base"
+    default: return "text-text-strong"
+  }
+}
+
+function methodBgClass(method: string): string {
+  switch (method) {
+    case "GET": return "bg-surface-success/20 text-icon-success-base"
+    case "POST": case "PUT": case "PATCH": return "bg-surface-warning/20 text-icon-warning-base"
+    case "DELETE": return "bg-surface-critical-weak text-text-on-critical-base"
+    default: return "text-text-strong"
+  }
+}
+
+interface QuickAction {
+  label: string
+  description: string
+  prompt: string
+  disabled?: boolean
+}
+
 export default function BurpWorkspace() {
   const navigate = useNavigate()
   const [apiBase, setApiBase] = createSignal(localStorage.getItem("burp.apiBase") ?? "http://127.0.0.1:8182")
@@ -245,11 +279,28 @@ export default function BurpWorkspace() {
 
   const startLiveSubscriptions = () => {
     stopPollingAndSse()
+    // Debounced fetchers: coalesce rapid-fire SSE events into a single API call.
+    let flowDebounce: ReturnType<typeof setTimeout> | null = null
+    let pendingDebounce: ReturnType<typeof setTimeout> | null = null
+    const debouncedFlowRefresh = () => {
+      if (flowDebounce) return
+      flowDebounce = setTimeout(() => {
+        flowDebounce = null
+        void api().flows({ limit: 200 }).then(setFlows).catch(() => undefined)
+      }, 200)
+    }
+    const debouncedPendingRefresh = () => {
+      if (pendingDebounce) return
+      pendingDebounce = setTimeout(() => {
+        pendingDebounce = null
+        void api().pending().then(setPending).catch(() => undefined)
+      }, 200)
+    }
     try {
       evtSource = new EventSource(api().eventsUrl())
-      evtSource.addEventListener("flow", () => void api().flows({ limit: 200 }).then(setFlows).catch(() => undefined))
-      evtSource.addEventListener("pending", () => void api().pending().then(setPending).catch(() => undefined))
-      evtSource.addEventListener("resolved", () => void api().pending().then(setPending).catch(() => undefined))
+      evtSource.addEventListener("flow", debouncedFlowRefresh)
+      evtSource.addEventListener("pending", debouncedPendingRefresh)
+      evtSource.addEventListener("resolved", debouncedPendingRefresh)
       evtSource.onerror = () => {
         // SSE dropped after a successful initial connect — kick off a
         // refreshAll cycle which will either re-establish or transition
@@ -568,11 +619,14 @@ function FlowsPanel(props: {
                   class="w-full text-left px-3 py-2 border-b border-surface-weak hover:bg-surface-raised-base-hover transition-colors"
                   classList={{
                     "bg-surface-raised-base-hover": props.selected === f.id,
+                    "border-l-2 border-l-icon-warning-base": !!f.flagged,
                   }}
                 >
                   <div class="flex items-center gap-2 min-w-0">
-                    <span class="text-11-mono text-text-weak shrink-0">#{f.id}</span>
-                    <span class="text-11-mono text-text-strong w-12 shrink-0">{f.method}</span>
+                    <span class="text-11-mono text-text-weak shrink-0 w-8 text-right">#{f.id}</span>
+                    <span class={`text-11-mono w-14 shrink-0 text-center rounded px-1 ${methodBgClass(f.method)}`}>
+                      {f.method}
+                    </span>
                     <span
                       class="text-11-mono w-10 shrink-0 text-right"
                       classList={{
@@ -581,18 +635,21 @@ function FlowsPanel(props: {
                         "text-text-on-critical-base": (f.status ?? 0) >= 400,
                       }}
                     >
-                      {f.status ?? "—"}
+                      {f.status ?? "..."}
                     </span>
-                    <span class="text-11-regular text-text-strong truncate">
-                      {f.scheme}://{f.host}
+                    <span class="text-11-regular text-text-strong truncate flex-1" title={`${f.scheme}://${f.host}${f.path}`}>
+                      <span class="text-text-weak">{f.host}</span>
                       {f.path}
                     </span>
                   </div>
-                  <div class="flex items-center gap-3 text-10-regular text-text-weak mt-0.5">
-                    <span>{(f.resp_body_size ?? 0).toLocaleString()} B</span>
-                    <span>{f.duration_ms ?? "—"} ms</span>
+                  <div class="flex items-center gap-3 text-10-regular text-text-weak mt-0.5 pl-8">
+                    <span>{formatBytes(f.resp_body_size ?? 0)}</span>
+                    <span>{f.duration_ms != null ? `${f.duration_ms} ms` : "pending"}</span>
+                    <Show when={f.resp_content_type}>
+                      <span class="truncate max-w-32">{f.resp_content_type?.split(";")[0]}</span>
+                    </Show>
                     <Show when={f.flagged}>
-                      <span class="text-icon-warning-base">🚩 flagged</span>
+                      <span class="text-icon-warning-base font-medium">flagged</span>
                     </Show>
                   </div>
                 </button>
@@ -704,11 +761,14 @@ function InterceptPanel(props: {
 }) {
   const sel = createMemo(() => props.pending.find((p) => p.id === props.selected) ?? null)
   const [editMethod, setEditMethod] = createSignal<string>("")
+  const [editPath, setEditPath] = createSignal<string>("")
   const [editHeaders, setEditHeaders] = createSignal<string>("")
   const [editBody, setEditBody] = createSignal<string>("")
+  const [busy, setBusy] = createSignal(false)
 
   const seedEdit = (p: PendingItem) => {
     setEditMethod(p.method)
+    setEditPath(p.path)
     setEditHeaders(
       Object.entries(p.headers)
         .map(([k, v]) => `${k}: ${v}`)
@@ -718,24 +778,31 @@ function InterceptPanel(props: {
   }
 
   const forward = async (id: number) => {
+    setBusy(true)
     try {
       await props.api().forwardPending(id)
       showToast({ variant: "success", title: `#${id} inoltrato` })
-      props.onSelect(null)
+      if (props.selected === id) props.onSelect(null)
     } catch (e) {
-      showToast({ variant: "error", title: (e as Error).message })
+      showToast({ variant: "error", title: "Forward fallito", description: (e as Error).message })
+    } finally {
+      setBusy(false)
     }
   }
   const drop = async (id: number) => {
+    setBusy(true)
     try {
       await props.api().dropPending(id)
       showToast({ variant: "success", title: `#${id} eliminato` })
-      props.onSelect(null)
+      if (props.selected === id) props.onSelect(null)
     } catch (e) {
-      showToast({ variant: "error", title: (e as Error).message })
+      showToast({ variant: "error", title: "Drop fallito", description: (e as Error).message })
+    } finally {
+      setBusy(false)
     }
   }
   const submitEdit = async (p: PendingItem) => {
+    setBusy(true)
     try {
       const headers: Record<string, string> = {}
       for (const line of editHeaders().split("\n")) {
@@ -745,21 +812,58 @@ function InterceptPanel(props: {
       }
       await props.api().editPending(p.id, {
         method: editMethod() || undefined,
+        url: editPath() !== p.path ? `${p.scheme}://${p.host}${editPath()}` : undefined,
         headers,
         body: editBody(),
       })
       showToast({ variant: "success", title: `#${p.id} editato e inoltrato` })
       props.onSelect(null)
     } catch (e) {
-      showToast({ variant: "error", title: (e as Error).message })
+      showToast({ variant: "error", title: "Edit fallito", description: (e as Error).message })
+    } finally {
+      setBusy(false)
     }
   }
+
+  const batchPending = async (
+    action: (id: number) => Promise<unknown>,
+    label: string,
+  ) => {
+    setBusy(true)
+    try {
+      const results = await Promise.allSettled(
+        props.pending.map((p) => action(p.id)),
+      )
+      const ok = results.filter((r) => r.status === "fulfilled").length
+      const fail = results.length - ok
+      props.onSelect(null)
+      showToast({
+        variant: fail > 0 ? "error" : "success",
+        title: `${label}: ${ok} ok${fail ? `, ${fail} falliti` : ""}`,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const forwardAll = () => batchPending((id) => props.api().forwardPending(id), "Forward all")
+  const dropAll = () => batchPending((id) => props.api().dropPending(id), "Drop all")
 
   return (
     <>
       <div class="w-1/3 min-w-72 max-w-md flex flex-col border-r border-surface-weak">
-        <div class="px-3 py-2 border-b border-surface-weak bg-surface-base text-12-semibold">
-          Richieste in attesa ({props.pending.length})
+        <div class="px-3 py-2 border-b border-surface-weak bg-surface-base flex items-center justify-between">
+          <span class="text-12-semibold">Richieste in attesa ({props.pending.length})</span>
+          <Show when={props.pending.length > 1}>
+            <div class="flex gap-1">
+              <Button size="small" variant="primary" onClick={forwardAll} disabled={busy()}>
+                Forward all
+              </Button>
+              <Button size="small" variant="secondary" onClick={dropAll} disabled={busy()}>
+                Drop all
+              </Button>
+            </div>
+          </Show>
         </div>
         <div class="flex-1 overflow-y-auto">
           <Show
@@ -772,23 +876,36 @@ function InterceptPanel(props: {
           >
             <For each={props.pending}>
               {(p) => (
-                <button
-                  onClick={() => {
-                    props.onSelect(p.id)
-                    seedEdit(p)
-                  }}
-                  class="w-full text-left px-3 py-2 border-b border-surface-weak hover:bg-surface-raised-base-hover transition-colors"
+                <div
+                  class="flex items-center border-b border-surface-weak hover:bg-surface-raised-base-hover transition-colors"
                   classList={{ "bg-surface-raised-base-hover": props.selected === p.id }}
                 >
-                  <div class="flex items-center gap-2">
-                    <span class="text-11-mono text-text-weak">#{p.id}</span>
-                    <span class="text-11-mono text-text-strong w-12">{p.method}</span>
-                    <span class="text-11-regular truncate">
-                      {p.scheme}://{p.host}
-                      {p.path}
-                    </span>
+                  <button
+                    onClick={() => {
+                      props.onSelect(p.id)
+                      seedEdit(p)
+                    }}
+                    class="flex-1 text-left px-3 py-2"
+                  >
+                    <div class="flex items-center gap-2">
+                      <span class="text-11-mono text-text-weak">#{p.id}</span>
+                      <span class={`text-11-mono w-12 ${methodTextClass(p.method)}`}>
+                        {p.method}
+                      </span>
+                      <span class="text-11-regular truncate">
+                        {p.host}
+                        {p.path}
+                      </span>
+                    </div>
+                    <div class="text-10-regular text-text-weak mt-0.5">
+                      {p.phase} · {new Date(p.ts).toLocaleTimeString()}
+                    </div>
+                  </button>
+                  <div class="flex gap-1 px-2 shrink-0">
+                    <IconButton icon="arrow-right" variant="ghost" onClick={() => forward(p.id)} aria-label="Forward" />
+                    <IconButton icon="circle-ban-sign" variant="ghost" onClick={() => drop(p.id)} aria-label="Drop" />
                   </div>
-                </button>
+                </div>
               )}
             </For>
           </Show>
@@ -805,41 +922,59 @@ function InterceptPanel(props: {
         >
           {(p) => (
             <div class="space-y-3 max-w-3xl">
-              <div class="flex gap-2">
-                <Button variant="primary" onClick={() => forward(p().id)}>
-                  Forward
+              <div class="flex items-center gap-3 mb-2">
+                <h3 class="text-14-semibold flex-1">
+                  Intercept #{p().id} — {p().phase}
+                </h3>
+                <span class="text-11-regular text-text-weak">{new Date(p().ts).toLocaleTimeString()}</span>
+              </div>
+              <div class="flex gap-2 flex-wrap">
+                <Button variant="primary" onClick={() => forward(p().id)} disabled={busy()}>
+                  ▶ Forward
                 </Button>
-                <Button variant="secondary" onClick={() => drop(p().id)}>
-                  Drop
+                <Button variant="secondary" onClick={() => drop(p().id)} disabled={busy()}>
+                  ✕ Drop
                 </Button>
-                <Button variant="secondary" onClick={() => submitEdit(p())}>
-                  Edit + Forward
+                <Button variant="secondary" onClick={() => submitEdit(p())} disabled={busy()}>
+                  ✎ Edit + Forward
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => {
+                    const raw = `${editMethod()} ${p().scheme}://${p().host}${editPath()} HTTP/1.1\n${editHeaders()}\n\n${editBody()}`
+                    void navigator.clipboard.writeText(raw)
+                    showToast({ variant: "success", title: "Raw request copiato" })
+                  }}
+                >
+                  Copia raw
                 </Button>
               </div>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-3 gap-2">
                 <TextField type="text" label="Method" value={editMethod()} onChange={setEditMethod} />
-                <TextField
-                  type="text"
-                  label="URL (read-only)"
-                  value={`${p().scheme}://${p().host}${p().path}`}
-                  onChange={() => {}}
-                  disabled
-                />
+                <div class="col-span-2">
+                  <TextField type="text" label="Path" value={editPath()} onChange={setEditPath} />
+                </div>
+              </div>
+              <div class="text-11-regular text-text-weak px-1">
+                Host: <code class="text-text-strong">{p().scheme}://{p().host}:{(p() as PendingItem).port ?? 443}</code>
               </div>
               <div>
                 <div class="text-12-semibold mb-1">Headers (Name: Value, una per riga)</div>
                 <textarea
-                  class="w-full bg-surface-base rounded px-2 py-1.5 text-11-mono min-h-32 font-mono"
+                  class="w-full bg-surface-base border border-surface-weak rounded px-2 py-1.5 text-11-mono min-h-32 font-mono focus:outline-none focus:border-icon-warning-base transition-colors"
                   value={editHeaders()}
                   onInput={(e) => setEditHeaders(e.currentTarget.value)}
+                  spellcheck={false}
                 />
               </div>
               <div>
                 <div class="text-12-semibold mb-1">Body</div>
                 <textarea
-                  class="w-full bg-surface-base rounded px-2 py-1.5 text-11-mono min-h-48 font-mono"
+                  class="w-full bg-surface-base border border-surface-weak rounded px-2 py-1.5 text-11-mono min-h-48 font-mono focus:outline-none focus:border-icon-warning-base transition-colors"
                   value={editBody()}
                   onInput={(e) => setEditBody(e.currentTarget.value)}
+                  spellcheck={false}
                 />
               </div>
             </div>
@@ -980,6 +1115,17 @@ function AgentPanel(props: {
   const [intent, setIntent] = createSignal("Analizza questo flusso, evidenzia anomalie e suggerisci attacchi pertinenti.")
   const [includeBody, setIncludeBody] = createSignal(true)
   const [snippet, setSnippet] = createSignal("")
+  const [copied, setCopied] = createSignal(false)
+  let flashTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => clearTimeout(flashTimer))
+
+  const copyAndFlash = (text: string, label: string) => {
+    void navigator.clipboard.writeText(text)
+    clearTimeout(flashTimer)
+    setCopied(true)
+    flashTimer = setTimeout(() => setCopied(false), 2000)
+    showToast({ variant: "success", title: label })
+  }
 
   const buildPrompt = async () => {
     if (!props.selectedFlow) {
@@ -1008,24 +1154,24 @@ function AgentPanel(props: {
         headers,
         body ? `\n${body}` : "",
         ``,
-        `## Response (${f.status} · ${f.duration_ms} ms · ${f.resp_body_size} B · ${f.resp_content_type ?? "-"})`,
+        `## Response (${f.status} · ${f.duration_ms} ms · ${formatBytes(f.resp_body_size ?? 0)} · ${f.resp_content_type ?? "-"})`,
         respHeaders,
         respSnippet ? `\n${respSnippet}` : "",
         ``,
-        `## Strumenti che puoi usare con burp_toolkit`,
-        `- repeater: replay con varianti (\`from-flow ${f.id}\`)`,
-        `- intruder: fuzzer con \`§…§\` placeholder`,
-        `- scanner: passive (sicuro) o active (richiede --enable + autorizzazione)`,
+        `## Strumenti disponibili (usa burp_toolkit con il subtool indicato)`,
+        `- repeater: replay con varianti → { subtool: "repeater", args: ["from-flow", "${f.id}"] }`,
+        `- intruder: fuzzer → { subtool: "intruder", args: ["sniper", "--from-flow", "${f.id}", "--builtin", "xss-basic"] }`,
+        `- scanner: scan passivo → { subtool: "scanner", args: ["passive", "--from-flow", "${f.id}"] }`,
         `- decoder/hackvertor: decode/encode catene`,
         `- engagement-notes: registra finding con severity + CWE`,
-        `- csrf-poc: genera HTML PoC se l'endpoint è state-changing senza token`,
-        `- collaborator: token OOB per testare SSRF / XXE / blind XSS`,
+        `- csrf-poc: genera HTML PoC → { subtool: "csrf-poc", args: ["from-flow", "${f.id}"] }`,
+        `- collaborator: token OOB per SSRF / XXE / blind XSS`,
+        `- comparer: diff due response → { subtool: "comparer", args: ["from-flows", "${f.id}", "<other_id>"] }`,
       ].join("\n")
       setSnippet(prompt)
-      void navigator.clipboard.writeText(prompt)
-      showToast({ variant: "success", title: "Prompt copiato negli appunti" })
+      copyAndFlash(prompt, "Prompt copiato negli appunti")
     } catch (e) {
-      showToast({ variant: "error", title: (e as Error).message })
+      showToast({ variant: "error", title: "Errore generazione prompt", description: (e as Error).message })
     }
   }
 
@@ -1036,24 +1182,83 @@ function AgentPanel(props: {
       return
     }
     const prompt = [
-      `Una richiesta è bloccata in intercept (id=${p.id}).`,
-      `Method: ${p.method}`,
-      `URL: ${p.scheme}://${p.host}${p.path}`,
-      `Headers: ${JSON.stringify(p.headers, null, 2)}`,
-      p.body ? `Body: ${p.body.slice(0, 1024)}` : "",
+      `Una richiesta HTTP è bloccata in intercept. Analizza e decidi come procedere.`,
       ``,
-      `Decidi se inoltrare, droppare o editare. Se editi:`,
-      `  burp_toolkit{ subtool: "proxy", args: ["intercept-action", "${p.id}", "edit", "--method", "POST", "--header", "X: y", "--body", "..."] }`,
+      `## Richiesta intercettata (id=${p.id}, phase: ${p.phase})`,
+      `${p.method} ${p.scheme}://${p.host}${p.path}`,
+      ``,
+      `### Headers`,
+      Object.entries(p.headers).map(([k, v]) => `  ${k}: ${v}`).join("\n"),
+      p.body ? `\n### Body\n${p.body.slice(0, 2048)}` : "",
+      ``,
+      `## Azioni possibili`,
+      `1. **Forward** (inoltra invariato): burp_toolkit { subtool: "proxy", args: ["forward", "${p.id}"] }`,
+      `2. **Drop** (scarta): burp_toolkit { subtool: "proxy", args: ["drop", "${p.id}"] }`,
+      `3. **Edit + Forward** (modifica e inoltra): burp_toolkit { subtool: "proxy", args: ["edit", "${p.id}", "--method", "POST", "--header", "X-Custom: value", "--body", "modified_body"] }`,
+      ``,
+      `Analizza la richiesta, identifica eventuali parametri interessanti per il testing, e suggerisci se/come modificarla.`,
     ].join("\n")
     setSnippet(prompt)
-    void navigator.clipboard.writeText(prompt)
-    showToast({ variant: "success", title: "Prompt copiato" })
+    copyAndFlash(prompt, "Prompt intercept copiato")
   }
+
+  const selectedFlowHost = createMemo(() => {
+    if (!props.selectedFlow) return null
+    const flow = props.flows.find((f) => f.id === props.selectedFlow)
+    return flow ? `${flow.scheme}://${flow.host}` : null
+  })
+
+  const quickActions = createMemo<QuickAction[]>(() => [
+    {
+      label: "Scan passivo dei flussi recenti",
+      description: "Analizza le ultime 200 richieste per vulnerabilità passive (CSP, cookie, error fingerprint, secrets leak)",
+      prompt:
+        'Usa burp_toolkit { subtool: "scanner", args: ["batch", "--limit", "200"], as_json: true }. ' +
+        "Classifica i finding per categoria (CSP mancante, cookie insicuri, error fingerprint, secret exposure) con priorità alta/media/bassa e il flow ID di riferimento per ciascuno. Formato tabella.",
+    },
+    {
+      label: `Fuzz parametri sul flusso #${props.selectedFlow ?? "—"}`,
+      description: "Identifica parametri query/body e lancia un intruder sniper con payload XSS",
+      disabled: !props.selectedFlow,
+      prompt: props.selectedFlow
+        ? `Per il flow #${props.selectedFlow}: 1) Usa burp_toolkit { subtool: "proxy", args: ["show", "${props.selectedFlow}"], as_json: true } per analizzare la richiesta. 2) Identifica tutti i parametri iniettabili (query string, body, header custom). 3) Per ciascuno, lancia burp_toolkit { subtool: "intruder", args: ["sniper", "--from-flow", "${props.selectedFlow}", "--builtin", "xss-basic"], as_json: true }. 4) Mostra solo i top-5 per differenza di response.`
+        : "Seleziona prima un flusso nella tab Flussi.",
+    },
+    {
+      label: "Mappa autorizzazioni (auth-matrix)",
+      description: "Replay delle ultime 30 richieste con identità diverse per trovare BOLA/IDOR",
+      prompt:
+        'Usa burp_toolkit { subtool: "auth-matrix", args: ["from-history", "--limit", "30"], as_json: true } per generare la matrice di autorizzazione. Chiedimi i Cookie/header per ciascuna identità (admin, utente normale, non autenticato), poi esegui il test con --baseline admin.',
+    },
+    {
+      label: "Genera payload OOB (Collaborator)",
+      description: "Crea un token di callback out-of-band per testare SSRF, XXE, blind XSS, SSTI",
+      prompt:
+        'Usa burp_toolkit { subtool: "collaborator", args: ["payload", "--type", "http"], as_json: true } per generare un URL di callback. Poi suggerisci 5 payload concreti per: 1) SSRF, 2) XXE, 3) SSTI (Jinja2/Twig), 4) blind XSS, 5) Log4Shell — ciascuno con l\'URL appena generato come target callback.',
+    },
+    {
+      label: "Genera CSRF PoC per flusso selezionato",
+      description: "Crea un HTML auto-submit che riproduce la richiesta state-changing",
+      disabled: !props.selectedFlow,
+      prompt: props.selectedFlow
+        ? `Usa burp_toolkit { subtool: "csrf-poc", args: ["from-flow", "${props.selectedFlow}", "--include-cookies"] } per generare un file HTML di CSRF PoC. Analizza se il flusso #${props.selectedFlow} è effettivamente vulnerabile (assenza di token CSRF, cookie SameSite=None, no custom header requirement).`
+        : "Seleziona prima un flusso nella tab Flussi.",
+    },
+    {
+      label: "Content discovery sull'host selezionato",
+      description: "Brute-force di directory/file nascosti con wordlist API",
+      disabled: !props.selectedFlow,
+      prompt: props.selectedFlow
+        ? `Usa burp_toolkit { subtool: "content-discovery", args: ["--url", "${selectedFlowHost() ?? "https://target"}/", "--builtin", "api", "--ext", "json,php,bak,old,txt"], as_json: true } per scoprire endpoint nascosti su ${selectedFlowHost() ?? "target"}. Mostra solo i path con status 200/301/302/403 e ordina per interesse (403 = potenzialmente protetto, 200 con contenuto = leak).`
+        : "Seleziona prima un flusso nella tab Flussi.",
+    },
+  ])
 
   return (
     <div class="flex-1 overflow-y-auto p-4">
       <div class="max-w-3xl mx-auto space-y-4">
-        <div class="bg-surface-base rounded p-4">
+        {/* Prompt builder */}
+        <div class="bg-surface-base rounded-lg p-4 border border-surface-weak">
           <div class="flex items-center gap-2 mb-2">
             <Icon name="code-lines" class="size-5 text-icon-warning-base" />
             <h3 class="text-14-semibold">Collabora con l'agente AI</h3>
@@ -1066,11 +1271,12 @@ function AgentPanel(props: {
 
           <div class="space-y-3">
             <TextField type="text" label="Intento (cosa vuoi che faccia l'agente)" value={intent()} onChange={setIntent} />
-            <label class="flex items-center gap-2 text-12-regular">
+            <label class="flex items-center gap-2 text-12-regular cursor-pointer">
               <input
                 type="checkbox"
                 checked={includeBody()}
                 onInput={(e) => setIncludeBody(e.currentTarget.checked)}
+                class="rounded"
               />
               Includi body request/response (max 6 KB)
             </label>
@@ -1088,71 +1294,70 @@ function AgentPanel(props: {
           </div>
         </div>
 
+        {/* Generated prompt preview */}
         <Show when={snippet()}>
-          <div class="bg-surface-base rounded p-3">
+          <div class="bg-surface-base rounded-lg p-3 border border-surface-weak">
             <div class="flex items-center justify-between mb-2">
-              <h4 class="text-12-semibold">Anteprima prompt (già negli appunti)</h4>
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={() => {
-                  void navigator.clipboard.writeText(snippet())
-                  showToast({ variant: "success", title: "Copiato" })
-                }}
-              >
-                Copia di nuovo
-              </Button>
+              <h4 class="text-12-semibold">
+                {copied() ? "✓ Copiato negli appunti" : "Anteprima prompt"}
+              </h4>
+              <div class="flex gap-2">
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => copyAndFlash(snippet(), "Copiato")}
+                >
+                  Copia
+                </Button>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => setSnippet("")}
+                >
+                  Chiudi
+                </Button>
+              </div>
             </div>
-            <pre class="text-11-mono whitespace-pre-wrap bg-surface-weak rounded p-2 max-h-96 overflow-auto">
+            <pre class="text-11-mono whitespace-pre-wrap bg-surface-weak rounded p-2 max-h-80 overflow-auto select-all">
               {snippet()}
             </pre>
           </div>
         </Show>
 
-        <div class="bg-surface-base rounded p-3 space-y-2">
-          <h4 class="text-12-semibold">Quick actions per l'agente</h4>
-          <For
-            each={[
-              {
-                label: "Scan passivo dei 200 flussi più recenti",
-                prompt:
-                  'Esegui burp_toolkit { subtool: "scanner", args: ["batch", "--limit", "200"], as_json: true } e ' +
-                  "riassumi per categoria (CSP, cookies, error fingerprints, secrets) con priorità + flow id di riferimento.",
-              },
-              {
-                label: "Fuzz parametri sul flusso selezionato",
-                prompt:
-                  `Per flow #${props.selectedFlow ?? "<id>"}: identifica parametri query/body, lancia burp_toolkit ` +
-                  `{ subtool: "intruder", args: ["sniper", "--from-flow", "${props.selectedFlow ?? "<id>"}", ` +
-                  `"--builtin", "xss-basic"] } e mostra solo le risposte con score top-5.`,
-              },
-              {
-                label: "Mappa autorizzazioni con auth-matrix",
-                prompt:
-                  "Genera con burp_toolkit { subtool: \"auth-matrix\", args: [\"from-history\", \"--limit\", \"30\"] } " +
-                  "una matrice; chiedimi i Cookie/header per ciascuna identità, poi esegui run con --baseline admin.",
-              },
-              {
-                label: "Avvia un Collaborator e mintami un payload",
-                prompt:
-                  "Esegui burp_toolkit { subtool: \"collaborator\", args: [\"payload\", \"--type\", \"http\"], as_json: true }, " +
-                  "poi suggerisci 5 payload SSRF / XXE / SSTI che usano l'URL appena generato.",
-              },
-            ]}
-          >
-            {(qa) => (
-              <button
-                onClick={() => {
-                  void navigator.clipboard.writeText(qa.prompt)
-                  showToast({ variant: "success", title: "Prompt copiato" })
-                }}
-                class="w-full text-left p-2 rounded hover:bg-surface-raised-base-hover"
-              >
-                <div class="text-12-semibold">{qa.label}</div>
-                <div class="text-11-regular text-text-weak truncate">{qa.prompt}</div>
-              </button>
-            )}
-          </For>
+        {/* Quick actions */}
+        <div class="bg-surface-base rounded-lg p-3 border border-surface-weak">
+          <h4 class="text-12-semibold mb-3">Quick actions per l'agente</h4>
+          <div class="space-y-1">
+            <For each={quickActions()}>
+              {(qa) => (
+                <button
+                  onClick={() => {
+                    if (qa.disabled) {
+                      showToast({ variant: "error", title: "Seleziona prima un flusso nella tab Flussi" })
+                      return
+                    }
+                    copyAndFlash(qa.prompt, `"${qa.label}" copiato`)
+                  }}
+                  class="w-full text-left p-3 rounded-lg hover:bg-surface-raised-base-hover transition-colors group"
+                  classList={{
+                    "opacity-50 cursor-not-allowed": !!qa.disabled,
+                  }}
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="text-12-semibold group-hover:text-icon-warning-base transition-colors">{qa.label}</div>
+                  </div>
+                  <div class="text-11-regular text-text-weak mt-0.5">{qa.description}</div>
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
+
+        {/* Help */}
+        <div class="bg-surface-weak/50 rounded-lg p-3 text-11-regular text-text-weak">
+          <strong>Come usare:</strong> Seleziona un flusso nella tab "Flussi", torna qui, genera il prompt e
+          incollalo nel composer dell'agente (o clicca "Apri composer agente"). L'agente pentester ha accesso diretto
+          al <code>burp_toolkit</code> con tutti i 16 sub-tool — non serve configurazione aggiuntiva.
         </div>
       </div>
     </div>
