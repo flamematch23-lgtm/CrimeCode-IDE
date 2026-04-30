@@ -150,16 +150,25 @@ export default function BurpWorkspace() {
 
   // Connection lifecycle:
   //   - while connected: SSE stream + a 4 s settings poll
-  //   - while disconnected: NO continuous polling. We schedule a single
-  //     retry with exponential backoff (2s → 4s → 8s → 16s → max 30s) so
-  //     the diagnostic console doesn't get spammed when the proxy isn't
-  //     running. The user can also click "Riprova" or "Avvia proxy" to
-  //     retry on demand.
+  //   - while disconnected: backoff esponenziale 2s → 4s → 8s → … → 5min
+  //     (cap ALTO perché il proxy locale è una feature opt-in che la
+  //     maggioranza degli utenti non accenderà mai — meglio retry rari).
+  //   - quando la tab non è visibile: STOP COMPLETO dei retry. Riprende
+  //     immediatamente al ritorno foreground.
+  //   - dopo MAX_FAIL_BEFORE_GIVE_UP retry consecutivi falliti, smette
+  //     del tutto: l'utente deve cliccare "Riprova" / "Avvia proxy" per
+  //     riattivare. Evita rumore infinito quando l'utente apre la pagina
+  //     per curiosità senza mai voler usare il proxy.
   let evtSource: EventSource | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let retryDelayMs = 2000
+  let consecutiveFailures = 0
+  let givenUp = false
+  let documentVisible = typeof document !== "undefined" ? !document.hidden : true
   let settingsTimer: ReturnType<typeof setInterval> | null = null
+  const MAX_FAIL_BEFORE_GIVE_UP = 8 // ~ dopo ≈ 12 minuti totali smette
+  const MAX_BACKOFF_MS = 5 * 60_000 // 5 minuti
 
   const stopPollingAndSse = () => {
     if (evtSource) {
@@ -185,11 +194,13 @@ export default function BurpWorkspace() {
 
   const scheduleRetry = () => {
     cancelRetry()
+    if (givenUp) return
+    if (!documentVisible) return // resume on visibility change
     retryTimer = setTimeout(() => {
       retryTimer = null
       void refreshAll()
     }, retryDelayMs)
-    retryDelayMs = Math.min(retryDelayMs * 2, 30_000)
+    retryDelayMs = Math.min(retryDelayMs * 2, MAX_BACKOFF_MS)
   }
 
   // Initial load + polling/SSE
@@ -208,16 +219,24 @@ export default function BurpWorkspace() {
       const wasConnected = connected()
       setConnected(true)
       retryDelayMs = 2000 // reset backoff
+      consecutiveFailures = 0
+      givenUp = false
       cancelRetry()
       if (!wasConnected) startLiveSubscriptions()
       return true
     } catch (e) {
       const wasConnected = connected()
       setConnected(false)
+      consecutiveFailures++
       if (wasConnected) {
         // Lost connection mid-session — tear down active subs and
         // schedule a fresh retry (backoff resets on next success).
         stopPollingAndSse()
+      }
+      if (consecutiveFailures >= MAX_FAIL_BEFORE_GIVE_UP) {
+        givenUp = true
+        cancelRetry()
+        return false
       }
       scheduleRetry()
       return false
@@ -262,7 +281,27 @@ export default function BurpWorkspace() {
 
   onMount(() => {
     void refreshAll()
+    // Pausa retry quando la tab non è visibile (Electron lo emette anche
+    // quando minimizzi la window). Riprende immediatamente al ritorno.
+    const onVisibility = () => {
+      const visible = !document.hidden
+      documentVisible = visible
+      if (visible) {
+        // Resetta lo stato "given up" quando l'utente torna sulla tab —
+        // probabilmente vuole effettivamente vedere lo stato.
+        if (givenUp) {
+          givenUp = false
+          retryDelayMs = 2000
+          consecutiveFailures = 0
+        }
+        if (!connected()) void refreshAll()
+      } else {
+        cancelRetry()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility)
     onCleanup(() => {
+      document.removeEventListener("visibilitychange", onVisibility)
       stopPollingAndSse()
       cancelRetry()
     })
@@ -272,6 +311,16 @@ export default function BurpWorkspace() {
     setApiBase(v)
     localStorage.setItem("burp.apiBase", v)
     retryDelayMs = 2000
+    consecutiveFailures = 0
+    givenUp = false
+    cancelRetry()
+    void refreshAll()
+  }
+
+  const manualRetry = () => {
+    retryDelayMs = 2000
+    consecutiveFailures = 0
+    givenUp = false
     cancelRetry()
     void refreshAll()
   }
@@ -400,13 +449,18 @@ export default function BurpWorkspace() {
               onChange={persistApiBase}
               placeholder="http://127.0.0.1:8182"
             />
-            <Button variant="secondary" size="small" onClick={() => void refreshAll()}>
+            <Button variant="secondary" size="small" onClick={manualRetry}>
               Riprova
             </Button>
+            <Button variant="secondary" size="small" onClick={() => navigate("/security")}>
+              Indietro a Sicurezza
+            </Button>
           </div>
-          <div class="text-10-regular text-text-weak">
-            Mentre offline il polling è disabilitato per evitare flood di richieste — la UI ritenta automaticamente con
-            backoff esponenziale (2s → 30s).
+          <div class="text-10-regular text-text-weak max-w-2xl">
+            Il Burp Workspace è un'**utilità opt-in** per il toolkit di sicurezza: serve un proxy MITM locale running
+            (vedi comando sopra). Se non lo stai usando, torna indietro — i retry sono già throttled (backoff 2s→5min,
+            stop a tab nascosta, stop dopo 8 fail consecutivi). Il polling NON tocca la tua GPU né altri sistemi: sono
+            solo controlli HTTP locali a vuoto fino a quando avvii il proxy.
           </div>
         </div>
       </Show>
