@@ -35,6 +35,7 @@ import {
   type TeamMember,
 } from "../../utils/teams-client"
 import { usePlatform } from "../../context/platform"
+import { ChatMessageBody } from "./chat-message-body"
 
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 const ATTACHMENT_ALLOWED = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
@@ -522,7 +523,9 @@ export function TeamChatPanel(props: Props) {
                         </a>
                       </Show>
                       <Show when={g.msg.text}>
-                        <div data-slot="bubble">{g.msg.text}</div>
+                        <div data-slot="bubble">
+                          <ChatMessageBody text={g.msg.text} />
+                        </div>
                       </Show>
                       <Show when={(readersByMessage().get(g.msg.id) ?? []).length > 0}>
                         <div data-slot="read-receipts" title="Visto da">
