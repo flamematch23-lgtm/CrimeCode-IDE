@@ -2,6 +2,9 @@ import type { Hono } from "hono"
 import type { Database } from "bun:sqlite"
 import { randomBytes } from "node:crypto"
 import { userAuth } from "../middleware/user-auth.ts"
+import { DASHBOARD_HTML } from "../dashboard-html.ts"
+import { makeCsrfToken, verifyCsrfToken } from "../csrf.ts"
+import { verifyTokenCrypto } from "../license-auth.ts"
 
 const DEFAULT_RPM = 60
 const DEFAULT_MONTHLY_TOKEN_QUOTA = 1_000_000
@@ -22,6 +25,19 @@ export type UserRoutesDeps = {
 
 export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
   const auth = userAuth({ licenseDb: deps.licenseDb })
+
+  // ─── GET /dashboard (public — SPA decides login vs app) ───────
+  app.get("/dashboard", (c) => {
+    let csrf = ""
+    const cookie = c.req.header("Cookie") ?? ""
+    const m = /crimeopus_session=([^;]+)/.exec(cookie)
+    if (m) {
+      const v = verifyTokenCrypto(m[1])
+      if (v.ok) csrf = makeCsrfToken(v.payload.sid, process.env.LICENSE_HMAC_SECRET ?? "")
+    }
+    const html = DASHBOARD_HTML.replace("{{CSRF_TOKEN}}", csrf)
+    return c.html(html)
+  })
 
   // ─── GET /api/user/me ─────────────────────────────────────────
   app.get("/api/user/me", auth, (c) => {
@@ -288,5 +304,33 @@ export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
       currentSid,
     )
     return c.json({ ok: true })
+  })
+
+  // ─── PATCH /api/user/me ───────────────────────────────────────
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const TG_RE = /^@?[a-zA-Z0-9_]{5,32}$/
+
+  app.patch("/api/user/me", auth, async (c) => {
+    const cust = c.get("customer")
+    const body = (await c.req.json().catch(() => ({}))) as { email?: string; telegram?: string }
+    const updates: Array<[string, string]> = []
+    if (body.email !== undefined) {
+      if (!EMAIL_RE.test(body.email)) return c.json({ error: "invalid_email" }, 400)
+      updates.push(["email", body.email])
+    }
+    if (body.telegram !== undefined) {
+      if (!TG_RE.test(body.telegram)) return c.json({ error: "invalid_telegram" }, 400)
+      updates.push(["telegram", body.telegram.startsWith("@") ? body.telegram : `@${body.telegram}`])
+    }
+    if (updates.length === 0) return c.json({ error: "no_fields_to_update" }, 400)
+
+    const setClause = updates.map(([k]) => `${k} = ?`).join(", ")
+    const values = updates.map(([, v]) => v)
+    deps.licenseDb.run(`UPDATE customers SET ${setClause} WHERE id = ?`, ...values, cust.id)
+
+    const fresh = deps.licenseDb
+      .query("SELECT id, email, telegram, telegram_user_id, approval_status FROM customers WHERE id = ?")
+      .get(cust.id) as any
+    return c.json(fresh)
   })
 }

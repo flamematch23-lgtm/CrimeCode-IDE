@@ -343,3 +343,37 @@ test("sessions: lists sessions and revoke-all spares current", async () => {
 
   dbs.cleanup()
 })
+
+// ─── PATCH /api/user/me ────────────────────────────────────────
+
+test("PATCH /api/user/me updates email", async () => {
+  const { dbs } = bootstrapApp()
+  const { mountUserRoutes } = await import("../src/routes/user")
+  const app = new Hono()
+  mountUserRoutes(app, { licenseDb: dbs.license, usageDb: dbs.usage })
+
+  const r = await authedRequest(app, "/api/user/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "new@example.com" }),
+  })
+  expect(r.status).toBe(200)
+  const b = (await r.json()) as any
+  expect(b.email).toBe("new@example.com")
+  dbs.cleanup()
+})
+
+test("PATCH /api/user/me rejects invalid email", async () => {
+  const { dbs } = bootstrapApp()
+  const { mountUserRoutes } = await import("../src/routes/user")
+  const app = new Hono()
+  mountUserRoutes(app, { licenseDb: dbs.license, usageDb: dbs.usage })
+
+  const r = await authedRequest(app, "/api/user/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "not-an-email" }),
+  })
+  expect(r.status).toBe(400)
+  dbs.cleanup()
+})
