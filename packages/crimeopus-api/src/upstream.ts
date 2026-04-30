@@ -49,6 +49,8 @@ export interface Provider {
   inflight: number
   healthy: boolean
   lastHealthCheck: number
+  /** Consecutive failed health checks. Marked unhealthy only after 3+. */
+  consecutiveFails: number
   /** path to call for health check (default /v1/models for openai, /api/tags for ollama) */
   healthPath: string
 }
@@ -92,6 +94,7 @@ export const providers: Provider[] = (() => {
         inflight: 0,
         healthy: true,
         lastHealthCheck: 0,
+        consecutiveFails: 0,
         healthPath: "/api/tags",
       },
     ]
@@ -113,8 +116,9 @@ export const providers: Provider[] = (() => {
       weight: p.weight ?? 1,
       maxInflight: p.maxInflight ?? Number(process.env.MAX_CONCURRENCY ?? 4),
       inflight: 0,
-      healthy: true,
+      healthy: true, // optimistic — health check downgrades only after 3 consecutive fails
       lastHealthCheck: 0,
+      consecutiveFails: 0,
       healthPath: kind === "ollama" ? "/api/tags" : "/v1/models",
     }
   })
@@ -188,10 +192,23 @@ export async function acquireSlot(publicModel: string, keyLabel: string): Promis
     throw new UpstreamError("per_key_concurrency_exceeded", 429)
   }
 
-  // Try immediate match in catalog order
+  // Try immediate match in catalog order. Two passes:
+  //   pass 1: prefer healthy providers (normal case)
+  //   pass 2: fall back to "down" providers anyway — health checks can lag
+  //           or false-positive, and a real request is the most accurate
+  //           liveness probe we have.
   for (const route of entry.providers) {
     const p = providerById.get(route.provider)
     if (!p || !p.healthy || p.inflight >= p.maxInflight) continue
+    p.inflight++
+    perKeyInflight.set(keyLabel, cur + 1)
+    return makeReservation(p, route.model, keyLabel)
+  }
+  for (const route of entry.providers) {
+    const p = providerById.get(route.provider)
+    if (!p || p.inflight >= p.maxInflight) continue
+    // Provider was marked down but slot is free — try anyway, the
+    // request itself will reveal if it's actually broken.
     p.inflight++
     perKeyInflight.set(keyLabel, cur + 1)
     return makeReservation(p, route.model, keyLabel)
@@ -296,29 +313,53 @@ export function buildUpstreamFetch(
 
 let healthInterval: ReturnType<typeof setInterval> | null = null
 
+const HEALTH_TIMEOUT_MS = Number(process.env.HEALTH_TIMEOUT_MS ?? 8000)
+const FAIL_THRESHOLD = Number(process.env.HEALTH_FAIL_THRESHOLD ?? 3)
+
 export function startHealthChecks(): void {
   if (healthInterval) return
   const tick = async () => {
     for (const p of providers) {
+      const t0 = Date.now()
+      let ok = false
+      let reason = ""
       try {
-        const req: RequestInit = { signal: AbortSignal.timeout(3000) }
+        const req: RequestInit = { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) }
         if (p.apiKey) req.headers = { Authorization: `Bearer ${p.apiKey}` }
         const r = await fetch(`${p.url}${p.healthPath}`, req)
-        const wasHealthy = p.healthy
-        p.healthy = r.ok || r.status === 401 // 401 still means alive — wrong key
-        p.lastHealthCheck = Date.now()
-        if (!wasHealthy && p.healthy) console.log(`✓ ${p.id} recovered`)
-        if (wasHealthy && !p.healthy) {
-          console.warn(`✗ ${p.id} down`)
-          emitWebhook("upstream.error", { provider: p.id, reason: "health_check_failed" })
-        }
+        // 2xx + 401 (wrong key but server alive) + 403 (auth-related) are all "reachable"
+        ok = r.ok || r.status === 401 || r.status === 403
+        reason = `HTTP ${r.status}`
       } catch (e) {
-        if (p.healthy) {
-          console.warn(`✗ ${p.id} unreachable: ${(e as Error).message}`)
-          emitWebhook("upstream.error", { provider: p.id, error: (e as Error).message })
+        reason = (e as Error).message
+      }
+      p.lastHealthCheck = Date.now()
+
+      if (ok) {
+        if (p.consecutiveFails > 0 || !p.healthy) {
+          console.log(`✓ ${p.id} healthy (${reason}, ${Date.now() - t0}ms)`)
         }
-        p.healthy = false
-        p.lastHealthCheck = Date.now()
+        p.consecutiveFails = 0
+        p.healthy = true
+      } else {
+        p.consecutiveFails++
+        if (p.consecutiveFails >= FAIL_THRESHOLD && p.healthy) {
+          console.warn(
+            `✗ ${p.id} marked DOWN after ${p.consecutiveFails} consecutive fails (last: ${reason})`,
+          )
+          emitWebhook("upstream.error", {
+            provider: p.id,
+            reason: "health_check_failed",
+            consecutive_fails: p.consecutiveFails,
+            last_error: reason,
+          })
+          p.healthy = false
+        } else if (p.healthy) {
+          // Don't log every transient blip — only when fail count progresses
+          console.warn(
+            `⚠ ${p.id} health check failed ${p.consecutiveFails}/${FAIL_THRESHOLD} (${reason}) — still considered healthy`,
+          )
+        }
       }
     }
   }

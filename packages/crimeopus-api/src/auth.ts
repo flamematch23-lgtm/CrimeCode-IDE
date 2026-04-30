@@ -93,9 +93,18 @@ export function syncEnvApiKeys(): void {
         ],
       )
     } else {
+      // Use ON CONFLICT to handle the case where a previous run left a row
+      // with the same label (e.g. you rotated the secret but kept the
+      // label) — overwrite the metadata + new secret instead of crashing.
       db.run(
         `INSERT INTO keys (kind, label, secret, rpm, monthly_token_quota, monthly_request_quota, scopes, created_at)
-         VALUES ('static', ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ('static', ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(label) DO UPDATE SET
+           secret = excluded.secret,
+           rpm = excluded.rpm,
+           monthly_token_quota = excluded.monthly_token_quota,
+           monthly_request_quota = excluded.monthly_request_quota,
+           scopes = excluded.scopes`,
         [
           meta.label,
           secret,
