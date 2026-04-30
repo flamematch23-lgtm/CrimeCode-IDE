@@ -100,7 +100,7 @@ export const dict = {
   "dialog.provider.group.popular": "Popular",
   "dialog.provider.group.other": "Other",
   "dialog.provider.tag.recommended": "Recommended",
-  "dialog.provider.crimeopus.note": "CrimeCode Cloud gateway - 4 models (Coder/Fast/Agentic/Vision) with Together/Groq/RunPod failover",
+  "dialog.provider.crimeopus.note": "CrimeCode AI gateway — 9 models (Default/Fast/Coder/Research/Reasoning/Agentic/Vision/Italian) via Together, Groq, RunPod failover. Set CRIMEOPUS_BASE_URL env var to point to your instance.",
   "dialog.provider.opencode.note": "Curated models including Claude, GPT, Gemini and more",
   "dialog.provider.opencode.tagline": "Reliable optimized models",
   "dialog.provider.opencodeGo.tagline": "Low cost subscription for everyone",

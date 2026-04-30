@@ -748,6 +748,23 @@ export namespace Provider {
         },
       }
     },
+    crimeopus: async (input) => {
+      const env = Env.all()
+      const hasKey = await (async () => {
+        if (input.env.some((item) => env[item])) return true
+        if (await Auth.get(input.id)) return true
+        const config = await Config.get()
+        if (config.provider?.["crimeopus"]?.options?.apiKey) return true
+        return false
+      })()
+
+      // If the user set CRIMEOPUS_BASE_URL, override the default endpoint.
+      const baseURL = env["CRIMEOPUS_BASE_URL"]
+      return {
+        autoload: hasKey,
+        ...(baseURL ? { options: { baseURL } } : {}),
+      }
+    },
     wormgpt: async (input) => {
       const hasKey = await (async () => {
         const env = Env.all()
@@ -928,6 +945,144 @@ export namespace Provider {
     }
   }
 
+  // CrimeOpus — CrimeCode Cloud AI gateway (Together/Groq/RunPod failover)
+  // Base URL: set CRIMEOPUS_BASE_URL env var, or override in config.
+  const CRIMEOPUS_PROVIDER: ModelsDev.Provider = {
+    id: "crimeopus",
+    name: "CrimeOpus",
+    api: "https://api.crimeopus.cc/v1",
+    npm: "@ai-sdk/openai-compatible",
+    env: ["CRIMEOPUS_API_KEY"],
+    models: {
+      "crimeopus-default": {
+        id: "crimeopus-default",
+        name: "CrimeOpus 4.7 Code Elite",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 256000, output: 8192 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-fast": {
+        id: "crimeopus-fast",
+        name: "CrimeOpus 4.7 FAST",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.2, output: 0.6 },
+        limit: { context: 131072, output: 4096 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-coder": {
+        id: "crimeopus-coder",
+        name: "CrimeOpus 4.7 CODER",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 131072, output: 8192 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-think-low": {
+        id: "crimeopus-think-low",
+        name: "CrimeOpus 4.7 Reasoning · Low",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: true,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 131072, output: 8192 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-think-high": {
+        id: "crimeopus-think-high",
+        name: "CrimeOpus 4.7 Reasoning · High",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: true,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 3, output: 7 },
+        limit: { context: 131072, output: 16384 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-research": {
+        id: "crimeopus-research",
+        name: "CrimeOpus 4.7 RESEARCH",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 1048576, output: 16384 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-italian": {
+        id: "crimeopus-italian",
+        name: "CrimeOpus 4.7 Italiano",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 256000, output: 8192 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-agentic": {
+        id: "crimeopus-agentic",
+        name: "CrimeOpus 4.7 AGENTIC",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: false,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 32768, output: 8192 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      "crimeopus-vision": {
+        id: "crimeopus-vision",
+        name: "CrimeOpus 4.7 VISION",
+        family: "crimeopus",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        attachment: true,
+        cost: { input: 0.5, output: 1.5 },
+        limit: { context: 262144, output: 8192 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        options: {},
+      },
+    },
+  }
+
   const WORMGPT_PROVIDER: ModelsDev.Provider = {
     id: "wormgpt",
     name: "WormGPT",
@@ -985,7 +1140,8 @@ export namespace Provider {
     const config = await Config.get()
     const modelsDev = await ModelsDev.get()
 
-    // Inject WormGPT as a known provider alongside models.dev providers
+    // Inject first-party providers alongside models.dev
+    modelsDev["crimeopus"] = CRIMEOPUS_PROVIDER
     modelsDev["wormgpt"] = WORMGPT_PROVIDER
 
     const database = mapValues(modelsDev, fromModelsDevProvider)
