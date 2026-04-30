@@ -160,7 +160,7 @@ CREATE INDEX IF NOT EXISTS teams_owner_idx ON teams(owner_customer_id);
 CREATE TABLE IF NOT EXISTS team_members (
   team_id      TEXT NOT NULL,
   customer_id  TEXT NOT NULL,
-  role         TEXT NOT NULL CHECK (role IN ('owner','admin','member')),
+  role         TEXT NOT NULL CHECK (role IN ('owner','admin','member','viewer')),
   added_at     INTEGER NOT NULL,
   PRIMARY KEY (team_id, customer_id),
   FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
@@ -335,6 +335,60 @@ function runMigrations(db: Database): void {
     [
       "v4.team_chat_messages_team_ts_idx",
       "CREATE INDEX IF NOT EXISTS team_chat_messages_team_ts_idx ON team_chat_messages(team_id, ts DESC)",
+    ],
+    // v2.23.3: team invite links. Owner/admin generates a shareable URL with
+    // a random token; recipients click it and auto-join with the encoded role.
+    // Token is opaque (URL-safe base64) and stored verbatim — no hashing,
+    // since invite tokens are inherently meant to be shared and we already
+    // gate redemption with the customer's authenticated session.
+    [
+      "v5.team_invite_links",
+      `CREATE TABLE IF NOT EXISTS team_invite_links (
+         token         TEXT PRIMARY KEY,
+         team_id       TEXT NOT NULL,
+         role          TEXT NOT NULL DEFAULT 'member',
+         created_by    TEXT NOT NULL,
+         created_at    INTEGER NOT NULL,
+         expires_at    INTEGER,
+         max_uses      INTEGER,
+         uses          INTEGER NOT NULL DEFAULT 0,
+         revoked_at    INTEGER,
+         FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+         FOREIGN KEY (created_by) REFERENCES customers(id)
+       )`,
+    ],
+    [
+      "v5.team_invite_links_team_idx",
+      "CREATE INDEX IF NOT EXISTS team_invite_links_team_idx ON team_invite_links(team_id, created_at DESC)",
+    ],
+    // v2.23.3: chat attachments. Renderer uploads images/PDFs to R2 and
+    // posts the resulting URL alongside the message. Stored as nullable
+    // columns so existing chat rows aren't affected.
+    ["v5.team_chat_messages.attachment_url", "ALTER TABLE team_chat_messages ADD COLUMN attachment_url TEXT"],
+    ["v5.team_chat_messages.attachment_type", "ALTER TABLE team_chat_messages ADD COLUMN attachment_type TEXT"],
+    ["v5.team_chat_messages.attachment_size", "ALTER TABLE team_chat_messages ADD COLUMN attachment_size INTEGER"],
+    ["v5.team_chat_messages.attachment_name", "ALTER TABLE team_chat_messages ADD COLUMN attachment_name TEXT"],
+    // v2.23.3: extend role CHECK to include 'viewer'. SQLite cannot ALTER a
+    // CHECK constraint in place, so we rebuild the table. Idempotent —
+    // if v6 marker already ran on this DB, the CREATE IF NOT EXISTS at
+    // boot uses the new schema and this rename becomes a no-op.
+    [
+      "v6.team_members_viewer_role",
+      `BEGIN;
+       CREATE TABLE IF NOT EXISTS team_members_v6 (
+         team_id      TEXT NOT NULL,
+         customer_id  TEXT NOT NULL,
+         role         TEXT NOT NULL CHECK (role IN ('owner','admin','member','viewer')),
+         added_at     INTEGER NOT NULL,
+         PRIMARY KEY (team_id, customer_id),
+         FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+         FOREIGN KEY (customer_id) REFERENCES customers(id)
+       );
+       INSERT INTO team_members_v6 SELECT team_id, customer_id, role, added_at FROM team_members;
+       DROP TABLE team_members;
+       ALTER TABLE team_members_v6 RENAME TO team_members;
+       CREATE INDEX IF NOT EXISTS team_members_customer_idx ON team_members(customer_id);
+       COMMIT;`,
     ],
   ]
   for (const [name, sql] of ops) {

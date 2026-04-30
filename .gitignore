@@ -48,3 +48,14 @@ packages/relay/relay.exe
 
 # Claude Code scratch directory (lock files etc.)
 .claude/scheduled_tasks.lock
+
+# Runtime logs from local services (never commit — may contain credentials/IPs)
+*.log
+cloudflared.log
+packages/relay/relay.log
+
+# Tool / shell scratch dumps
+.playwright-mcp/
+WindowsTemp*.json
+WindowsTempcopilot.json
+WindowsTempgh-user.json

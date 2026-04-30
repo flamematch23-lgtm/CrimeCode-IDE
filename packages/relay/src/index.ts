@@ -522,6 +522,12 @@ Bun.serve<Data>({
         "screen.stop",
         "cursor",
         "annotation",
+        // CRDT (Yjs) sync — opaque update bytes embedded as a base64 string.
+        // The relay just forwards to the host (and host re-broadcasts to all
+        // peers via the existing host→clients path), so the relay stays
+        // CRDT-agnostic — it never decodes or merges updates.
+        "crdt.sync",
+        "crdt.awareness",
       ])
       if (!t || !ALLOWED_FROM_CLIENT.has(t)) return
 

@@ -329,6 +329,147 @@ export function claimPendingInvitesForCustomer(customerId: string): { joined: st
   return { joined }
 }
 
+/* ────────────────────────  Invite links  ──────────────────────── */
+
+export interface InviteLinkRow {
+  token: string
+  team_id: string
+  role: Role
+  created_by: string
+  created_at: number
+  expires_at: number | null
+  max_uses: number | null
+  uses: number
+  revoked_at: number | null
+}
+
+const INVITE_LINK_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const INVITE_LINK_DEFAULT_MAX_USES = 10
+
+/**
+ * Create a shareable invite URL token. Owner/admin only. The returned token
+ * is opaque (URL-safe base64) and the caller is expected to embed it in a
+ * link like https://crimecode.cc/r/team/<token>.
+ */
+export function createInviteLink(args: {
+  team_id: string
+  actor: string
+  role?: Role
+  ttl_ms?: number | null
+  max_uses?: number | null
+}): InviteLinkRow {
+  const role = getMemberRole(args.team_id, args.actor)
+  if (role !== "owner" && role !== "admin") throw new Error("forbidden")
+  const linkRole: Role = args.role ?? "member"
+  if (linkRole !== "member" && linkRole !== "viewer") {
+    // Refuse to generate links that grant admin/owner — those must go through
+    // explicit setMemberRole after the user joins as a regular member.
+    throw new Error("invalid_role")
+  }
+  const token = randomBytes(24).toString("base64url")
+  const createdAt = now()
+  const expiresAt =
+    args.ttl_ms === null ? null : createdAt + (args.ttl_ms ?? INVITE_LINK_DEFAULT_TTL_MS)
+  const maxUses = args.max_uses === null ? null : args.max_uses ?? INVITE_LINK_DEFAULT_MAX_USES
+  const db = getDb()
+  db.prepare(
+    `INSERT INTO team_invite_links
+       (token, team_id, role, created_by, created_at, expires_at, max_uses, uses)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+  ).run(token, args.team_id, linkRole, args.actor, createdAt, expiresAt, maxUses)
+  return db.prepare<InviteLinkRow, [string]>("SELECT * FROM team_invite_links WHERE token = ?").get(token)!
+}
+
+export function listInviteLinks(teamId: string, viewer: string): InviteLinkRow[] {
+  const role = getMemberRole(teamId, viewer)
+  if (role !== "owner" && role !== "admin") return []
+  return getDb()
+    .prepare<InviteLinkRow, [string]>(
+      "SELECT * FROM team_invite_links WHERE team_id = ? AND revoked_at IS NULL ORDER BY created_at DESC",
+    )
+    .all(teamId)
+}
+
+export function revokeInviteLink(teamId: string, actor: string, token: string): void {
+  const role = getMemberRole(teamId, actor)
+  if (role !== "owner" && role !== "admin") throw new Error("forbidden")
+  getDb()
+    .prepare("UPDATE team_invite_links SET revoked_at = ? WHERE token = ? AND team_id = ? AND revoked_at IS NULL")
+    .run(now(), token, teamId)
+}
+
+/**
+ * Public preview — returns just enough info for the redeem page to render
+ * the team name + member count + role being granted, without revealing
+ * member identities. Token must exist, be unexpired, and have remaining uses.
+ */
+export function previewInviteLink(token: string): {
+  team_id: string
+  team_name: string
+  role: Role
+  member_count: number
+  expires_at: number | null
+} | null {
+  const db = getDb()
+  const row = db
+    .prepare<InviteLinkRow, [string]>("SELECT * FROM team_invite_links WHERE token = ?")
+    .get(token)
+  if (!row) return null
+  if (row.revoked_at) return null
+  if (row.expires_at && row.expires_at < now()) return null
+  if (row.max_uses !== null && row.uses >= row.max_uses) return null
+  const team = getTeam(row.team_id)
+  if (!team) return null
+  const memberCount =
+    (db
+      .prepare<{ c: number }, [string]>("SELECT COUNT(*) AS c FROM team_members WHERE team_id = ?")
+      .get(row.team_id)?.c ?? 0)
+  return {
+    team_id: row.team_id,
+    team_name: team.name,
+    role: row.role,
+    member_count: memberCount,
+    expires_at: row.expires_at,
+  }
+}
+
+/**
+ * Redeem the token for `customerId`: insert them as a team member with the
+ * link's role, increment uses, emit member_added. Returns the team or
+ * throws on token/permission errors.
+ */
+export function redeemInviteLink(args: {
+  token: string
+  customer_id: string
+}): { team: TeamRow; role: Role; already_member: boolean } {
+  const db = getDb()
+  const row = db
+    .prepare<InviteLinkRow, [string]>("SELECT * FROM team_invite_links WHERE token = ?")
+    .get(args.token)
+  if (!row) throw new Error("invalid_token")
+  if (row.revoked_at) throw new Error("token_revoked")
+  if (row.expires_at && row.expires_at < now()) throw new Error("token_expired")
+  if (row.max_uses !== null && row.uses >= row.max_uses) throw new Error("token_exhausted")
+
+  const team = getTeam(row.team_id)
+  if (!team) throw new Error("team_not_found")
+
+  const existingRole = getMemberRole(row.team_id, args.customer_id)
+  if (existingRole) {
+    return { team, role: existingRole, already_member: true }
+  }
+
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO team_members (team_id, customer_id, role, added_at) VALUES (?, ?, ?, ?)",
+    ).run(row.team_id, args.customer_id, row.role, now())
+    db.prepare("UPDATE team_invite_links SET uses = uses + 1 WHERE token = ?").run(args.token)
+  })()
+
+  emitTeamEvent({ type: "member_added", team_id: row.team_id, customer_id: args.customer_id })
+  return { team, role: row.role, already_member: false }
+}
+
 /* ──────────────────────────  Live sessions  ────────────────────────── */
 
 export function createTeamSession(opts: { team_id: string; host: string; title: string; state?: unknown }): TeamSessionRow {
@@ -512,6 +653,21 @@ export interface TeamChatRow {
   author_name: string | null
   text: string
   ts: number
+  /** R2-hosted URL for an image/PDF attached to this message, or null. */
+  attachment_url: string | null
+  /** MIME type of the attachment (e.g. image/png, application/pdf). */
+  attachment_type: string | null
+  /** Size in bytes of the attachment, capped at 10 MB on upload. */
+  attachment_size: number | null
+  /** Original file name (display only — never used for filesystem ops). */
+  attachment_name: string | null
+}
+
+export interface ChatAttachment {
+  url: string
+  type: string
+  size: number
+  name: string
 }
 
 const CHAT_RETENTION = 200 // keep at most N rows per team — dropped on insert
@@ -528,20 +684,38 @@ export function postChatMessage(args: {
   author: string
   author_name: string | null
   text: string
+  attachment?: ChatAttachment | null
 }): TeamChatRow | null {
   // Viewers (read-only role) cannot post chat — only owner/admin/member can.
   if (!canWrite(getMemberRole(args.team_id, args.author))) return null
   const text = args.text.trim()
-  if (!text) return null
+  // Allow empty text when there's an attachment — image/file-only messages
+  // are a normal pattern in chat UIs.
+  if (!text && !args.attachment) return null
   if (text.length > 2000) return null
+
+  const att = args.attachment ?? null
 
   const db = getDb()
   const ts = now()
   const result = db
     .prepare(
-      "INSERT INTO team_chat_messages (team_id, customer_id, author_name, text, ts) VALUES (?, ?, ?, ?, ?)",
+      `INSERT INTO team_chat_messages
+         (team_id, customer_id, author_name, text, ts,
+          attachment_url, attachment_type, attachment_size, attachment_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(args.team_id, args.author, args.author_name, text, ts)
+    .run(
+      args.team_id,
+      args.author,
+      args.author_name,
+      text,
+      ts,
+      att?.url ?? null,
+      att?.type ?? null,
+      att?.size ?? null,
+      att?.name ?? null,
+    )
   const id = Number(result.lastInsertRowid)
 
   // Prune old rows for this team so the table can't grow without bound.
@@ -561,6 +735,10 @@ export function postChatMessage(args: {
     author_name: args.author_name,
     text,
     ts,
+    attachment_url: att?.url ?? null,
+    attachment_type: att?.type ?? null,
+    attachment_size: att?.size ?? null,
+    attachment_name: att?.name ?? null,
   }
   emitTeamEvent({
     type: "chat_message",
@@ -570,6 +748,10 @@ export function postChatMessage(args: {
     author_name: args.author_name,
     text,
     ts,
+    attachment_url: att?.url ?? null,
+    attachment_type: att?.type ?? null,
+    attachment_size: att?.size ?? null,
+    attachment_name: att?.name ?? null,
   })
   return row
 }
@@ -583,7 +765,9 @@ export function listChatMessages(teamId: string, viewer: string, limit = 50): Te
   const cap = Math.min(Math.max(1, limit), 200)
   return getDb()
     .prepare<TeamChatRow, [string, number]>(
-      "SELECT id, team_id, customer_id, author_name, text, ts FROM team_chat_messages WHERE team_id = ? ORDER BY id DESC LIMIT ?",
+      `SELECT id, team_id, customer_id, author_name, text, ts,
+              attachment_url, attachment_type, attachment_size, attachment_name
+         FROM team_chat_messages WHERE team_id = ? ORDER BY id DESC LIMIT ?`,
     )
     .all(teamId, cap)
     .reverse()

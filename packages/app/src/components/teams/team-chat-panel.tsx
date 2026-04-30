@@ -28,10 +28,20 @@ import {
 } from "solid-js"
 import {
   getTeamsClient,
+  type TeamChatAttachment,
   type TeamChatMessage,
   type TeamEvent,
   type TeamMember,
 } from "../../utils/teams-client"
+
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+const ATTACHMENT_ALLOWED = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
 
 interface Props {
   teamId: string
@@ -116,9 +126,12 @@ export function TeamChatPanel(props: Props) {
   const [draft, setDraft] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
+  const [pendingAttachment, setPendingAttachment] = createSignal<TeamChatAttachment | null>(null)
+  const [uploading, setUploading] = createSignal(false)
   let lastTypingAt = 0
   let scrollEl: HTMLDivElement | undefined
   let textareaEl: HTMLTextAreaElement | undefined
+  let fileInputEl: HTMLInputElement | undefined
   let stickToBottom = true
 
   // Hydrate
@@ -148,6 +161,10 @@ export function TeamChatPanel(props: Props) {
           author_name: ev.author_name ?? null,
           text: ev.text ?? "",
           ts: ev.ts ?? Math.floor(Date.now() / 1000),
+          attachment_url: ev.attachment_url ?? null,
+          attachment_type: ev.attachment_type ?? null,
+          attachment_size: ev.attachment_size ?? null,
+          attachment_name: ev.attachment_name ?? null,
         }
         setMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev
@@ -219,12 +236,13 @@ export function TeamChatPanel(props: Props) {
 
   async function send() {
     const text = draft().trim()
-    if (!text) return
+    const attachment = pendingAttachment()
+    if (!text && !attachment) return
     if (sending()) return
     setSending(true)
     setError(null)
     try {
-      const r = await client.postChat(props.teamId, text)
+      const r = await client.postChat(props.teamId, text, attachment)
       // Optimistic insert (the SSE event will dedupe by id)
       if (r?.message) {
         setMessages((prev) => {
@@ -233,6 +251,7 @@ export function TeamChatPanel(props: Props) {
         })
       }
       setDraft("")
+      setPendingAttachment(null)
       stickToBottom = true
       // textarea height reset
       if (textareaEl) {
@@ -243,6 +262,41 @@ export function TeamChatPanel(props: Props) {
     } finally {
       setSending(false)
     }
+  }
+
+  async function onAttachClick() {
+    fileInputEl?.click()
+  }
+
+  async function onFileSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+    if (!ATTACHMENT_ALLOWED.includes(file.type)) {
+      setError(`Tipo di file non supportato (${file.type || "sconosciuto"}). Solo immagini e PDF.`)
+      input.value = ""
+      return
+    }
+    if (file.size > ATTACHMENT_MAX_BYTES) {
+      setError(`File troppo grande (${formatBytes(file.size)}). Massimo 10 MB.`)
+      input.value = ""
+      return
+    }
+    setUploading(true)
+    setError(null)
+    try {
+      const att = await client.uploadChatAttachment(props.teamId, file)
+      setPendingAttachment(att)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(false)
+      input.value = "" // allow re-selecting the same file
+    }
+  }
+
+  function clearAttachment() {
+    setPendingAttachment(null)
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -342,7 +396,40 @@ export function TeamChatPanel(props: Props) {
                           <span data-slot="time">{formatTime(g.msg.ts)}</span>
                         </div>
                       </Show>
-                      <div data-slot="bubble">{g.msg.text}</div>
+                      <Show when={g.msg.attachment_url}>
+                        <a
+                          data-slot="attachment"
+                          href={g.msg.attachment_url ?? "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-type={g.msg.attachment_type}
+                        >
+                          <Show
+                            when={g.msg.attachment_type?.startsWith("image/")}
+                            fallback={
+                              <span data-slot="attachment-file">
+                                <span data-slot="attachment-icon">📎</span>
+                                <span data-slot="attachment-name">{g.msg.attachment_name ?? "file"}</span>
+                                <Show when={g.msg.attachment_size}>
+                                  <span data-slot="attachment-size">
+                                    {formatBytes(g.msg.attachment_size ?? 0)}
+                                  </span>
+                                </Show>
+                              </span>
+                            }
+                          >
+                            <img
+                              data-slot="attachment-image"
+                              src={g.msg.attachment_url ?? ""}
+                              alt={g.msg.attachment_name ?? "image"}
+                              loading="lazy"
+                            />
+                          </Show>
+                        </a>
+                      </Show>
+                      <Show when={g.msg.text}>
+                        <div data-slot="bubble">{g.msg.text}</div>
+                      </Show>
                     </div>
                   </div>
                 </>
@@ -369,7 +456,60 @@ export function TeamChatPanel(props: Props) {
         <div data-slot="error">{error()}</div>
       </Show>
 
+      <Show when={pendingAttachment()}>
+        {(att) => (
+          <div data-slot="pending-attachment">
+            <Show
+              when={att().type.startsWith("image/")}
+              fallback={
+                <span data-slot="pending-icon">📎</span>
+              }
+            >
+              <img
+                data-slot="pending-thumb"
+                src={att().url}
+                alt={att().name}
+              />
+            </Show>
+            <span data-slot="pending-name">{att().name}</span>
+            <span data-slot="pending-size">{formatBytes(att().size)}</span>
+            <button
+              type="button"
+              data-slot="pending-clear"
+              onClick={clearAttachment}
+              aria-label="Rimuovi allegato"
+            >
+              ×
+            </button>
+          </div>
+        )}
+      </Show>
+
+      <Show when={uploading()}>
+        <div data-slot="upload-progress">
+          <span data-slot="upload-spinner" />
+          <span>Caricamento allegato…</span>
+        </div>
+      </Show>
+
       <div data-slot="composer">
+        <input
+          ref={(el) => (fileInputEl = el)}
+          type="file"
+          accept={ATTACHMENT_ALLOWED.join(",")}
+          style={{ display: "none" }}
+          onChange={onFileSelected}
+        />
+        <button
+          type="button"
+          data-slot="attach"
+          onClick={onAttachClick}
+          disabled={uploading() || sending() || !!pendingAttachment()}
+          aria-label="Allega file"
+          title="Allega un'immagine o un PDF (max 10 MB)"
+        >
+          <span data-slot="attach-icon">📎</span>
+        </button>
         <textarea
           ref={(el) => (textareaEl = el)}
           data-slot="textarea"
@@ -383,7 +523,7 @@ export function TeamChatPanel(props: Props) {
           type="button"
           data-slot="send"
           onClick={send}
-          disabled={sending() || !draft().trim()}
+          disabled={sending() || (!draft().trim() && !pendingAttachment())}
           aria-label="Invia messaggio"
         >
           <Show when={sending()} fallback={<span data-slot="send-icon">▶</span>}>

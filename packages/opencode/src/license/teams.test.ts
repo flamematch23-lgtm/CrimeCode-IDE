@@ -44,6 +44,8 @@ import * as teams from "./teams"
 beforeEach(() => {
   const db = dbMod.getDb()
   // Order matters — children first to respect FK.
+  db.exec("DELETE FROM team_invite_links")
+  db.exec("DELETE FROM team_chat_messages")
   db.exec("DELETE FROM team_sessions")
   db.exec("DELETE FROM team_invites")
   db.exec("DELETE FROM team_members")
@@ -271,6 +273,143 @@ describe("license/teams", () => {
       const alice = makeCustomer("@alice")
       const { joined } = teams.claimPendingInvitesForCustomer(alice.id)
       expect(joined).toEqual([])
+    })
+  })
+
+  describe("invite links", () => {
+    test("owner can create + redeem; uses counter increments", () => {
+      const owner = makeCustomer("@alice")
+      const bob = makeCustomer("@bob")
+      const team = teams.createTeam(owner.id, "Alpha")
+
+      const link = teams.createInviteLink({ team_id: team.id, actor: owner.id })
+      expect(link.token).toBeTruthy()
+      expect(link.role).toBe("member")
+
+      const result = teams.redeemInviteLink({ token: link.token, customer_id: bob.id })
+      expect(result.team.id).toBe(team.id)
+      expect(result.role).toBe("member")
+      expect(result.already_member).toBe(false)
+      expect(teams.getMemberRole(team.id, bob.id)).toBe("member")
+
+      const links = teams.listInviteLinks(team.id, owner.id)
+      expect(links[0].uses).toBe(1)
+    })
+
+    test("redeeming twice as same user reports already_member=true without duplicate row", () => {
+      const owner = makeCustomer("@alice")
+      const bob = makeCustomer("@bob")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const link = teams.createInviteLink({ team_id: team.id, actor: owner.id })
+
+      teams.redeemInviteLink({ token: link.token, customer_id: bob.id })
+      const second = teams.redeemInviteLink({ token: link.token, customer_id: bob.id })
+      expect(second.already_member).toBe(true)
+    })
+
+    test("non-admin cannot create a link", () => {
+      const owner = makeCustomer("@alice")
+      const bob = makeCustomer("@bob")
+      const team = teams.createTeam(owner.id, "Alpha")
+      teams.addMemberByIdentifier(team.id, owner.id, "@bob")
+      expect(() => teams.createInviteLink({ team_id: team.id, actor: bob.id })).toThrow("forbidden")
+    })
+
+    test("revoked link cannot be redeemed", () => {
+      const owner = makeCustomer("@alice")
+      const bob = makeCustomer("@bob")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const link = teams.createInviteLink({ team_id: team.id, actor: owner.id })
+      teams.revokeInviteLink(team.id, owner.id, link.token)
+      expect(() => teams.redeemInviteLink({ token: link.token, customer_id: bob.id })).toThrow("token_revoked")
+    })
+
+    test("link with viewer role grants read-only membership", () => {
+      const owner = makeCustomer("@alice")
+      const bob = makeCustomer("@bob")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const link = teams.createInviteLink({ team_id: team.id, actor: owner.id, role: "viewer" })
+      teams.redeemInviteLink({ token: link.token, customer_id: bob.id })
+      expect(teams.getMemberRole(team.id, bob.id)).toBe("viewer")
+
+      // Viewers cannot post chat.
+      const row = teams.postChatMessage({
+        team_id: team.id,
+        author: bob.id,
+        author_name: "@bob",
+        text: "hi",
+      })
+      expect(row).toBeNull()
+    })
+
+    test("link cannot grant admin/owner role", () => {
+      const owner = makeCustomer("@alice")
+      const team = teams.createTeam(owner.id, "Alpha")
+      expect(() =>
+        teams.createInviteLink({ team_id: team.id, actor: owner.id, role: "admin" as never }),
+      ).toThrow("invalid_role")
+    })
+
+    test("preview returns team metadata; expired link returns null", () => {
+      const owner = makeCustomer("@alice")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const link = teams.createInviteLink({ team_id: team.id, actor: owner.id })
+      const preview = teams.previewInviteLink(link.token)
+      expect(preview?.team_name).toBe("Alpha")
+      expect(preview?.role).toBe("member")
+      expect(preview?.member_count).toBe(1)
+
+      teams.revokeInviteLink(team.id, owner.id, link.token)
+      expect(teams.previewInviteLink(link.token)).toBeNull()
+    })
+  })
+
+  describe("chat attachments", () => {
+    test("postChatMessage persists attachment fields and emits them", () => {
+      const owner = makeCustomer("@alice")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const row = teams.postChatMessage({
+        team_id: team.id,
+        author: owner.id,
+        author_name: "@alice",
+        text: "look at this",
+        attachment: {
+          url: "https://r2.example/file.png",
+          type: "image/png",
+          size: 1024,
+          name: "screenshot.png",
+        },
+      })
+      expect(row?.attachment_url).toBe("https://r2.example/file.png")
+      expect(row?.attachment_type).toBe("image/png")
+      expect(row?.attachment_size).toBe(1024)
+      expect(row?.attachment_name).toBe("screenshot.png")
+    })
+
+    test("attachment-only message (empty text) is allowed", () => {
+      const owner = makeCustomer("@alice")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const row = teams.postChatMessage({
+        team_id: team.id,
+        author: owner.id,
+        author_name: "@alice",
+        text: "",
+        attachment: { url: "https://r2.example/x.pdf", type: "application/pdf", size: 100, name: "x.pdf" },
+      })
+      expect(row).not.toBeNull()
+      expect(row?.text).toBe("")
+    })
+
+    test("empty text and no attachment is rejected", () => {
+      const owner = makeCustomer("@alice")
+      const team = teams.createTeam(owner.id, "Alpha")
+      const row = teams.postChatMessage({
+        team_id: team.id,
+        author: owner.id,
+        author_name: "@alice",
+        text: "   ",
+      })
+      expect(row).toBeNull()
     })
   })
 })

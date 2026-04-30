@@ -94,6 +94,18 @@ export interface TeamEvent {
   ts?: number
   // session_state
   state?: unknown
+  // chat_message attachment fields
+  attachment_url?: string | null
+  attachment_type?: string | null
+  attachment_size?: number | null
+  attachment_name?: string | null
+}
+
+export interface TeamChatAttachment {
+  url: string
+  type: string
+  size: number
+  name: string
 }
 
 export interface TeamChatMessage {
@@ -103,6 +115,30 @@ export interface TeamChatMessage {
   author_name: string | null
   text: string
   ts: number
+  attachment_url: string | null
+  attachment_type: string | null
+  attachment_size: number | null
+  attachment_name: string | null
+}
+
+export interface TeamInviteLink {
+  token: string
+  team_id: string
+  role: TeamRole
+  created_by: string
+  created_at: number
+  expires_at: number | null
+  max_uses: number | null
+  uses: number
+  revoked_at: number | null
+}
+
+export interface TeamInviteLinkPreview {
+  team_id: string
+  team_name: string
+  role: TeamRole
+  member_count: number
+  expires_at: number | null
 }
 
 export interface AccountSession {
@@ -254,11 +290,24 @@ export interface TeamsClient {
   /** List the most-recent chat messages for a team (oldest-first). */
   listChat(id: string, limit?: number): Promise<{ messages: TeamChatMessage[] }>
   /** Post a chat message. The server captures the author name. */
-  postChat(id: string, text: string): Promise<{ message: TeamChatMessage }>
+  postChat(id: string, text: string, attachment?: TeamChatAttachment | null): Promise<{ message: TeamChatMessage }>
   /** Notify other members that the local user is typing. Fire-and-forget. */
   postTyping(id: string): Promise<void>
   /** Open an SSE subscription. Returns an unsubscribe. */
   subscribe(id: string, onEvent: (e: TeamEvent) => void): () => void
+  /** Upload an image/PDF to be attached to a subsequent chat message. */
+  uploadChatAttachment(id: string, file: File): Promise<TeamChatAttachment>
+  /** Generate a shareable invite URL for a team. Owner/admin only. */
+  createInviteLink(
+    id: string,
+    opts?: { role?: "member" | "viewer"; ttl_ms?: number | null; max_uses?: number | null },
+  ): Promise<{ link: TeamInviteLink }>
+  listInviteLinks(id: string): Promise<{ links: TeamInviteLink[] }>
+  revokeInviteLink(id: string, token: string): Promise<{ ok: true }>
+  /** Public preview of an invite link — no auth required. */
+  previewInviteLink(token: string): Promise<TeamInviteLinkPreview | null>
+  /** Redeem an invite link as the current user. Returns the joined team. */
+  redeemInviteLink(token: string): Promise<{ team: TeamSummary; role: TeamRole; already_member: boolean }>
 }
 
 // ─── Desktop (IPC) ────────────────────────────────────────────────────────
@@ -315,7 +364,12 @@ function desktopClient(): TeamsClient {
       if (typeof teams?.listChat === "function") return teams.listChat(id, limit)
       return webClient().listChat(id, limit)
     },
-    postChat: (id, text) => {
+    postChat: (id, text, attachment) => {
+      // Always go through the web client so attachments flow uniformly. The
+      // older desktop IPC postChat only forwards text and would silently drop
+      // attachments — fall through to fetch-with-Bearer when an attachment
+      // is present.
+      if (attachment) return webClient().postChat(id, text, attachment)
       const teams = api()
       if (typeof teams?.postChat === "function") return teams.postChat(id, text)
       return webClient().postChat(id, text)
@@ -342,6 +396,15 @@ function desktopClient(): TeamsClient {
       }
       return webClient().subscribe(id, onEvent)
     },
+    // Attachment upload + invite links go through the web client (fetch+Bearer)
+    // regardless of desktop mode — the desktop IPC layer doesn't yet have these
+    // handlers and they're infrequent enough that the bearer-via-fetch path is fine.
+    uploadChatAttachment: (id, file) => webClient().uploadChatAttachment(id, file),
+    createInviteLink: (id, opts) => webClient().createInviteLink(id, opts),
+    listInviteLinks: (id) => webClient().listInviteLinks(id),
+    revokeInviteLink: (id, token) => webClient().revokeInviteLink(id, token),
+    previewInviteLink: (token) => webClient().previewInviteLink(token),
+    redeemInviteLink: (token) => webClient().redeemInviteLink(token),
   }
 }
 
@@ -464,10 +527,10 @@ function webClient(): TeamsClient {
     },
     listChat: (id, limit) =>
       json(`/license/teams/${encodeURIComponent(id)}/chat${limit ? "?limit=" + limit : ""}`),
-    postChat: (id, text) =>
+    postChat: (id, text, attachment) =>
       json(`/license/teams/${encodeURIComponent(id)}/chat`, {
         method: "POST",
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, attachment: attachment ?? null }),
       }),
     postTyping: async (id) => {
       await apiFetch(`/license/teams/${encodeURIComponent(id)}/chat/typing`, { method: "POST" }).catch(() => undefined)
@@ -512,6 +575,46 @@ function webClient(): TeamsClient {
       })
       return () => handle.close()
     },
+    uploadChatAttachment: async (id, file) => {
+      const s = readWebSession()
+      if (!s) throw new Error("not_signed_in")
+      const buf = await file.arrayBuffer()
+      const res = await fetch(
+        `${API_BASE}/license/teams/${encodeURIComponent(id)}/chat/upload`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": file.type,
+            "X-Attachment-Name": encodeURIComponent(file.name),
+            Authorization: `Bearer ${s.token}`,
+          },
+          body: buf,
+        },
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "upload_failed" }))
+        throw new Error((err as { error?: string }).error ?? `upload_failed_${res.status}`)
+      }
+      return (await res.json()) as TeamChatAttachment
+    },
+    createInviteLink: (id, opts) =>
+      json(`/license/teams/${encodeURIComponent(id)}/invite-links`, {
+        method: "POST",
+        body: JSON.stringify(opts ?? {}),
+      }),
+    listInviteLinks: (id) => json(`/license/teams/${encodeURIComponent(id)}/invite-links`),
+    revokeInviteLink: (id, token) =>
+      json(`/license/teams/${encodeURIComponent(id)}/invite-links/${encodeURIComponent(token)}`, {
+        method: "DELETE",
+      }),
+    previewInviteLink: async (token) => {
+      // No auth — public preview.
+      const res = await fetch(`${API_BASE}/license/invite-links/${encodeURIComponent(token)}`)
+      if (!res.ok) return null
+      return (await res.json()) as TeamInviteLinkPreview
+    },
+    redeemInviteLink: (token) =>
+      json(`/license/invite-links/${encodeURIComponent(token)}/redeem`, { method: "POST" }),
   }
 }
 

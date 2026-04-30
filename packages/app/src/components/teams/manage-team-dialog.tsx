@@ -9,6 +9,8 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
   const [busy, setBusy] = createSignal<string | null>(null)
   const [err, setErr] = createSignal<string | null>(null)
   const [info, setInfo] = createSignal<string | null>(null)
+  const [generatedLink, setGeneratedLink] = createSignal<string | null>(null)
+  const [linkRole, setLinkRole] = createSignal<"member" | "viewer">("member")
 
   // Live updates — role changes, new members, removals, and ownership
   // transfers all push an SSE event so the dialog reflects reality even
@@ -100,6 +102,38 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
     }
   }
 
+  async function onGenerateLink() {
+    setBusy("invite-link")
+    setErr(null)
+    setInfo(null)
+    try {
+      const r = await client.createInviteLink(props.teamId, { role: linkRole() })
+      // Build the public redeem URL. Falls back to the API origin so
+      // self-hosted deployments still work without a marketing domain.
+      const origin =
+        (typeof window !== "undefined" && window.location?.origin) ||
+        "https://crimecode.cc"
+      const url = `${origin.replace(/\/+$/, "")}/r/team/${r.link.token}`
+      setGeneratedLink(url)
+      setInfo(linkRole() === "viewer" ? "Invite link created (read-only access)." : "Invite link created.")
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : String(ex))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onCopyLink() {
+    const link = generatedLink()
+    if (!link) return
+    try {
+      await navigator.clipboard.writeText(link)
+      setInfo("Link copied to clipboard.")
+    } catch {
+      setErr("Failed to copy. Select the link and copy manually.")
+    }
+  }
+
   async function onCancelInvite(inviteId: string) {
     setBusy("invite:" + inviteId)
     setErr(null)
@@ -159,7 +193,7 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                     : " can only view."}
               </p>
 
-              <Show when={d().self_role !== "member"}>
+              <Show when={d().self_role !== "member" && d().self_role !== "viewer"}>
                 <form onSubmit={onAdd} data-slot="add-form">
                   <label>
                     <span>Add Team Member</span>
@@ -177,6 +211,51 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                     </div>
                   </label>
                 </form>
+
+                <div data-slot="invite-link-section">
+                  <span data-slot="invite-link-label">Invite via link</span>
+                  <div data-slot="invite-link-row">
+                    <select
+                      data-slot="invite-link-role"
+                      value={linkRole()}
+                      onChange={(e) => setLinkRole(e.currentTarget.value as "member" | "viewer")}
+                      disabled={busy() === "invite-link"}
+                      aria-label="Role granted by the link"
+                    >
+                      <option value="member">member</option>
+                      <option value="viewer">viewer (read-only)</option>
+                    </select>
+                    <button
+                      data-kind="secondary"
+                      data-slot="invite-link-generate"
+                      type="button"
+                      onClick={onGenerateLink}
+                      disabled={busy() === "invite-link"}
+                    >
+                      {busy() === "invite-link" ? "…" : "🔗 Generate link"}
+                    </button>
+                  </div>
+                  <Show when={generatedLink()}>
+                    {(link) => (
+                      <div data-slot="invite-link-result">
+                        <input
+                          type="text"
+                          readonly
+                          value={link()}
+                          data-slot="invite-link-input"
+                          onClick={(e) => e.currentTarget.select()}
+                          aria-label="Generated invite link"
+                        />
+                        <button data-kind="ghost" type="button" onClick={onCopyLink}>
+                          Copy
+                        </button>
+                      </div>
+                    )}
+                  </Show>
+                  <span data-slot="invite-link-hint">
+                    Anyone with the link joins automatically (default: max 10 uses, expires in 7 days).
+                  </span>
+                </div>
               </Show>
 
               <div data-slot="members-section">
