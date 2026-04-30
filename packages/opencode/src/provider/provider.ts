@@ -1295,7 +1295,12 @@ export namespace Provider {
       })
 
       if (baseURL !== undefined) options["baseURL"] = baseURL
-      if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
+      // Also override empty-string apiKey: a config like `apiKey: "{env:FOO}"`
+      // resolves to "" when FOO is unset, which is NOT undefined and would
+      // mask a user-provided key set via Auth.set ("Connetti" dialog).
+      if ((options["apiKey"] === undefined || options["apiKey"] === "") && provider.key) {
+        options["apiKey"] = provider.key
+      }
       if (model.headers)
         options["headers"] = {
           ...options["headers"],

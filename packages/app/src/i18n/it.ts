@@ -546,6 +546,7 @@ export const dict = {
   "command.session.unshare.description": "Smetti di condividere questa sessione",
 
   // Provider notes
+  "dialog.provider.crimeopus.note": "Gateway CrimeCode Cloud - 4 modelli (Coder/Fast/Agentic/Vision) con failover Together/Groq/RunPod",
   "dialog.provider.opencode.note": "Modelli curati tra cui Claude, GPT, Gemini e altri",
   "dialog.provider.opencode.tagline": "Modelli ottimizzati e affidabili",
   "dialog.provider.opencodeGo.tagline": "Abbonamento economico per tutti",
