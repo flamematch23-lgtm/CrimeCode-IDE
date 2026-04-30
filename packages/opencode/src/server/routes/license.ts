@@ -71,6 +71,10 @@ import {
   broadcastTyping,
   markChatRead,
   listChatReads,
+  listTeamAgents,
+  createTeamAgent,
+  updateTeamAgent,
+  deleteTeamAgent,
   getCustomerDisplay,
   getSessionState,
   createInviteLink,
@@ -1165,6 +1169,88 @@ export const LicenseRoutes = lazy(() => {
     try {
       const result = redeemInviteLink({ token, customer_id: sess.sub })
       return c.json(result)
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  // ── Team agents (shared system-prompt templates) ───────────────
+  // CRUD restricted to owner/admin (enforced inside teams.ts). Members
+  // call GET to populate the @-autocomplete in chat / prompt input.
+
+  app.get("/teams/:id/agents", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    return c.json({ agents: listTeamAgents(teamId, sess.sub) })
+  })
+
+  app.post("/teams/:id/agents", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const body = (await c.req.json().catch(() => ({}))) as {
+      slug?: string
+      display_name?: string
+      system_prompt?: string
+      model?: string | null
+      description?: string | null
+    }
+    try {
+      const agent = createTeamAgent({
+        team_id: teamId,
+        actor: sess.sub,
+        slug: body.slug ?? "",
+        display_name: body.display_name ?? "",
+        system_prompt: body.system_prompt ?? "",
+        model: body.model ?? null,
+        description: body.description ?? null,
+      })
+      return c.json({ agent })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.patch("/teams/:id/agents/:aid", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const aid = c.req.param("aid")
+    const body = (await c.req.json().catch(() => ({}))) as {
+      display_name?: string
+      system_prompt?: string
+      model?: string | null
+      description?: string | null
+    }
+    try {
+      const agent = updateTeamAgent({
+        team_id: teamId,
+        agent_id: aid,
+        actor: sess.sub,
+        display_name: body.display_name,
+        system_prompt: body.system_prompt,
+        model: body.model,
+        description: body.description,
+      })
+      return c.json({ agent })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.delete("/teams/:id/agents/:aid", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const aid = c.req.param("aid")
+    try {
+      const ok = deleteTeamAgent({ team_id: teamId, agent_id: aid, actor: sess.sub })
+      if (!ok) return c.json({ error: "agent_not_found" }, 404)
+      return c.json({ ok: true })
     } catch (err) {
       const { status, body: b } = teamError(err)
       return c.json(b, status as 400 | 500)

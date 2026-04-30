@@ -1,5 +1,6 @@
 import type { Message, Session } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@opencode-ai/ui/toast"
+import { expandTeamAgentMention } from "@/components/teams/team-agents-cache"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { Binary } from "@opencode-ai/util/binary"
 import { useNavigate, useParams } from "@solidjs/router"
@@ -104,11 +105,16 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
+  // Team agents: if the prompt starts with `@<slug>` and `<slug>` matches
+  // a shared team agent (cache populated by SharedWorkspacePublisher),
+  // expand it into the agent's system prompt. The visible message stays
+  // unchanged in the optimistic UI; only the request body is rewritten.
+  const expandedText = expandTeamAgentMention(text)
   const { requestParts, optimisticParts } = buildRequestParts({
     prompt: input.draft.prompt,
     context: input.draft.context,
     images,
-    text,
+    text: expandedText,
     sessionID: input.draft.sessionID,
     messageID,
     sessionDirectory: input.draft.sessionDirectory,

@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { getTeamsClient } from "../../utils/teams-client"
 import { installFocusTrap } from "../../a11y/focus-trap"
+import { TeamAgentsPanel } from "./team-agents-panel"
 
 export function ManageTeamDialog(props: { teamId: string; onClose: () => void; onDeleted: () => void }) {
   const client = getTeamsClient()
@@ -357,6 +358,8 @@ export function ManageTeamDialog(props: { teamId: string; onClose: () => void; o
                   </ul>
                 </div>
               </Show>
+
+              <TeamAgentsPanel teamId={props.teamId} selfRole={d().self_role} />
 
               <Show when={info()}>
                 <p data-slot="info">✓ {info()}</p>

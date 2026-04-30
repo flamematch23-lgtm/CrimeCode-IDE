@@ -118,6 +118,34 @@ export interface TeamChatRead {
   updated_at: number
 }
 
+export interface TeamAgent {
+  id: string
+  team_id: string
+  slug: string
+  display_name: string
+  system_prompt: string
+  model: string | null
+  description: string | null
+  created_by: string
+  created_at: number
+  updated_at: number
+}
+
+export interface CreateTeamAgentInput {
+  slug: string
+  display_name: string
+  system_prompt: string
+  model?: string | null
+  description?: string | null
+}
+
+export interface UpdateTeamAgentInput {
+  display_name?: string
+  system_prompt?: string
+  model?: string | null
+  description?: string | null
+}
+
 export interface TeamChatAttachment {
   url: string
   type: string
@@ -331,6 +359,14 @@ export interface TeamsClient {
   markChatRead(teamId: string, messageId: number): Promise<void>
   /** Hydrate the read-receipt state for a team on chat-panel mount. */
   listChatReads(teamId: string): Promise<{ reads: TeamChatRead[] }>
+  /** List all custom AI agents defined for the team. Members may invoke; admins manage. */
+  listAgents(teamId: string): Promise<{ agents: TeamAgent[] }>
+  /** Create a new shared agent. Owner/admin only. */
+  createAgent(teamId: string, input: CreateTeamAgentInput): Promise<{ agent: TeamAgent }>
+  /** Edit an existing agent. Owner/admin only. */
+  updateAgent(teamId: string, agentId: string, input: UpdateTeamAgentInput): Promise<{ agent: TeamAgent }>
+  /** Remove an agent. Owner/admin only. */
+  deleteAgent(teamId: string, agentId: string): Promise<{ ok: true }>
 }
 
 // ─── Desktop (IPC) ────────────────────────────────────────────────────────
@@ -431,6 +467,10 @@ function desktopClient(): TeamsClient {
     postCrdt: (teamId, sessionId, msg) => webClient().postCrdt(teamId, sessionId, msg),
     markChatRead: (teamId, messageId) => webClient().markChatRead(teamId, messageId),
     listChatReads: (teamId) => webClient().listChatReads(teamId),
+    listAgents: (teamId) => webClient().listAgents(teamId),
+    createAgent: (teamId, input) => webClient().createAgent(teamId, input),
+    updateAgent: (teamId, agentId, input) => webClient().updateAgent(teamId, agentId, input),
+    deleteAgent: (teamId, agentId) => webClient().deleteAgent(teamId, agentId),
   }
 }
 
@@ -654,6 +694,21 @@ function webClient(): TeamsClient {
       }).catch(() => undefined)
     },
     listChatReads: (teamId) => json(`/license/teams/${encodeURIComponent(teamId)}/chat/reads`),
+    listAgents: (teamId) => json(`/license/teams/${encodeURIComponent(teamId)}/agents`),
+    createAgent: (teamId, input) =>
+      json(`/license/teams/${encodeURIComponent(teamId)}/agents`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    updateAgent: (teamId, agentId, input) =>
+      json(`/license/teams/${encodeURIComponent(teamId)}/agents/${encodeURIComponent(agentId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    deleteAgent: (teamId, agentId) =>
+      json(`/license/teams/${encodeURIComponent(teamId)}/agents/${encodeURIComponent(agentId)}`, {
+        method: "DELETE",
+      }),
   }
 }
 

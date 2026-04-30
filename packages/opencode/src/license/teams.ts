@@ -839,6 +839,132 @@ export function listChatReads(teamId: string, viewer: string): TeamChatReadRow[]
     .all(teamId)
 }
 
+// ── Team agents ───────────────────────────────────────────────────────
+// Shared system-prompt templates that any team member can invoke with
+// `@<slug>` in chat or in the AI prompt. Owner/admin define them; members
+// invoke. The system prompt is prepended to the user's message before
+// the AI call — invocation happens client-side so the local quota is
+// charged, not the central license server's.
+
+export interface TeamAgentRow {
+  id: string
+  team_id: string
+  slug: string
+  display_name: string
+  system_prompt: string
+  model: string | null
+  description: string | null
+  created_by: string
+  created_at: number
+  updated_at: number
+}
+
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
+
+function normalizeSlug(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+}
+
+export function listTeamAgents(teamId: string, viewer: string): TeamAgentRow[] {
+  if (!getMemberRole(teamId, viewer)) return []
+  const db = getDb()
+  return db
+    .prepare<TeamAgentRow, [string]>(
+      `SELECT id, team_id, slug, display_name, system_prompt, model, description,
+              created_by, created_at, updated_at
+       FROM team_agents WHERE team_id = ? ORDER BY display_name COLLATE NOCASE`,
+    )
+    .all(teamId)
+}
+
+export function createTeamAgent(args: {
+  team_id: string
+  actor: string
+  slug: string
+  display_name: string
+  system_prompt: string
+  model?: string | null
+  description?: string | null
+}): TeamAgentRow {
+  const role = getMemberRole(args.team_id, args.actor)
+  if (role !== "owner" && role !== "admin") throw new Error("forbidden")
+  const slug = normalizeSlug(args.slug)
+  if (!SLUG_RE.test(slug)) throw new Error("invalid_slug")
+  const display = args.display_name.trim().slice(0, 80)
+  if (!display) throw new Error("invalid_display_name")
+  const prompt = args.system_prompt.trim()
+  if (!prompt) throw new Error("invalid_system_prompt")
+  if (prompt.length > 8000) throw new Error("system_prompt_too_long")
+  const ts = now()
+  const id = `ag_${randomBytes(9).toString("base64url")}`
+  const db = getDb()
+  try {
+    db.prepare(
+      `INSERT INTO team_agents (id, team_id, slug, display_name, system_prompt, model, description, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, args.team_id, slug, display, prompt, args.model ?? null, args.description ?? null, args.actor, ts, ts)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes("UNIQUE")) throw new Error("slug_taken")
+    throw err
+  }
+  const row = db
+    .prepare<TeamAgentRow, [string]>("SELECT * FROM team_agents WHERE id = ?")
+    .get(id)
+  if (!row) throw new Error("agent_not_created")
+  return row
+}
+
+export function updateTeamAgent(args: {
+  team_id: string
+  agent_id: string
+  actor: string
+  display_name?: string
+  system_prompt?: string
+  model?: string | null
+  description?: string | null
+}): TeamAgentRow {
+  const role = getMemberRole(args.team_id, args.actor)
+  if (role !== "owner" && role !== "admin") throw new Error("forbidden")
+  const db = getDb()
+  const existing = db
+    .prepare<TeamAgentRow, [string, string]>("SELECT * FROM team_agents WHERE id = ? AND team_id = ?")
+    .get(args.agent_id, args.team_id)
+  if (!existing) throw new Error("agent_not_found")
+  const display = args.display_name === undefined ? existing.display_name : args.display_name.trim().slice(0, 80)
+  if (!display) throw new Error("invalid_display_name")
+  const prompt = args.system_prompt === undefined ? existing.system_prompt : args.system_prompt.trim()
+  if (!prompt) throw new Error("invalid_system_prompt")
+  if (prompt.length > 8000) throw new Error("system_prompt_too_long")
+  const model = args.model === undefined ? existing.model : args.model
+  const description = args.description === undefined ? existing.description : args.description
+  const ts = now()
+  db.prepare(
+    `UPDATE team_agents SET display_name = ?, system_prompt = ?, model = ?, description = ?, updated_at = ?
+     WHERE id = ? AND team_id = ?`,
+  ).run(display, prompt, model, description, ts, args.agent_id, args.team_id)
+  const row = db
+    .prepare<TeamAgentRow, [string]>("SELECT * FROM team_agents WHERE id = ?")
+    .get(args.agent_id)
+  if (!row) throw new Error("agent_not_found")
+  return row
+}
+
+export function deleteTeamAgent(args: { team_id: string; agent_id: string; actor: string }): boolean {
+  const role = getMemberRole(args.team_id, args.actor)
+  if (role !== "owner" && role !== "admin") throw new Error("forbidden")
+  const db = getDb()
+  const r = db
+    .prepare("DELETE FROM team_agents WHERE id = ? AND team_id = ?")
+    .run(args.agent_id, args.team_id)
+  return r.changes > 0
+}
+
 export function endSession(sessionId: string, actor: string): boolean {
   const db = getDb()
   const row = db

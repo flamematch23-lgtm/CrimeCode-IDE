@@ -404,6 +404,30 @@ function runMigrations(db: Database): void {
          FOREIGN KEY (customer_id) REFERENCES customers(id)
        )`,
     ],
+    // v2.27.0: shared AI agents per team. Each agent is a named system-
+    // prompt template that members invoke with `@<slug>` in chat or prompt.
+    // Only owner/admin can create/edit/delete; members may invoke.
+    [
+      "v8.team_agents",
+      `CREATE TABLE IF NOT EXISTS team_agents (
+         id              TEXT PRIMARY KEY,
+         team_id         TEXT NOT NULL,
+         slug            TEXT NOT NULL,
+         display_name    TEXT NOT NULL,
+         system_prompt   TEXT NOT NULL,
+         model           TEXT,
+         description     TEXT,
+         created_by      TEXT NOT NULL,
+         created_at      INTEGER NOT NULL,
+         updated_at      INTEGER NOT NULL,
+         FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+         FOREIGN KEY (created_by) REFERENCES customers(id)
+       )`,
+    ],
+    [
+      "v8.team_agents_team_slug_idx",
+      "CREATE UNIQUE INDEX IF NOT EXISTS team_agents_team_slug_idx ON team_agents(team_id, slug)",
+    ],
   ]
   for (const [name, sql] of ops) {
     try {

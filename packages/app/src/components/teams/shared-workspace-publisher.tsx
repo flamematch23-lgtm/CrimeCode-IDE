@@ -31,6 +31,7 @@ import { getTeamsClient, readWebSession, type TeamEvent } from "@/utils/teams-cl
 import { SharedEditorProvider, type CrdtTransport, type CrdtMessage } from "./shared-editor-protocol"
 import { bindPromptEditor, findPromptEl } from "./bind-prompt-editor"
 import { PromptCursorOverlay } from "./prompt-cursor-overlay"
+import { refreshTeamAgents } from "./team-agents-cache"
 
 function readActiveTeamId(): string | null {
   try {
@@ -240,8 +241,11 @@ export function SharedWorkspacePublisher() {
       const active = getActiveTeamSession()
       if (active) {
         setupCrdt(active.teamId, active.sessionId)
+        // Hydrate the team-agent cache so @<slug> expansion works at submit.
+        void refreshTeamAgents(active.teamId)
       } else {
         teardownCrdt()
+        void refreshTeamAgents(null)
       }
     }
 
