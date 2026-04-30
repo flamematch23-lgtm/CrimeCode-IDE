@@ -250,12 +250,12 @@ const createPlatform = (): Platform => {
 
     automation: {
       getBrowserAllowAll: () => window.api.automation.getBrowserAllowAll(),
-      setBrowserAllowAll: (value) => window.api.automation.setBrowserAllowAll(value),
+      setBrowserAllowAll: (value: boolean) => window.api.automation.setBrowserAllowAll(value),
       listConnectedBrowsers: () => window.api.automation.listConnectedBrowsers(),
       getComputerUseStatus: () => window.api.automation.getComputerUseStatus(),
-      setComputerUseEnabled: (value) => window.api.automation.setComputerUseEnabled(value),
+      setComputerUseEnabled: (value: boolean) => window.api.automation.setComputerUseEnabled(value),
       getRestoreApps: () => window.api.automation.getRestoreApps(),
-      setRestoreApps: (value) => window.api.automation.setRestoreApps(value),
+      setRestoreApps: (value: boolean) => window.api.automation.setRestoreApps(value),
     },
   }
 }
