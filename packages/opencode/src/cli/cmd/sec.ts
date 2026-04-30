@@ -16,6 +16,14 @@ import { SSRFProbeTool } from "../../tool/ssrf_probe"
 import { CVEPocTool } from "../../tool/cve_poc"
 import { NmapTool, NucleiTool, SqlmapTool } from "../../tool/external_scanners"
 import { Tool } from "../../tool/tool"
+import { ReverseShellTool } from "../../tool/reverse_shell"
+import { PayloadGeneratorTool } from "../../tool/payload_generator"
+import { PrivEscSuggesterTool } from "../../tool/privesc_suggester"
+import { CredentialDumperTool } from "../../tool/credential_dumper"
+import { C2GeneratorTool } from "../../tool/c2_generator"
+import { SSTITool } from "../../tool/ssti_tool"
+import { AMSIBypassTool } from "../../tool/amsi_bypass"
+import { PersistenceTool } from "../../tool/persistence_tool"
 import fs from "fs/promises"
 import path from "path"
 
@@ -353,9 +361,232 @@ const Sqlmap = cmd({
   },
 })
 
+const ReverseShell = cmd({
+  command: "shell",
+  describe: "reverse shell handler (generate, listen, sessions, upgrade)",
+  builder: (y: Argv) =>
+    y
+      .option("action", {
+        type: "string",
+        choices: ["generate", "listen", "sessions", "send", "kill", "upgrade"],
+        demandOption: true,
+      })
+      .option("lhost", { type: "string", describe: "Listener IP" })
+      .option("lport", { type: "number", describe: "Listener port" })
+      .option("platform", { type: "string", choices: ["linux", "windows", "macos", "all"] })
+      .option("session", { type: "string", describe: "Session ID" })
+      .option("command", { type: "string", describe: "Command to send" })
+      .option("encoding", { type: "string", choices: ["none", "base64", "hex", "url"] })
+      .option("format", { type: "string" }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(ReverseShellTool, {
+        action: args.action,
+        lhost: args.lhost,
+        lport: args.lport,
+        platform: args.platform,
+        session: args.session,
+        command: args.command,
+        encoding: args.encoding,
+        format: args.format,
+      })
+    })
+  },
+})
+
+const PayloadGen = cmd({
+  command: "payload",
+  describe: "generate polyglot reverse shell payloads",
+  builder: (y: Argv) =>
+    y
+      .option("lhost", { type: "string", demandOption: true })
+      .option("lport", { type: "number", default: 4444 })
+      .option("format", { type: "string", default: "all" })
+      .option("encoding", { type: "string", default: "none" })
+      .option("method", { type: "string", default: "shell" })
+      .option("sleep", { type: "number", default: 5 })
+      .option("retry", { type: "boolean", default: false })
+      .option("os", { type: "string", default: "all" })
+      .option("useragent", { type: "string" })
+      .option("inline", { type: "boolean", default: true }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(PayloadGeneratorTool, {
+        lhost: args.lhost,
+        lport: args.lport,
+        format: args.format,
+        encoding: args.encoding,
+        method: args.method,
+        sleep: args.sleep,
+        retry: args.retry,
+        os: args.os,
+        useragent: args.useragent,
+        inline: args.inline,
+      })
+    })
+  },
+})
+
+const Privesc = cmd({
+  command: "privesc",
+  describe: "local privilege escalation suggester",
+  builder: (y: Argv) =>
+    y
+      .option("platform", { type: "string", choices: ["linux", "windows", "macos", "auto"] })
+      .option("thorough", { type: "boolean", default: false })
+      .option("commands", { type: "string", describe: "Paste command output to analyze" }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(PrivEscSuggesterTool, {
+        platform: args.platform,
+        thorough: args.thorough,
+        commands: args.commands,
+      })
+    })
+  },
+})
+
+const Creds = cmd({
+  command: "creds",
+  describe: "credential dumper (cross-platform)",
+  builder: (y: Argv) =>
+    y
+      .option("platform", { type: "string", choices: ["linux", "windows", "auto", "all"] })
+      .option("target", { type: "string", default: "all" })
+      .option("output_format", { type: "string", choices: ["commands", "script", "both"], default: "commands" })
+      .option("lhost", { type: "string" }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(CredentialDumperTool, {
+        platform: args.platform,
+        target: args.target,
+        output_format: args.output_format,
+        lhost: args.lhost,
+      })
+    })
+  },
+})
+
+const C2Gen = cmd({
+  command: "c2",
+  describe: "C2 implant generator",
+  builder: (y: Argv) =>
+    y
+      .option("channel", { type: "string", choices: ["http", "https", "dns", "websocket", "all"], default: "all" })
+      .option("lhost", { type: "string", demandOption: true })
+      .option("lport", { type: "number", default: 443 })
+      .option("encryption", { type: "string", choices: ["xor", "aes256", "chacha20", "none"], default: "xor" })
+      .option("sleep", { type: "number", default: 60 })
+      .option("jitter", { type: "number", default: 20 })
+      .option("format", {
+        type: "string",
+        choices: ["python", "powershell", "c", "rust", "go", "js", "vbs", "all"],
+        default: "all",
+      })
+      .option("persist", { type: "boolean", default: false })
+      .option("useragent", { type: "string" })
+      .option("implant_name", { type: "string" }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(C2GeneratorTool, {
+        channel: args.channel,
+        lhost: args.lhost,
+        lport: args.lport,
+        encryption: args.encryption,
+        sleep: args.sleep,
+        jitter: args.jitter,
+        format: args.format,
+        persist: args.persist,
+        useragent: args.useragent,
+        implant_name: args.implant_name,
+      })
+    })
+  },
+})
+
+const SSTICmd = cmd({
+  command: "ssti",
+  describe: "SSTI exploitation toolkit",
+  builder: (y: Argv) =>
+    y
+      .option("action", { type: "string", choices: ["detect", "exploit", "payloads", "rce"], demandOption: true })
+      .option("url", { type: "string" })
+      .option("template", { type: "string", default: "auto" })
+      .option("command", { type: "string", default: "id" })
+      .option("method", { type: "string", choices: ["GET", "POST"], default: "GET" })
+      .option("param", { type: "string", default: "q" })
+      .option("value", { type: "string" }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(SSTITool, {
+        action: args.action,
+        url: args.url,
+        template: args.template,
+        command: args.command,
+        method: args.method,
+        param: args.param,
+        value: args.value,
+      })
+    })
+  },
+})
+
+const AMSICmd = cmd({
+  command: "amsi",
+  describe: "AMSI/EDR bypass engine",
+  builder: (y: Argv) =>
+    y
+      .option("bypass", {
+        type: "string",
+        choices: ["amsi", "clm", "applocker", "etw", "all", "obfuscation"],
+        demandOption: true,
+      })
+      .option("format", { type: "string", choices: ["inline", "script", "encoded", "all"], default: "all" })
+      .option("command", { type: "string" }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(AMSIBypassTool, {
+        bypass: args.bypass,
+        format: args.format,
+        command: args.command,
+      })
+    })
+  },
+})
+
+const PersistCmd = cmd({
+  command: "persist",
+  describe: "persistence deployment toolkit",
+  builder: (y: Argv) =>
+    y
+      .option("platform", { type: "string", choices: ["windows", "linux", "macos", "all"], default: "all" })
+      .option("method", { type: "string", default: "all" })
+      .option("payload", { type: "string", demandOption: true })
+      .option("name", { type: "string" })
+      .option("schedule", { type: "string" })
+      .option("user", { type: "string" })
+      .option("elevated", { type: "boolean", default: false })
+      .option("hide", { type: "boolean", default: true }),
+  handler: async (args) => {
+    await bootstrap(process.cwd(), async () => {
+      await run(PersistenceTool, {
+        platform: args.platform,
+        method: args.method,
+        payload: args.payload,
+        name: args.name,
+        schedule: args.schedule,
+        user: args.user,
+        elevated: args.elevated,
+        hide: args.hide,
+      })
+    })
+  },
+})
+
 export const SecCommand = cmd({
   command: "sec",
-  describe: "offensive security toolkit (recon, scan, vuln, phish, report, playbook)",
+  describe:
+    "offensive security toolkit (recon, scan, vuln, phish, report, playbook, shell, payload, privesc, creds, c2, ssti, amsi, persist)",
   builder: (y: Argv) =>
     y
       .command(Recon)
@@ -370,6 +601,14 @@ export const SecCommand = cmd({
       .command(Nmap)
       .command(Nuclei)
       .command(Sqlmap)
+      .command(ReverseShell)
+      .command(PayloadGen)
+      .command(Privesc)
+      .command(Creds)
+      .command(C2Gen)
+      .command(SSTICmd)
+      .command(AMSICmd)
+      .command(PersistCmd)
       .demandCommand(),
   async handler() {},
 })

@@ -62,6 +62,14 @@ import { CVEPocTool } from "./cve_poc"
 import { NmapTool, NucleiTool, SqlmapTool } from "./external_scanners"
 import { BurpToolkitTool } from "./burp_toolkit"
 import { InviteTool } from "./invite"
+import { ReverseShellTool } from "./reverse_shell"
+import { PayloadGeneratorTool } from "./payload_generator"
+import { PrivEscSuggesterTool } from "./privesc_suggester"
+import { CredentialDumperTool } from "./credential_dumper"
+import { C2GeneratorTool } from "./c2_generator"
+import { SSTITool } from "./ssti_tool"
+import { AMSIBypassTool } from "./amsi_bypass"
+import { PersistenceTool } from "./persistence_tool"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
@@ -209,6 +217,14 @@ export namespace ToolRegistry {
           SqlmapTool,
           BurpToolkitTool,
           InviteTool,
+          ReverseShellTool,
+          PayloadGeneratorTool,
+          PrivEscSuggesterTool,
+          CredentialDumperTool,
+          C2GeneratorTool,
+          SSTITool,
+          AMSIBypassTool,
+          PersistenceTool,
           SkillTool,
           ApplyPatchTool,
           ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
