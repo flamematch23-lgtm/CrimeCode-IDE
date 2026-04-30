@@ -63,26 +63,53 @@
 !packages/containers/package.json
 !packages/function/package.json
 
-# Re-exclude junk inside the whitelisted dirs (explicit paths to be safe)
+# Re-exclude junk inside the whitelisted dirs.
+# IMPORTANT: in .dockerignore the LAST matching rule wins. We use both the
+# bare pattern and `/**` form to handle both directories and their contents,
+# and add explicit paths for the worst offenders (opencode/dist is 150+ MB
+# of bundle artifacts that have no business in the Fly build context).
 **/node_modules
-**/node_modules/
+**/node_modules/**
 **/dist
-**/dist/
+**/dist/**
 **/out
-**/out/
+**/out/**
 **/.turbo
-**/.turbo/
+**/.turbo/**
 **/tsconfig.tsbuildinfo
 **/target
-**/target/
+**/target/**
 **/.bun-build
+**/.bun-build/**
 *.log
-# Only exclude built artifacts and node_modules — keep source / migrations / specs
+**/*.log
+
+# Source/test artifacts that aren't needed at runtime
+**/*.test.ts
+**/*.spec.ts
+**/test
+**/test/**
+**/tests
+**/tests/**
+**/__tests__/**
+**/coverage
+**/coverage/**
+
+# Explicit paths for the worst offenders (dist alone is 150+ MB)
 packages/opencode/dist
-packages/opencode/dist/
+packages/opencode/dist/**
 packages/opencode/node_modules
-packages/opencode/node_modules/
+packages/opencode/node_modules/**
+packages/opencode/test
+packages/opencode/test/**
 packages/util/dist
-packages/util/dist/
+packages/util/dist/**
 packages/sdk/js/dist
-packages/sdk/js/dist/
+packages/sdk/js/dist/**
+
+# Windows-specific files that produce "unknown file mode" errors in
+# the Fly tar packer.
+**/Thumbs.db
+**/desktop.ini
+**/*.lnk
+**/.DS_Store
