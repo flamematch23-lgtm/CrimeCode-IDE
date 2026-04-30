@@ -81,6 +81,8 @@
     "solid-list": "catalog:",
     "tailwindcss": "catalog:",
     "virtua": "catalog:",
+    "y-protocols": "1.0.6",
+    "yjs": "13.6.27",
     "zod": "catalog:"
   }
 }

@@ -21,6 +21,8 @@ import {
 } from "../../license/store"
 import { getWallets } from "../../license/wallets"
 import { backupOnce } from "../../license/backup"
+import { s3Put, s3Config } from "../../license/s3-upload"
+import { randomBytes } from "node:crypto"
 import { checkRateLimit } from "../../license/rate-limit"
 import {
   approveCustomer,
@@ -69,6 +71,11 @@ import {
   broadcastTyping,
   getCustomerDisplay,
   getSessionState,
+  createInviteLink,
+  listInviteLinks,
+  revokeInviteLink,
+  previewInviteLink,
+  redeemInviteLink,
 } from "../../license/teams"
 import { subscribeTeam } from "../../license/team-events"
 import { streamSSE } from "hono/streaming"
@@ -1048,6 +1055,142 @@ export const LicenseRoutes = lazy(() => {
     return c.json({ session_id: sid, ...data })
   })
 
+  // ── Team invite links ──────────────────────────────────────────
+  // Owner/admin generates a shareable token; recipient clicks the URL and
+  // joins automatically with the role baked into the link (member|viewer).
+
+  app.post("/teams/:id/invite-links", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const body = (await c.req.json().catch(() => ({}))) as {
+      role?: "member" | "viewer"
+      ttl_ms?: number | null
+      max_uses?: number | null
+    }
+    try {
+      const link = createInviteLink({
+        team_id: teamId,
+        actor: sess.sub,
+        role: body.role,
+        ttl_ms: body.ttl_ms,
+        max_uses: body.max_uses,
+      })
+      return c.json({ link })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  app.get("/teams/:id/invite-links", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    return c.json({ links: listInviteLinks(teamId, sess.sub) })
+  })
+
+  app.delete("/teams/:id/invite-links/:token", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const token = c.req.param("token")
+    try {
+      revokeInviteLink(teamId, sess.sub, token)
+      return c.json({ ok: true })
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  // Public preview — no session required. Lets the redeem page render the
+  // team name + member count before the user signs in.
+  app.get("/invite-links/:token", (c) => {
+    const token = c.req.param("token")
+    const preview = previewInviteLink(token)
+    if (!preview) return c.json({ error: "invalid_or_expired" }, 404)
+    return c.json(preview)
+  })
+
+  // Redeem — requires authentication. Adds the calling customer to the team.
+  app.post("/invite-links/:token/redeem", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const token = c.req.param("token")
+    try {
+      const result = redeemInviteLink({ token, customer_id: sess.sub })
+      return c.json(result)
+    } catch (err) {
+      const { status, body: b } = teamError(err)
+      return c.json(b, status as 400 | 500)
+    }
+  })
+
+  // ── Team chat: attachment upload ───────────────────────────────
+  // Accepts a single image/PDF up to 10 MB and pushes it to the
+  // configured S3-compatible bucket (R2 in production). Returns the
+  // resulting public URL plus type/size/name so the renderer can attach
+  // it to the next chat message via the existing /chat endpoint.
+  //
+  // Authenticated members only — the team membership check prevents the
+  // bucket from doubling as a free public file host.
+  app.post("/teams/:id/chat/upload", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const role = getMemberRole(teamId, sess.sub)
+    if (!role) return c.json({ error: "forbidden" }, 403)
+    // Viewers are read-only — no posting, no uploads.
+    if (role === "viewer") return c.json({ error: "forbidden" }, 403)
+
+    if (!s3Config()) return c.json({ error: "uploads_not_configured" }, 503)
+
+    const contentType = c.req.header("content-type") ?? ""
+    const allowedTypes = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
+    if (!allowedTypes.includes(contentType)) {
+      return c.json({ error: "invalid_type", allowed: allowedTypes }, 400)
+    }
+    const filenameHeader = c.req.header("x-attachment-name") ?? "file"
+    const sanitizedName = filenameHeader.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200) || "file"
+
+    const buf = await c.req.arrayBuffer()
+    const size = buf.byteLength
+    if (size <= 0) return c.json({ error: "empty" }, 400)
+    if (size > 10 * 1024 * 1024) return c.json({ error: "too_large", max_bytes: 10 * 1024 * 1024 }, 413)
+
+    const ext = (() => {
+      switch (contentType) {
+        case "image/png":
+          return "png"
+        case "image/jpeg":
+          return "jpg"
+        case "image/gif":
+          return "gif"
+        case "image/webp":
+          return "webp"
+        case "application/pdf":
+          return "pdf"
+        default:
+          return "bin"
+      }
+    })()
+    const key = `chat/${teamId}/${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`
+
+    try {
+      const { url } = await s3Put(key, new Uint8Array(buf), contentType)
+      return c.json({
+        url,
+        type: contentType,
+        size,
+        name: sanitizedName,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return c.json({ error: "upload_failed", detail: msg.slice(0, 200) }, 502)
+    }
+  })
+
   // ── Team chat ──────────────────────────────────────────────────
   // Persistent chat: posts a message, prunes oldest beyond N=200 per team,
   // emits a `chat_message` SSE event so all subscribers see it instantly.
@@ -1056,11 +1199,26 @@ export const LicenseRoutes = lazy(() => {
     if (!sess) return c.json({ error: "unauthorized" }, 401)
     const teamId = c.req.param("id")
     if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
-    const body = (await c.req.json().catch(() => ({}))) as { text?: string }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      text?: string
+      attachment?: { url: string; type: string; size: number; name: string } | null
+    }
     const text = typeof body.text === "string" ? body.text : ""
-    if (!text.trim()) return c.json({ error: "empty" }, 400)
+    const attachment = (() => {
+      if (!body.attachment) return null
+      const a = body.attachment
+      // Allow only images and PDF; cap at 10 MB. Invalid attachments are
+      // dropped silently — the message still goes through with text only.
+      const allowedTypes = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
+      if (typeof a.url !== "string" || !a.url.startsWith("https://")) return null
+      if (typeof a.type !== "string" || !allowedTypes.includes(a.type)) return null
+      if (typeof a.size !== "number" || a.size <= 0 || a.size > 10 * 1024 * 1024) return null
+      if (typeof a.name !== "string") return null
+      return { url: a.url, type: a.type, size: a.size, name: a.name.slice(0, 200) }
+    })()
+    if (!text.trim() && !attachment) return c.json({ error: "empty" }, 400)
     const display = getCustomerDisplay(sess.sub)
-    const row = postChatMessage({ team_id: teamId, author: sess.sub, author_name: display, text })
+    const row = postChatMessage({ team_id: teamId, author: sess.sub, author_name: display, text, attachment })
     if (!row) return c.json({ error: "rejected" }, 400)
     return c.json({ message: row })
   })

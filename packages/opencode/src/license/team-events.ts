@@ -33,6 +33,10 @@ export type TeamEvent =
       author_name: string | null
       text: string
       ts: number
+      attachment_url?: string | null
+      attachment_type?: string | null
+      attachment_size?: number | null
+      attachment_name?: string | null
     }
   | {
       type: "chat_typing"
