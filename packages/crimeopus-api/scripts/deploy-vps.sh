@@ -166,10 +166,11 @@ $DOMAIN {
     }
     encode zstd gzip
 
-    # Block /admin from public internet — uncomment if you want admin
-    # only via SSH tunnel:
-    # @admin path /admin*
-    # respond @admin "use SSH tunnel" 403
+    # Note: /admin is publicly reachable here. Auth is enforced by the
+    # application's basicAuth (ADMIN_PASSWORD env). If you prefer admin
+    # only via SSH tunnel, uncomment the next 3 lines:
+    # @admin path /admin /admin/*
+    # handle @admin { respond "use SSH tunnel" 403 }
 
     log {
         output file /var/log/caddy/$DOMAIN.log {

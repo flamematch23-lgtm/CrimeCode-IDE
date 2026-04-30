@@ -788,6 +788,57 @@ export function broadcastTyping(args: { team_id: string; author: string; author_
   })
 }
 
+// ── Read receipts ─────────────────────────────────────────────────────
+// Per-(team, customer) high-water-mark of the last chat message acknowledged.
+// Updated on POST /chat/read; broadcast on the SSE bus so peers can render
+// "seen by N" markers without polling.
+
+export interface TeamChatReadRow {
+  team_id: string
+  customer_id: string
+  last_read_message_id: number
+  updated_at: number
+}
+
+export function markChatRead(args: { team_id: string; customer_id: string; message_id: number }): TeamChatReadRow | null {
+  if (!getMemberRole(args.team_id, args.customer_id)) return null
+  if (!Number.isFinite(args.message_id) || args.message_id <= 0) return null
+  const db = getDb()
+  const ts = now()
+  // Upsert with high-water-mark semantics: never decrease the existing value.
+  db.prepare(
+    `INSERT INTO team_chat_reads (team_id, customer_id, last_read_message_id, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(team_id, customer_id) DO UPDATE SET
+       last_read_message_id = MAX(last_read_message_id, excluded.last_read_message_id),
+       updated_at = excluded.updated_at`,
+  ).run(args.team_id, args.customer_id, args.message_id, ts)
+  const row = db
+    .prepare<TeamChatReadRow, [string, string]>(
+      "SELECT team_id, customer_id, last_read_message_id, updated_at FROM team_chat_reads WHERE team_id = ? AND customer_id = ?",
+    )
+    .get(args.team_id, args.customer_id)
+  if (!row) return null
+  emitTeamEvent({
+    type: "chat_read",
+    team_id: args.team_id,
+    customer_id: args.customer_id,
+    last_read_message_id: row.last_read_message_id,
+    ts: row.updated_at,
+  })
+  return row
+}
+
+export function listChatReads(teamId: string, viewer: string): TeamChatReadRow[] {
+  if (!getMemberRole(teamId, viewer)) return []
+  const db = getDb()
+  return db
+    .prepare<TeamChatReadRow, [string]>(
+      "SELECT team_id, customer_id, last_read_message_id, updated_at FROM team_chat_reads WHERE team_id = ?",
+    )
+    .all(teamId)
+}
+
 export function endSession(sessionId: string, actor: string): boolean {
   const db = getDb()
   const row = db

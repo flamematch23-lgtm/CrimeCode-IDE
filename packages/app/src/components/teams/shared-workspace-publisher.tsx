@@ -17,6 +17,7 @@
  * instance per renderer.
  */
 import { createEffect, onCleanup, onMount } from "solid-js"
+import { render } from "solid-js/web"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { useServer, ServerConnection } from "@/context/server"
 import {
@@ -29,6 +30,7 @@ import {
 import { getTeamsClient, readWebSession, type TeamEvent } from "@/utils/teams-client"
 import { SharedEditorProvider, type CrdtTransport, type CrdtMessage } from "./shared-editor-protocol"
 import { bindPromptEditor, findPromptEl } from "./bind-prompt-editor"
+import { PromptCursorOverlay } from "./prompt-cursor-overlay"
 
 function readActiveTeamId(): string | null {
   try {
@@ -137,6 +139,10 @@ export function SharedWorkspacePublisher() {
     let crdtCleanup: (() => void) | null = null
     let crdtSessionId: string | null = null
     let bindInterval: ReturnType<typeof setInterval> | null = null
+    // Solid disposer + DOM node for the remote-cursor overlay. We mount it
+    // as a child of the prompt's scroller (which is position: relative).
+    let overlayDispose: (() => void) | null = null
+    let overlayHost: HTMLDivElement | null = null
 
     const selfId = readWebSession()?.customer_id ?? null
 
@@ -145,6 +151,10 @@ export function SharedWorkspacePublisher() {
         clearInterval(bindInterval)
         bindInterval = null
       }
+      overlayDispose?.()
+      overlayDispose = null
+      overlayHost?.remove()
+      overlayHost = null
       crdtCleanup?.()
       crdtCleanup = null
       crdtProvider?.destroy()
@@ -192,7 +202,32 @@ export function SharedWorkspacePublisher() {
         if (el && !crdtCleanup) {
           clearInterval(bindInterval!)
           bindInterval = null
-          crdtCleanup = bindPromptEditor(providerRef.doc.getText("draft"), el)
+          crdtCleanup = bindPromptEditor(
+            providerRef.doc.getText("draft"),
+            el,
+            providerRef.awareness,
+          )
+          // Mount the remote-cursor overlay inside the prompt's scroller
+          // (the parent of the contenteditable, which is position: relative).
+          // We append our own host div so the overlay can be torn down
+          // cleanly without disturbing the existing layout.
+          const scroller = el.parentElement
+          if (scroller) {
+            overlayHost = document.createElement("div")
+            overlayHost.className = "absolute inset-0 pointer-events-none"
+            scroller.appendChild(overlayHost)
+            const selfClientId = providerRef.doc.clientID
+            overlayDispose = render(
+              () => (
+                <PromptCursorOverlay
+                  awareness={providerRef.awareness}
+                  promptEl={el}
+                  selfClientId={selfClientId}
+                />
+              ),
+              overlayHost,
+            )
+          }
         }
         if (++bindAttempts > 30) {
           clearInterval(bindInterval!)

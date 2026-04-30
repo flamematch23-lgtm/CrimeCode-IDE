@@ -19,8 +19,21 @@
  */
 
 import * as Y from "yjs"
+import type { Awareness } from "y-protocols/awareness"
 
 type Cleanup = () => void
+
+/**
+ * Shape of the cursor field we put into Awareness state. Other clients read
+ * this to draw remote carets/selections in the prompt overlay. `anchor` and
+ * `head` are character offsets into the plain-text view of Y.Text.
+ *   - anchor === head → caret only
+ *   - anchor !== head → selection range
+ */
+export interface AwarenessCursorState {
+  anchor: number
+  head: number
+}
 
 function getCaretOffset(el: HTMLElement): number {
   const sel = window.getSelection()
@@ -32,6 +45,28 @@ function getCaretOffset(el: HTMLElement): number {
   pre.selectNodeContents(el)
   pre.setEnd(range.startContainer, range.startOffset)
   return pre.toString().length
+}
+
+/**
+ * Read the current selection inside `el` as plain-text offsets. Returns null
+ * when nothing is selected or the selection is outside the element.
+ */
+function getSelectionOffsets(el: HTMLElement): AwarenessCursorState | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return null
+  const range = sel.getRangeAt(0)
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return null
+  const startRange = range.cloneRange()
+  startRange.selectNodeContents(el)
+  startRange.setEnd(range.startContainer, range.startOffset)
+  const endRange = range.cloneRange()
+  endRange.selectNodeContents(el)
+  endRange.setEnd(range.endContainer, range.endOffset)
+  // Direction: if anchor === backward, swap; for our purposes treat them as
+  // numbers — `anchor` = where the user started selecting, `head` = caret.
+  const anchor = startRange.toString().length
+  const head = endRange.toString().length
+  return { anchor, head }
 }
 
 function setCaretOffset(el: HTMLElement, offset: number): void {
@@ -62,7 +97,11 @@ function setCaretOffset(el: HTMLElement, offset: number): void {
   walk(el)
 }
 
-export function bindPromptEditor(ytext: Y.Text, el: HTMLDivElement): Cleanup {
+export function bindPromptEditor(
+  ytext: Y.Text,
+  el: HTMLDivElement,
+  awareness?: Awareness,
+): Cleanup {
   const LOCAL = Symbol("prompt-crdt-local")
   let ignoreInput = false
 
@@ -78,6 +117,7 @@ export function bindPromptEditor(ytext: Y.Text, el: HTMLDivElement): Cleanup {
       ytext.delete(0, ytext.length)
       ytext.insert(0, text)
     }, LOCAL)
+    publishCursor()
   }
 
   // ── Y.Text → LOCAL ──────────────────────────────────────────────────────
@@ -105,11 +145,32 @@ export function bindPromptEditor(ytext: Y.Text, el: HTMLDivElement): Cleanup {
     setCaretOffset(el, Math.min(offset, text.length))
   }
 
+  // ── LOCAL caret/selection → Awareness ───────────────────────────────────
+  function publishCursor() {
+    if (!awareness) return
+    const cursor = getSelectionOffsets(el)
+    awareness.setLocalStateField("cursor", cursor)
+  }
+
   el.addEventListener("input", onInput)
+  // selectionchange fires globally on document — filter to our element.
+  function onSelectionChange() {
+    if (document.activeElement !== el) return
+    publishCursor()
+  }
+  document.addEventListener("selectionchange", onSelectionChange)
+  function onBlur() {
+    if (!awareness) return
+    awareness.setLocalStateField("cursor", null)
+  }
+  el.addEventListener("blur", onBlur)
+
   ytext.observe(onYChange)
 
   return () => {
     el.removeEventListener("input", onInput)
+    el.removeEventListener("blur", onBlur)
+    document.removeEventListener("selectionchange", onSelectionChange)
     ytext.unobserve(onYChange)
   }
 }
@@ -128,4 +189,49 @@ function findFirstTextNode(el: HTMLElement): Text | null {
  */
 export function findPromptEl(): HTMLDivElement | null {
   return document.querySelector<HTMLDivElement>('[data-component="prompt-input"]')
+}
+
+/**
+ * Convert a plain-text character offset into a pixel rect inside `el`.
+ * Returns null if the offset is out of range or the DOM has no text yet.
+ *
+ * Used by the remote-cursor overlay to position other peers' carets — we
+ * walk into the right text node, build a Range at that exact char, and
+ * read its bounding client rect. Pixel coordinates are relative to the
+ * viewport (use el.getBoundingClientRect() to convert to local space).
+ */
+export function offsetToRect(el: HTMLElement, offset: number): DOMRect | null {
+  let remaining = offset
+  let target: { node: Text; pos: number } | null = null
+  const walk = (node: Node): boolean => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = (node.textContent ?? "").length
+      if (remaining <= len) {
+        target = { node: node as Text, pos: remaining }
+        return true
+      }
+      remaining -= len
+      return false
+    }
+    for (const child of Array.from(node.childNodes)) {
+      if (walk(child)) return true
+    }
+    return false
+  }
+  walk(el)
+  if (!target) {
+    // Past the end — caret at the very end of the editor.
+    const r = el.getBoundingClientRect()
+    return new DOMRect(r.right - 1, r.top, 1, r.height)
+  }
+  try {
+    const range = document.createRange()
+    range.setStart((target as { node: Text; pos: number }).node, (target as { node: Text; pos: number }).pos)
+    range.setEnd((target as { node: Text; pos: number }).node, (target as { node: Text; pos: number }).pos)
+    const rects = range.getClientRects()
+    if (rects.length === 0) return range.getBoundingClientRect()
+    return rects[0]
+  } catch {
+    return null
+  }
 }

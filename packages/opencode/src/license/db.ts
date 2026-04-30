@@ -390,6 +390,20 @@ function runMigrations(db: Database): void {
        CREATE INDEX IF NOT EXISTS team_members_customer_idx ON team_members(customer_id);
        COMMIT;`,
     ],
+    // v2.26.0: read receipts. One row per (team, customer) tracking the
+    // highest message_id they've acknowledged. Updated on POST /chat/read.
+    [
+      "v7.team_chat_reads",
+      `CREATE TABLE IF NOT EXISTS team_chat_reads (
+         team_id              TEXT NOT NULL,
+         customer_id          TEXT NOT NULL,
+         last_read_message_id INTEGER NOT NULL,
+         updated_at           INTEGER NOT NULL,
+         PRIMARY KEY (team_id, customer_id),
+         FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+         FOREIGN KEY (customer_id) REFERENCES customers(id)
+       )`,
+    ],
   ]
   for (const [name, sql] of ops) {
     try {

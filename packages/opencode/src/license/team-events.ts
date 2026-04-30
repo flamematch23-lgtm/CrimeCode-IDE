@@ -70,6 +70,13 @@ export type TeamEvent =
       awareness_b64: string
       from_customer_id: string
     }
+  | {
+      type: "chat_read"
+      team_id: string
+      customer_id: string
+      last_read_message_id: number
+      ts: number
+    }
 
 type Listener = (event: TeamEvent) => void
 

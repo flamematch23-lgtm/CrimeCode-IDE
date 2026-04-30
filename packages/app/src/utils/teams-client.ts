@@ -78,6 +78,7 @@ export interface TeamEvent {
     | "session_state"
     | "crdt_sync"
     | "crdt_awareness"
+    | "chat_read"
   team_id?: string
   session_id?: string
   host?: string
@@ -106,6 +107,15 @@ export interface TeamEvent {
   update_b64?: string
   awareness_b64?: string
   from_customer_id?: string
+  // chat_read
+  last_read_message_id?: number
+}
+
+export interface TeamChatRead {
+  team_id: string
+  customer_id: string
+  last_read_message_id: number
+  updated_at: number
 }
 
 export interface TeamChatAttachment {
@@ -317,6 +327,10 @@ export interface TeamsClient {
   redeemInviteLink(token: string): Promise<{ team: TeamSummary; role: TeamRole; already_member: boolean }>
   /** Broadcast a CRDT update (sync or awareness) to all session members via SSE. Fire-and-forget. */
   postCrdt(teamId: string, sessionId: string, msg: { type: string; doc_id: string; update_b64?: string; awareness_b64?: string }): Promise<void>
+  /** Mark a chat message as read by the current user (high-water-mark). */
+  markChatRead(teamId: string, messageId: number): Promise<void>
+  /** Hydrate the read-receipt state for a team on chat-panel mount. */
+  listChatReads(teamId: string): Promise<{ reads: TeamChatRead[] }>
 }
 
 // ─── Desktop (IPC) ────────────────────────────────────────────────────────
@@ -415,6 +429,8 @@ function desktopClient(): TeamsClient {
     previewInviteLink: (token) => webClient().previewInviteLink(token),
     redeemInviteLink: (token) => webClient().redeemInviteLink(token),
     postCrdt: (teamId, sessionId, msg) => webClient().postCrdt(teamId, sessionId, msg),
+    markChatRead: (teamId, messageId) => webClient().markChatRead(teamId, messageId),
+    listChatReads: (teamId) => webClient().listChatReads(teamId),
   }
 }
 
@@ -631,6 +647,13 @@ function webClient(): TeamsClient {
         { method: "POST", body: JSON.stringify(msg) },
       ).catch(() => undefined)
     },
+    markChatRead: async (teamId, messageId) => {
+      await apiFetch(`/license/teams/${encodeURIComponent(teamId)}/chat/read`, {
+        method: "POST",
+        body: JSON.stringify({ message_id: messageId }),
+      }).catch(() => undefined)
+    },
+    listChatReads: (teamId) => json(`/license/teams/${encodeURIComponent(teamId)}/chat/reads`),
   }
 }
 

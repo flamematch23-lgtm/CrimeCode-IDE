@@ -30,9 +30,11 @@ import {
   getTeamsClient,
   type TeamChatAttachment,
   type TeamChatMessage,
+  type TeamChatRead,
   type TeamEvent,
   type TeamMember,
 } from "../../utils/teams-client"
+import { usePlatform } from "../../context/platform"
 
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 const ATTACHMENT_ALLOWED = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
@@ -121,8 +123,13 @@ function formatDayDivider(ts: number): string {
 
 export function TeamChatPanel(props: Props) {
   const client = getTeamsClient()
+  const platform = usePlatform()
   const [messages, setMessages] = createSignal<TeamChatMessage[]>([])
   const [typingMap, setTypingMap] = createSignal<Record<string, TypingState>>({})
+  // Read-receipts: per-customer high-water-mark of last_read_message_id.
+  const [readsByCustomer, setReadsByCustomer] = createSignal<Record<string, number>>({})
+  let lastMarkedRead = 0
+  let markReadTimer: ReturnType<typeof setTimeout> | null = null
   const [draft, setDraft] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
@@ -134,19 +141,67 @@ export function TeamChatPanel(props: Props) {
   let fileInputEl: HTMLInputElement | undefined
   let stickToBottom = true
 
-  // Hydrate
+  // Hydrate messages + existing read state.
   const [hydrated] = createResource(
     () => props.teamId,
     async (id) => {
       try {
-        const r = await client.listChat(id, 50)
+        const [r, reads] = await Promise.all([
+          client.listChat(id, 50),
+          client.listChatReads(id).catch(() => ({ reads: [] as TeamChatRead[] })),
+        ])
         setMessages(r.messages ?? [])
+        const map: Record<string, number> = {}
+        for (const row of reads.reads ?? []) {
+          map[row.customer_id] = row.last_read_message_id
+        }
+        setReadsByCustomer(map)
         return true
       } catch {
         return false
       }
     },
   )
+
+  // Mark the latest visible message as read for the local user — but
+  // only when the window is actually focused. Debounced 1 s so a flurry
+  // of incoming messages collapses to a single API call. We keep an
+  // in-memory high-water-mark so we never POST the same id twice.
+  function maybeMarkLatestRead() {
+    if (typeof document === "undefined") return
+    if (document.visibilityState !== "visible" || !document.hasFocus()) return
+    const list = messages()
+    if (list.length === 0) return
+    const latest = list[list.length - 1].id
+    if (latest <= lastMarkedRead) return
+    if (markReadTimer) clearTimeout(markReadTimer)
+    markReadTimer = setTimeout(() => {
+      markReadTimer = null
+      lastMarkedRead = latest
+      void client.markChatRead(props.teamId, latest).catch(() => undefined)
+      // Optimistic local update so we don't render our own missing avatar.
+      if (props.selfCustomerId) {
+        const cid = props.selfCustomerId
+        setReadsByCustomer((prev) => ({ ...prev, [cid]: latest }))
+      }
+    }, 1_000)
+  }
+
+  // Trigger mark-read on every new message, on window focus, on visibility.
+  createEffect(() => {
+    void messages()
+    maybeMarkLatestRead()
+  })
+  onMount(() => {
+    const onFocus = () => maybeMarkLatestRead()
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onFocus)
+    onCleanup(() => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onFocus)
+      if (markReadTimer) clearTimeout(markReadTimer)
+    })
+  })
 
   // Subscribe SSE
   createEffect(() => {
@@ -166,10 +221,19 @@ export function TeamChatPanel(props: Props) {
           attachment_size: ev.attachment_size ?? null,
           attachment_name: ev.attachment_name ?? null,
         }
+        const isFromOther = !props.selfCustomerId || msg.customer_id !== props.selfCustomerId
         setMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev
           return [...prev, msg]
         })
+        // Desktop notification when window is not focused. platform.notify
+        // already short-circuits when document.hasFocus() is true, so we
+        // don't need to recheck visibility here.
+        if (isFromOther) {
+          const author = formatLabel(msg.author_name, msg.customer_id)
+          const body = msg.text || (msg.attachment_url ? `📎 ${msg.attachment_name ?? "file"}` : "")
+          void platform.notify(`${author} (chat)`, body).catch(() => undefined)
+        }
       } else if (ev.type === "chat_typing" && ev.customer_id) {
         // Don't render the indicator for ourselves
         if (props.selfCustomerId && ev.customer_id === props.selfCustomerId) return
@@ -178,6 +242,13 @@ export function TeamChatPanel(props: Props) {
           ...prev,
           [cid]: { customer_id: cid, author_name: ev.author_name ?? null, at: Date.now() },
         }))
+      } else if (ev.type === "chat_read" && ev.customer_id && typeof ev.last_read_message_id === "number") {
+        const cid = ev.customer_id
+        const newId = ev.last_read_message_id
+        setReadsByCustomer((prev) => {
+          if ((prev[cid] ?? 0) >= newId) return prev
+          return { ...prev, [cid]: newId }
+        })
       }
     })
     onCleanup(unsub)
@@ -328,6 +399,29 @@ export function TeamChatPanel(props: Props) {
 
   const typingList = createMemo(() => Object.values(typingMap()))
 
+  // For each customer that's read at least one message, find which message
+  // they last read AND that's still in the visible window. Used to render
+  // the avatar cluster *next to that specific message*.
+  // Returns Map<message_id, customer_id[]> — readers grouped by their
+  // own high-water-mark message.
+  const readersByMessage = createMemo<Map<number, string[]>>(() => {
+    const out = new Map<number, string[]>()
+    const reads = readsByCustomer()
+    const seenIds = new Set(messages().map((m) => m.id))
+    for (const [cid, lastId] of Object.entries(reads)) {
+      // Skip the local user (we don't render our own "seen by" avatar).
+      if (props.selfCustomerId && cid === props.selfCustomerId) continue
+      // Anchor the receipt to the highest visible message <= their high-water-mark.
+      // If their lastId is in the visible window, anchor there. Otherwise we
+      // skip — the message has scrolled off and we don't try to fake it.
+      if (!seenIds.has(lastId)) continue
+      const arr = out.get(lastId) ?? []
+      arr.push(cid)
+      out.set(lastId, arr)
+    }
+    return out
+  })
+
   const memberDisplayLookup = createMemo(() => {
     const m = new Map<string, string>()
     for (const member of props.members ?? []) {
@@ -429,6 +523,26 @@ export function TeamChatPanel(props: Props) {
                       </Show>
                       <Show when={g.msg.text}>
                         <div data-slot="bubble">{g.msg.text}</div>
+                      </Show>
+                      <Show when={(readersByMessage().get(g.msg.id) ?? []).length > 0}>
+                        <div data-slot="read-receipts" title="Visto da">
+                          <For each={readersByMessage().get(g.msg.id) ?? []}>
+                            {(cid) => {
+                              const memberName =
+                                memberDisplayLookup().get(cid) ?? cid.slice(0, 8)
+                              const seenColor = colorFor(cid)
+                              return (
+                                <span
+                                  data-slot="read-avatar"
+                                  title={`Visto da ${memberName}`}
+                                  style={{ "--avatar-color": seenColor } as never}
+                                >
+                                  {initialsOf(memberName)}
+                                </span>
+                              )
+                            }}
+                          </For>
+                        </div>
                       </Show>
                     </div>
                   </div>

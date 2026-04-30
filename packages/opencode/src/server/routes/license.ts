@@ -69,6 +69,8 @@ import {
   postChatMessage,
   listChatMessages,
   broadcastTyping,
+  markChatRead,
+  listChatReads,
   getCustomerDisplay,
   getSessionState,
   createInviteLink,
@@ -1284,6 +1286,32 @@ export const LicenseRoutes = lazy(() => {
     const display = getCustomerDisplay(sess.sub)
     broadcastTyping({ team_id: teamId, author: sess.sub, author_name: display })
     return c.json({ ok: true })
+  })
+
+  // Read receipts — a member calls POST /chat/read with the message_id of
+  // the latest message they've seen. Server upserts (high-water-mark, no
+  // backwards) and broadcasts a chat_read SSE event so other members can
+  // render "seen by N" markers.
+  app.post("/teams/:id/chat/read", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const body = (await c.req.json().catch(() => ({}))) as { message_id?: number }
+    const id = Number(body.message_id)
+    if (!Number.isFinite(id) || id <= 0) return c.json({ error: "bad_message_id" }, 400)
+    const row = markChatRead({ team_id: teamId, customer_id: sess.sub, message_id: id })
+    if (!row) return c.json({ error: "forbidden_or_not_found" }, 403)
+    return c.json({ read: row })
+  })
+
+  // Bulk read state — clients hydrate the "seen by" markers on chat-panel
+  // mount instead of waiting for each member's next chat_read event.
+  app.get("/teams/:id/chat/reads", (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    if (!getMemberRole(teamId, sess.sub)) return c.json({ error: "forbidden" }, 403)
+    return c.json({ reads: listChatReads(teamId, sess.sub) })
   })
 
   // SSE stream: live push of team events (sessions, member changes, renames).

@@ -650,6 +650,30 @@
 [data-component="team-chat-panel"] [data-slot="message"][data-self="true"] [data-slot="author"] {
   color: #4ade80;
 }
+/* Read receipts: tiny avatar cluster anchored to the bottom-right of the
+ * last message each remote member has seen. Each circle is half the size of
+ * the main author avatar so it doesn't visually compete with the bubble. */
+[data-component="team-chat-panel"] [data-slot="read-receipts"] {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 2px;
+  align-items: center;
+}
+[data-component="team-chat-panel"] [data-slot="read-avatar"] {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--avatar-color, #6366f1);
+  color: #0b0d12;
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+}
 [data-component="team-chat-panel"] [data-slot="typing-row"] {
   display: flex;
   align-items: center;
