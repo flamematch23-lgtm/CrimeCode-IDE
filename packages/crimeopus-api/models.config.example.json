@@ -1,0 +1,63 @@
+{
+  "_comment": "Configurazione installer modelli CrimeOpus. Lo script scarica i GGUF da Hugging Face, genera Modelfile, e fa ollama create. Idempotente — ri-eseguire è sicuro.",
+
+  "ollama_url": "http://127.0.0.1:11434",
+  "models_dir": "./models-cache",
+
+  "models": [
+    {
+      "name": "crimeopus-default",
+      "hf_repo": "yourorg/CrimeOpus-4.7-Opus-GGUF",
+      "hf_file": "CrimeOpus4.7-Opus.IQ4_XS.gguf",
+      "private": true,
+      "modelfile": {
+        "system": "Sei CrimeOpus, un assistente AI esperto. Rispondi in modo conciso e accurato.",
+        "parameters": {
+          "num_ctx": 8192,
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "stop": ["<|im_end|>", "<|endoftext|>"]
+        }
+      }
+    },
+    {
+      "name": "crimeopus-coder",
+      "hf_repo": "yourorg/CrimeOpus-4.7-Coder-GGUF",
+      "hf_file": "CrimeOpus4.7-Coder.IQ4_XS.gguf",
+      "private": true,
+      "modelfile": {
+        "system": "Sei CrimeOpus CODER, un esperto sviluppatore. Genera codice idiomatico, conciso e ben commentato.",
+        "parameters": {
+          "num_ctx": 16384,
+          "temperature": 0.3,
+          "top_p": 0.9
+        }
+      }
+    },
+    {
+      "name": "crimeopus-italian",
+      "hf_repo": "yourorg/CrimeOpus-4.7-Italian-GGUF",
+      "hf_file": "CrimeOpus4.7-Italian.IQ4_XS.gguf",
+      "private": true,
+      "modelfile": {
+        "system": "Sei CrimeOpus ITALIANO. Rispondi sempre in italiano fluente, formale o informale a seconda del contesto.",
+        "parameters": {
+          "num_ctx": 8192,
+          "temperature": 0.7
+        }
+      }
+    },
+    {
+      "name": "crimeopus-fast",
+      "hf_repo": "yourorg/CrimeOpus-4.7-Opus-GGUF",
+      "hf_file": "CrimeOpus4.7-Opus.IQ3_M.gguf",
+      "private": true,
+      "modelfile": {
+        "parameters": {
+          "num_ctx": 8192,
+          "temperature": 0.6
+        }
+      }
+    }
+  ]
+}

@@ -5,5 +5,9 @@ dist/
 !.env.example
 usage.db
 usage.db-journal
+usage.db-shm
+usage.db-wal
 catalog.json
+models.config.json
+models-cache/
 *.log

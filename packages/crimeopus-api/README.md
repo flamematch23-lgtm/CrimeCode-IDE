@@ -1,167 +1,245 @@
 # CrimeOpus API — Self-hosted OpenAI-compatible gateway
 
-Single-binary Bun + Hono server che espone i tuoi modelli locali Ollama come
-un cloud provider OpenAI standard. Lo configuri in OpenCode (e in qualsiasi
-altro client OpenAI-compatible) come se fosse un servizio commerciale.
+Gateway Bun + Hono che espone i tuoi modelli locali (Ollama / Whisper) come
+un cloud provider OpenAI standard. Lo configuri in OpenCode e in qualsiasi
+altro client OpenAI-compatible come se fosse un servizio commerciale.
 
 ```
-┌─ Ollama (locale, mai esposto) ─┐    ┌─ CrimeOpus API ─┐    ┌─ Client (OpenCode, web app, ...) ─┐
-│ crimeopus-default               │ ←──│  + auth         │←───│  baseURL: https://api.crime.dev    │
-│ crimeopus-coder                 │    │  + rate limit   │    │  apiKey:  sk-xxxx                  │
-│ crimeopus-italian               │    │  + usage logs   │    │  → /v1/chat/completions            │
-│ ...                             │    │  + catalog      │    │                                    │
-└─────────────────────────────────┘    └─────────────────┘    └────────────────────────────────────┘
+┌─ Ollama / Whisper (locale) ─┐    ┌─ CrimeOpus API ─┐    ┌─ Client (OpenCode, web app, …) ─┐
+│ crimeopus-default            │ ←──│  + auth         │←───│  baseURL: https://api.crime.dev  │
+│ crimeopus-coder              │    │  + quota mensile│    │  apiKey:  sk-xxxx (o JWT)        │
+│ whisper-large-v3             │    │  + admin UI     │    │  → /v1/chat/completions          │
+│ ...                          │    │  + webhooks     │    │  → /v1/audio/transcriptions      │
+└──────────────────────────────┘    └─────────────────┘    └──────────────────────────────────┘
 ```
 
-## Cosa fa
+## Cosa fa (v0.2.0)
 
-- **API OpenAI 1:1** — endpoints `/v1/models`, `/v1/chat/completions` (incl. streaming SSE), `/v1/embeddings`. Funziona out-of-the-box con qualsiasi SDK / IDE / chat client che supporti OpenAI.
-- **Auth via API-key** — bearer token validato contro un set di chiavi configurabili (JSON o CSV via env).
-- **Rate limit per chiave** — token bucket in-memory (60 req/min default, override per chiave). Niente Redis richiesto.
-- **Usage log SQLite** — una riga per richiesta: timestamp, label chiave, IP, modello, token, latenza, status. Serve per fatturazione, debug, audit.
-- **Catalog brandable** — il client vede `crimeopus-default` invece di `hf.co/mradermacher/...:IQ4_XS`. Puoi nascondere modelli interni, iniettare system prompt, limitare context.
-- **Streaming completo** — il SSE viene piped attraverso byte-by-byte con riscrittura del campo `model` per coerenza.
-- **Healthcheck** `/healthz` — controlla anche stato upstream Ollama.
-- **Docker / Cloudflare Tunnel / VPS / Fly.io** — distribuibile come immagine Docker o binary `--compile`-d standalone.
+### Endpoints OpenAI 1:1
+| Endpoint | Scope | Quota tracked |
+|---|---|---|
+| `GET /v1/models` | `models:list` | — |
+| `POST /v1/chat/completions` (streaming + non) | `chat` | ✅ |
+| `POST /v1/embeddings` | `embed` | ✅ |
+| `POST /v1/audio/transcriptions` | `audio` | ✅ |
+| `POST /v1/audio/translations` | `audio` | ✅ |
+| `GET /healthz` | — | — |
+| `GET /admin` (web SPA + JSON API) | basic-auth | — |
 
-## Avvio rapido locale
+### Auth
+- **Static API keys** (env `API_KEYS` JSON o CSV, oppure DB tramite `/admin`)
+- **JWT bearer** (HS256 con `JWT_SECRET` o RS256 con `JWT_PUBLIC_KEY`) — auto-onboard tenant al primo request
+- **Scopes per chiave**: `models:list`, `chat`, `embed`, `audio` (parziali OK)
+
+### Quote mensili
+- Per ogni chiave: `monthly_token_quota` + `monthly_request_quota` (NULL = illimitato)
+- Reset automatico a inizio mese UTC (rollover trasparente)
+- Webhook `quota.warning` a 80%, `quota.exceeded` a 100% (blocca ulteriori richieste)
+- Storia ultimi 12 periodi visibile dal dashboard
+
+### Rate limit
+- Token bucket per chiave (60 rpm / burst 10 default, override per chiave)
+- Webhook `ratelimit.exceeded` quando il bucket si svuota
+
+### Webhooks
+- Subscribe da `/admin` o via API: `POST /admin/api/webhooks {url, event, secret}`
+- Eventi: `quota.warning`, `quota.exceeded`, `upstream.error`, `ratelimit.exceeded`, `audio.error`, `key.created`, `key.disabled`, `*`
+- Firma HMAC-SHA256 in header `X-CrimeOpus-Signature` (convenzione GitHub)
+- Retry esponenziale 3 tentativi (1s/3s/10s)
+- Audit trail in `webhook_deliveries`
+
+### Admin web UI
+- `GET /admin` (auth: basic, password = `ADMIN_PASSWORD`)
+- 4 tab:
+  - **Overview**: cards live (last 24h, 7d, errors, tokens), grafico bar 24×1h, top models, top keys
+  - **Keys & Quota**: lista con barre uso/quota, generate, edit, disable, reset quota
+  - **Webhooks**: subscribe, toggle, delete
+  - **Deliveries**: 100 ultimi tentativi con status code + error excerpt
+- Auto-refresh 10s
+
+### Whisper bridging
+- Forward trasparente di multipart `file/model/response_format/...` a un upstream OpenAI-compatible
+- Compatibile con `faster-whisper-server`, `whisper.cpp server`, `localai`
+- Configurazione: `WHISPER_URL` + `WHISPER_API_KEY` (opzionale) + `WHISPER_MODEL_DEFAULT`
+- Webhook `audio.error` su upstream failure
+
+### Catalog brandable
+File `catalog.json` opzionale: `public_id → { upstream, display, description, hidden, maxContext, systemPrefix }`. Il client vede solo i nomi pubblici, l'upstream resta nascosto.
+
+### HuggingFace → Ollama installer
+`bun run install-models` legge `models.config.json`, scarica i GGUF (anche da repo privati con `HF_TOKEN`), genera Modelfile, lancia `ollama create`. Idempotente.
+
+## Quickstart locale
 
 ```bash
-# 1. Installa dipendenze
 cd packages/crimeopus-api
 bun install
-
-# 2. Configura
 cp .env.example .env
-# edita .env e setta API_KEYS
+# edita .env: imposta API_KEYS, opzionalmente ADMIN_PASSWORD + JWT_SECRET
 
-# 3. Crea il catalog (opzionale ma raccomandato in prod)
 cp catalog.example.json catalog.json
-# edita catalog.json se vuoi cambiare display name / hide modelli
+# personalizza i display name dei modelli
 
-# 4. Lancia
 bun run dev
 # → ✓ CrimeOpus API listening on http://0.0.0.0:8787
+#   admin dashboard: enabled at /admin
+#   jwt: HS256
 ```
 
 Test:
 ```bash
 # Lista modelli
-curl -H "Authorization: Bearer sk-dev-CHANGE-ME" http://localhost:8787/v1/models
+curl -H "Authorization: Bearer sk-prod-CHANGE-ME" http://localhost:8787/v1/models
 
-# Chat completion
-curl -H "Authorization: Bearer sk-dev-CHANGE-ME" \
+# Chat
+curl -H "Authorization: Bearer sk-prod-CHANGE-ME" \
      -H "Content-Type: application/json" \
      -d '{"model":"crimeopus-default","messages":[{"role":"user","content":"ciao"}]}' \
      http://localhost:8787/v1/chat/completions
 
-# Streaming
-curl -N -H "Authorization: Bearer sk-dev-CHANGE-ME" \
-     -H "Content-Type: application/json" \
-     -d '{"model":"crimeopus-default","stream":true,"messages":[{"role":"user","content":"raccontami una barzelletta"}]}' \
-     http://localhost:8787/v1/chat/completions
+# Whisper transcription (richiede WHISPER_URL configurato)
+curl -H "Authorization: Bearer sk-prod-CHANGE-ME" \
+     -F file=@audio.mp3 \
+     -F model=whisper-1 \
+     http://localhost:8787/v1/audio/transcriptions
+
+# Admin dashboard
+open http://localhost:8787/admin
+# → Basic auth: admin / <ADMIN_PASSWORD>
 ```
 
-## Deploy production
+## Multi-tenant via JWT
 
-### Opzione A · Docker Compose (raccomandato per VPS)
-
+Genera un JWT per un tenant:
 ```bash
-cd packages/crimeopus-api
-cp .env.example .env
-# edita .env: imposta API_KEYS reali, RATE_LIMIT, CORS_ORIGINS
+JWT_SECRET=$(openssl rand -hex 32) \
+  bun run issue-jwt -- \
+    --sub tenant-acme \
+    --label "Acme Corp" \
+    --rpm 120 \
+    --token-quota 5000000 \
+    --request-quota 50000 \
+    --scopes chat,embed \
+    --expires-in 30d
 
-cp catalog.example.json catalog.json
-# personalizza il catalog
-
-docker compose up -d
-docker compose exec ollama ollama pull crimeopus-default
-docker compose logs -f api
+# → eyJhbGc...
 ```
 
-Davanti metti un reverse proxy con TLS (Caddy è il più semplice):
+Manda il JWT al cliente. Al primo request crea automaticamente una riga in `keys (kind='jwt', tenant_id='tenant-acme')` con quote/scopes/rpm dal JWT, visibile nel dashboard come una qualsiasi static key.
 
-```caddy
-# /etc/caddy/Caddyfile
-api.crimeopus.dev {
-    reverse_proxy 127.0.0.1:8787
-    encode zstd gzip
+In OpenCode:
+```bash
+export CRIMEOPUS_API_KEY=eyJhbGc...
+```
+
+## Distribuzione modelli
+
+`models.config.json` (vedi `models.config.example.json`):
+
+```json
+{
+  "ollama_url": "http://127.0.0.1:11434",
+  "models_dir": "./models-cache",
+  "models": [
+    {
+      "name": "crimeopus-default",
+      "hf_repo": "yourorg/CrimeOpus-4.7-Opus-GGUF",
+      "hf_file": "CrimeOpus4.7-Opus.IQ4_XS.gguf",
+      "private": true,
+      "modelfile": {
+        "system": "Sei CrimeOpus...",
+        "parameters": { "num_ctx": 8192, "temperature": 0.6 }
+      }
+    }
+  ]
 }
 ```
 
 ```bash
-sudo systemctl reload caddy
-# Caddy negozia automaticamente Let's Encrypt
+HF_TOKEN=hf_xxx bun run install-models
+# Scarica → genera Modelfile → ollama create. Idempotente.
 ```
 
-### Opzione B · Cloudflare Tunnel (zero VPS / IP pubblico)
+## Webhook signature verification (esempio Node receiver)
 
-Quando il tuo Ollama gira su una macchina dietro NAT o senza IP pubblico:
+```js
+import { createHmac, timingSafeEqual } from "node:crypto"
 
+function verifyCrimeopusSignature(rawBody, header, secret) {
+  if (!header?.startsWith("sha256=")) return false
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex")
+  const got = header.slice(7)
+  return got.length === expected.length &&
+    timingSafeEqual(Buffer.from(got, "hex"), Buffer.from(expected, "hex"))
+}
+```
+
+## Deploy production
+
+### A · Docker Compose (raccomandato)
 ```bash
-# Installa cloudflared
-# https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+cp .env.example .env
+cp catalog.example.json catalog.json
+docker compose up -d
+docker compose exec ollama ollama pull crimeopus-default
+```
 
-# Crea il tunnel
+Caddy davanti per TLS:
+```caddy
+api.crimeopus.dev {
+  reverse_proxy 127.0.0.1:8787
+  encode zstd gzip
+}
+```
+
+### B · Cloudflare Tunnel (zero VPS)
+```bash
 cloudflared tunnel create crimeopus-api
 cloudflared tunnel route dns crimeopus-api api.tuo-dominio.dev
-
-# config.yml
-cat > ~/.cloudflared/config.yml <<'YAML'
-tunnel: crimeopus-api
-credentials-file: ~/.cloudflared/<UUID>.json
-ingress:
-  - hostname: api.tuo-dominio.dev
-    service: http://localhost:8787
-  - service: http_status:404
-YAML
-
-# Avvia
 cloudflared tunnel run crimeopus-api &
 bun run packages/crimeopus-api/src/index.ts
 ```
 
-Risultato: `https://api.tuo-dominio.dev/v1/...` arriva al tuo Ollama locale, con TLS gestito da Cloudflare.
-
-### Opzione C · Single binary su VPS (no Docker)
-
+### C · Single-binary VPS
 ```bash
-# Sulla tua macchina con Bun installato
-cd packages/crimeopus-api
 bun run compile
-# → dist/crimeopus-api  (binario standalone con runtime embedded, ~80 MB)
-
-# Copialo sul VPS
-scp dist/crimeopus-api user@vps:/opt/crimeopus/
-
-# systemd unit su VPS
-cat > /etc/systemd/system/crimeopus-api.service <<'UNIT'
-[Unit]
-Description=CrimeOpus API
-After=network-online.target ollama.service
-Requires=ollama.service
-
-[Service]
-ExecStart=/opt/crimeopus/crimeopus-api
-Environment=PORT=8787
-Environment=BIND=127.0.0.1
-Environment=OLLAMA_URL=http://127.0.0.1:11434
-Environment=API_KEYS={"sk-prod-XXX":"prod"}
-Environment=CATALOG_PATH=/opt/crimeopus/catalog.json
-Environment=LOG_DB=/var/lib/crimeopus/usage.db
-Restart=on-failure
-User=crimeopus
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-systemctl enable --now crimeopus-api
+# → dist/crimeopus-api  (binary self-contained ~80 MB)
+scp dist/crimeopus-api vps:/opt/crimeopus/
+# + systemd unit (esempio in vecchio README v0.1)
 ```
 
-## Integrazione in OpenCode
+## Configurazione completa env
 
-Aggiungi al tuo `.opencode/opencode.jsonc` (o `~/.config/opencode/opencode.jsonc`):
+Vedi `.env.example` per la lista completa. Variabili principali:
+
+| Var | Default | Cosa fa |
+|---|---|---|
+| `PORT` / `BIND` | 8787 / 0.0.0.0 | Listener |
+| `OLLAMA_URL` | http://127.0.0.1:11434 | Upstream chat / embed |
+| `WHISPER_URL` | http://127.0.0.1:9000 | Upstream STT |
+| `API_KEYS` | (none) | JSON o CSV — sync nel DB al boot |
+| `JWT_SECRET` | (none) | HS256 secret per JWT multi-tenant |
+| `JWT_PUBLIC_KEY` | (none) | RS256 PEM (alternativa) |
+| `ADMIN_PASSWORD` | (none) | Abilita /admin |
+| `RATE_LIMIT_RPM` / `RATE_LIMIT_BURST` | 60 / 10 | Token bucket default |
+| `CORS_ORIGINS` | * | Lista CSV per prod |
+| `LOG_DB` / `CATALOG_PATH` | ./usage.db / ./catalog.json | Storage |
+| `ALLOW_ANON` | (none) | DEV only — disabilita auth |
+
+## Sicurezza checklist prod
+
+- ✅ Set `API_KEYS` (mai con `ALLOW_ANON=1` in prod)
+- ✅ Set `ADMIN_PASSWORD` con password forte (≥20 char) o disabilita `/admin`
+- ✅ HTTPS davanti (Caddy / Cloudflare / nginx)
+- ✅ `CORS_ORIGINS` lista esplicita per prod
+- ✅ Bind 127.0.0.1 quando dietro reverse proxy
+- ✅ Webhook secrets impostati per ogni subscriber
+- ✅ Backup periodico `usage.db` (contiene chiavi! — almeno encrypted at rest)
+- ⚠️ Le static keys non sono cifrate at-rest in SQLite — usa filesystem cifrato o solo JWT + key rotation
+
+## Integrazione OpenCode (utenti finali)
+
+Distribuisci `opencode.cloud.example.jsonc` (rinominato in `.opencode/opencode.jsonc`):
 
 ```jsonc
 {
@@ -175,92 +253,14 @@ Aggiungi al tuo `.opencode/opencode.jsonc` (o `~/.config/opencode/opencode.jsonc
         "baseURL": "https://api.tuo-dominio.dev/v1",
         "apiKey": "{env:CRIMEOPUS_API_KEY}"
       },
-      "models": {
-        "crimeopus-default": {
-          "name": "CrimeOpus 4.7 Code Elite",
-          "type": "chat",
-          "limit": { "context": 8192, "output": 2048 }
-        },
-        "crimeopus-coder": {
-          "name": "CrimeOpus 4.7 CODER",
-          "type": "chat",
-          "limit": { "context": 16384, "output": 4096 }
-        },
-        "crimeopus-italian": {
-          "name": "CrimeOpus 4.7 Italiano",
-          "type": "chat",
-          "limit": { "context": 8192, "output": 2048 }
-        }
-      }
+      "models": { "crimeopus-default": ..., ... }
     }
   }
 }
 ```
 
-L'utente esporta una sola env var:
-
-```bash
-export CRIMEOPUS_API_KEY=sk-prod-xxx     # dato dall'admin del server
-```
-
-E il model picker di OpenCode mostra **"CrimeOpus Cloud"** con i tuoi modelli — esattamente come per Anthropic / OpenAI.
-
-## Distribuzione modelli ai tuoi utenti
-
-Per condividere il provider con altri utenti / membri team:
-
-1. **Genera una chiave per ciascuno**:
-   ```bash
-   # genera 32 byte randomici, prefissati per leggibilità
-   echo "sk-$(openssl rand -hex 16)"
-   # → sk-abc123def456...
-   ```
-2. **Aggiungila al server** (`API_KEYS` env var) con label parlante (`alice`, `bob`, …) — vedrai chi consuma cosa nei log.
-3. **Mandagli un blob JSONC** già pronto (vedi sezione precedente) con il loro `CRIMEOPUS_API_KEY` come segnaposto.
-4. **Monitora consumi** con SQL diretto sul `usage.db`:
-   ```sql
-   SELECT key_label, COUNT(*) AS req, SUM(prompt_tokens+completion_tokens) AS tok
-   FROM usage WHERE ts > strftime('%s','now','-1 day')*1000
-   GROUP BY key_label ORDER BY tok DESC;
-   ```
-
-## Catalog
-
-Il file `catalog.json` controlla cosa il client vede vs cosa l'upstream sa fare:
-
-```jsonc
-{
-  "crimeopus-default": {
-    "upstream": "crimeopus-default:latest",     // tag Ollama reale
-    "display": "CrimeOpus 4.7 Code Elite",      // nome mostrato nel picker
-    "description": "Flagship multilingue.",
-    "maxContext": 8192,
-    "systemPrefix": "Sei CrimeOpus..."          // injection automatica system prompt
-  },
-  "internal-debug": {
-    "upstream": "qwen2.5-coder:14b",
-    "hidden": true                              // non in /v1/models, ma callable
-  }
-}
-```
-
-## Sicurezza
-
-- ✅ **Auth obbligatoria** — il server rifiuta partenza se `API_KEYS` è vuoto, a meno di `ALLOW_ANON=1` (solo dev).
-- ✅ **Bind 127.0.0.1 di default** quando dietro reverse proxy. L'env `BIND=0.0.0.0` è solo per Docker.
-- ✅ **Rate limit** evita brute-force / DoS.
-- ✅ **CORS configurabile** — `*` per dev, lista esplicita per prod.
-- ⚠️ **HTTPS obbligatorio** in pubblico — usa Caddy / Cloudflare / nginx davanti. Le API key viaggiano in chiaro nell'header.
-- ⚠️ **Log delle chiavi** — il `usage.db` salva la *label* della chiave, mai la chiave stessa. Le chiavi non vengono mai stampate sui log.
-
-## Estensioni future
-
-- `/v1/audio/transcriptions` (Whisper bridging)
-- Multi-tenant via JWT al posto di API key statiche
-- Quota mensili per chiave (con reset automatico)
-- Dashboard web `/admin` per gestione chiavi + statistiche
-- Webhook su superamento quota / errori upstream
+L'utente esporta `CRIMEOPUS_API_KEY=sk-xxx` (o un JWT) e nel model picker di OpenCode appare **CrimeOpus Cloud**.
 
 ## License
 
-MIT — riusa, modifica, ridistribuisci.
+MIT

@@ -8,8 +8,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "lib": ["ESNext"],
-    "types": ["bun-types"]
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun"]
   },
   "include": ["src/**/*.ts"]
 }

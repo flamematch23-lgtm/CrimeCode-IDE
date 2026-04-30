@@ -2,61 +2,38 @@
 /**
  * CrimeOpus API — self-hosted OpenAI-compatible gateway.
  *
- * One-file Bun + Hono server that exposes the OpenAI Chat Completions
- * surface (`/v1/models`, `/v1/chat/completions`, `/v1/embeddings`) and
- * proxies all calls to a local or remote Ollama instance.
+ * Endpoints:
+ *   GET  /v1/models                       (auth, scope: models:list)
+ *   POST /v1/chat/completions             (auth, scope: chat, quota tracked)
+ *   POST /v1/embeddings                   (auth, scope: embed, quota tracked)
+ *   POST /v1/audio/transcriptions         (auth, scope: audio, quota tracked)
+ *   POST /v1/audio/translations           (auth, scope: audio, quota tracked)
+ *   GET  /healthz                         (no auth)
+ *   GET  /admin                           (basic auth — ADMIN_PASSWORD)
+ *   *    /admin/api/*                     (basic auth — ADMIN_PASSWORD)
  *
- * Add it to OpenCode (or any OpenAI SDK client) like a normal cloud
- * provider:
+ * Auth:
+ *   - Static API keys via env API_KEYS or via /admin
+ *   - JWT bearer (HS256 / RS256) — auto-onboards new tenants
+ *   - Per-key scopes: models:list, chat, embed, audio
  *
- *   {
- *     "provider": {
- *       "crimeopus": {
- *         "name": "CrimeOpus Cloud",
- *         "npm": "@ai-sdk/openai-compatible",
- *         "options": {
- *           "baseURL": "https://api.your-domain.tld/v1",
- *           "apiKey": "{env:CRIMEOPUS_API_KEY}"
- *         },
- *         "models": { … }
- *       }
- *     }
- *   }
+ * Quotas:
+ *   - Per-key monthly token + request counters with auto rollover at
+ *     UTC month start
+ *   - Webhook 'quota.warning' at 80%, 'quota.exceeded' at 100% (block)
  *
- * Features:
- *   - API-key auth (multiple keys, per-key rate limit + label for logs)
- *   - Per-key + per-IP rate limit (token bucket, no Redis needed)
- *   - Usage logging to SQLite (one row per request: ts, key_label, model,
- *     tokens, latency, status, ip)
- *   - Custom catalog: rename / hide / alias Ollama models so the public
- *     name doesn't leak the underlying file (e.g. show "CrimeOpus 4.7"
- *     instead of "hf.co/mradermacher/...:IQ4_XS")
- *   - Streaming + non-streaming chat completions
- *   - CORS configurable
- *   - /healthz endpoint for load balancers
- *   - Graceful upstream-down handling with descriptive error messages
- *
- * Configuration is via environment variables (.env or shell):
- *
- *   PORT             default 8787
- *   BIND             default 0.0.0.0
- *   OLLAMA_URL       default http://127.0.0.1:11434
- *   API_KEYS         JSON object: {"sk-prod-abc":"label","sk-dev":"…"}
- *                    OR comma-separated keys: "sk-1,sk-2,sk-3"
- *   ALLOW_ANON       set to "1" to skip auth (dev only — DO NOT in prod)
- *   RATE_LIMIT_RPM   default 60 requests/minute per key
- *   RATE_LIMIT_BURST default 10 (token bucket size)
- *   CORS_ORIGINS     comma-separated origins or "*" (default "*")
- *   LOG_DB           SQLite path for usage logs (default ./usage.db)
- *   CATALOG_PATH     path to a JSON file mapping public model id →
- *                    upstream Ollama model id (see catalog.example.json).
- *                    If absent, every Ollama model is exposed as-is.
+ * See README.md for deployment recipes.
  */
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { stream } from "hono/streaming"
-import { Database } from "bun:sqlite"
 import { existsSync, readFileSync } from "node:fs"
+import { getDb } from "./db.ts"
+import { syncEnvApiKeys, resolveAuth, type AuthContext } from "./auth.ts"
+import { checkQuota, recordUsage } from "./quota.ts"
+import { emitWebhook } from "./webhooks.ts"
+import { audioRouter } from "./audio.ts"
+import { adminRouter } from "./admin.ts"
 
 // ─── Config ───────────────────────────────────────────────────────────
 
@@ -67,56 +44,20 @@ const ALLOW_ANON = process.env.ALLOW_ANON === "1"
 const RATE_LIMIT_RPM = Number(process.env.RATE_LIMIT_RPM ?? 60)
 const RATE_LIMIT_BURST = Number(process.env.RATE_LIMIT_BURST ?? 10)
 const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? "*").split(",").map((s) => s.trim())
-const LOG_DB = process.env.LOG_DB ?? "./usage.db"
 const CATALOG_PATH = process.env.CATALOG_PATH ?? "./catalog.json"
 
-interface KeyEntry {
-  label: string
-  rpmOverride?: number
-}
-
-const apiKeys: Map<string, KeyEntry> = (() => {
-  const raw = process.env.API_KEYS ?? ""
-  const m = new Map<string, KeyEntry>()
-  if (!raw) return m
-  // Try JSON first
-  try {
-    const obj = JSON.parse(raw) as Record<string, string | { label: string; rpm?: number }>
-    for (const [k, v] of Object.entries(obj)) {
-      if (typeof v === "string") m.set(k, { label: v })
-      else m.set(k, { label: v.label, rpmOverride: v.rpm })
-    }
-    return m
-  } catch {
-    /* not JSON — fall through to CSV */
-  }
-  for (const k of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
-    m.set(k, { label: k.slice(0, 12) })
-  }
-  return m
-})()
-
-if (apiKeys.size === 0 && !ALLOW_ANON) {
-  console.error(
-    "✗ API_KEYS is empty and ALLOW_ANON is not set. The server would refuse every request.\n" +
-      "  Set API_KEYS='sk-yourkey:label' or ALLOW_ANON=1 (DEV ONLY).",
-  )
-  process.exit(2)
-}
+// Boot: open the DB so the schema is in place, then sync env keys.
+getDb()
+syncEnvApiKeys()
 
 // ─── Catalog: public model id → upstream Ollama tag ────────────────────
 
 interface CatalogEntry {
-  /** Upstream Ollama tag, e.g. "crimeopus-default:latest" */
   upstream: string
-  /** What to display in /v1/models */
   display?: string
   description?: string
-  /** Hide from /v1/models but still callable by id */
   hidden?: boolean
-  /** Override max context the client can request (default Ollama default) */
   maxContext?: number
-  /** Inject a system prompt prefix on every call */
   systemPrefix?: string
 }
 
@@ -128,7 +69,10 @@ const catalog: Map<string, CatalogEntry> = (() => {
   }
   try {
     const raw = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as Record<string, CatalogEntry>
-    for (const [id, e] of Object.entries(raw)) m.set(id, e)
+    for (const [id, e] of Object.entries(raw)) {
+      if (id.startsWith("_")) continue // comments
+      m.set(id, e)
+    }
     console.log(`✓ loaded catalog with ${m.size} model(s) from ${CATALOG_PATH}`)
     return m
   } catch (e) {
@@ -143,26 +87,31 @@ function resolveUpstream(publicId: string): { upstreamId: string; entry: Catalog
   return { upstreamId: publicId, entry: null }
 }
 
-// ─── Usage log (sqlite) ────────────────────────────────────────────────
+// ─── Rate limit (token bucket per key) ─────────────────────────────────
 
-const db = new Database(LOG_DB)
-db.exec(`
-CREATE TABLE IF NOT EXISTS usage (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts INTEGER NOT NULL,
-  key_label TEXT,
-  ip TEXT,
-  model TEXT,
-  endpoint TEXT,
-  status INTEGER,
-  prompt_tokens INTEGER,
-  completion_tokens INTEGER,
-  latency_ms INTEGER,
-  error TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage(ts);
-CREATE INDEX IF NOT EXISTS idx_usage_key ON usage(key_label);
-`)
+interface Bucket {
+  tokens: number
+  lastRefill: number
+}
+const buckets = new Map<string, Bucket>()
+
+function takeToken(keyId: string, rpm: number): boolean {
+  const now = Date.now()
+  const ratePerMs = rpm / 60_000
+  let b = buckets.get(keyId)
+  if (!b) {
+    b = { tokens: RATE_LIMIT_BURST, lastRefill: now }
+    buckets.set(keyId, b)
+  }
+  const elapsed = now - b.lastRefill
+  b.tokens = Math.min(RATE_LIMIT_BURST, b.tokens + elapsed * ratePerMs)
+  b.lastRefill = now
+  if (b.tokens < 1) return false
+  b.tokens -= 1
+  return true
+}
+
+// ─── Usage log helper (for non-quota endpoints) ────────────────────────
 
 function logUsage(args: {
   keyLabel: string | null
@@ -176,7 +125,7 @@ function logUsage(args: {
   error?: string
 }) {
   try {
-    db.run(
+    getDb().run(
       `INSERT INTO usage (ts, key_label, ip, model, endpoint, status, prompt_tokens, completion_tokens, latency_ms, error)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -197,75 +146,114 @@ function logUsage(args: {
   }
 }
 
-// ─── Rate limit (token bucket per key) ─────────────────────────────────
-
-interface Bucket {
-  tokens: number
-  lastRefill: number
-}
-const buckets = new Map<string, Bucket>()
-
-function takeToken(keyId: string, rpm: number): boolean {
-  const now = Date.now()
-  const ratePerMs = rpm / 60_000
-  let b = buckets.get(keyId)
-  if (!b) {
-    b = { tokens: RATE_LIMIT_BURST, lastRefill: now }
-    buckets.set(keyId, b)
-  }
-  // Refill since last hit
-  const elapsed = now - b.lastRefill
-  b.tokens = Math.min(RATE_LIMIT_BURST, b.tokens + elapsed * ratePerMs)
-  b.lastRefill = now
-  if (b.tokens < 1) return false
-  b.tokens -= 1
-  return true
-}
-
 // ─── Hono app ──────────────────────────────────────────────────────────
 
-const app = new Hono()
+const app = new Hono<{ Variables: { auth: AuthContext } }>()
 
 app.use("*", cors({ origin: CORS_ORIGINS, allowHeaders: ["Authorization", "Content-Type"] }))
 
-// Auth middleware — runs on every /v1/* route
+// Mount admin BEFORE the auth middleware so it can do its own basic-auth.
+app.route("/admin", adminRouter())
+
+// Public health
+app.get("/healthz", async (c) => {
+  let upstreamOk = false
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(2000) })
+    upstreamOk = r.ok
+  } catch {
+    /* down */
+  }
+  return c.json({ ok: true, upstream: upstreamOk, version: "0.2.0" })
+})
+
+app.get("/", (c) =>
+  c.json({
+    name: "CrimeOpus API",
+    version: "0.2.0",
+    endpoints: [
+      "/v1/models",
+      "/v1/chat/completions",
+      "/v1/embeddings",
+      "/v1/audio/transcriptions",
+      "/v1/audio/translations",
+      "/admin",
+      "/healthz",
+    ],
+  }),
+)
+
+// ─── Auth middleware for /v1/* ────────────────────────────────────────
+
 app.use("/v1/*", async (c, next) => {
   const auth = c.req.header("authorization") ?? c.req.header("Authorization") ?? ""
   const token = auth.replace(/^Bearer\s+/i, "").trim()
-  let keyEntry: KeyEntry | null = null
-  if (apiKeys.size > 0) {
-    const found = apiKeys.get(token)
-    if (!found) {
-      if (!ALLOW_ANON) return c.json({ error: { message: "invalid api key", type: "auth" } }, 401)
+
+  if (!token && !ALLOW_ANON) return c.json({ error: { message: "missing api key", type: "auth" } }, 401)
+
+  let ctx: AuthContext | null = null
+  if (token) {
+    const resolved = resolveAuth(token)
+    if ("error" in resolved) {
+      if (!ALLOW_ANON) return c.json({ error: { message: resolved.error, type: "auth" } }, 401)
     } else {
-      keyEntry = found
+      ctx = resolved
     }
   }
-  const rpm = keyEntry?.rpmOverride ?? RATE_LIMIT_RPM
-  const bucketKey = keyEntry?.label ?? ipOf(c)
+
+  if (!ctx && ALLOW_ANON) {
+    // Synthetic anonymous context (NEVER use in prod). Quotas are skipped.
+    ctx = {
+      keyId: 0,
+      kind: "static",
+      label: "anonymous",
+      tenantId: null,
+      rpm: null,
+      monthlyTokenQuota: null,
+      monthlyRequestQuota: null,
+      scopes: new Set(["models:list", "chat", "embed", "audio"]),
+    }
+  }
+  if (!ctx) return c.json({ error: { message: "auth_failed", type: "auth" } }, 401)
+
+  // Rate limit (token bucket, per key)
+  const rpm = ctx.rpm ?? RATE_LIMIT_RPM
+  const bucketKey = ctx.label
   if (!takeToken(bucketKey, rpm)) {
+    emitWebhook("ratelimit.exceeded", { key_label: ctx.label, rpm, ip: ipOf(c) })
     return c.json({ error: { message: "rate_limit_exceeded", type: "rate_limit" } }, 429)
   }
-  c.set("keyLabel", keyEntry?.label ?? null)
+  c.set("auth", ctx)
   await next()
 })
 
-function ipOf(c: { req: { header: (n: string) => string | undefined; raw?: { headers?: Headers } } }): string {
+function ipOf(c: { req: { header: (n: string) => string | undefined } }): string {
+  const xff = c.req.header("x-forwarded-for")
   return (
     c.req.header("cf-connecting-ip") ??
-    c.req.header("x-forwarded-for")?.split(",")[0].trim() ??
+    (xff ? xff.split(",")[0]!.trim() : null) ??
     c.req.header("x-real-ip") ??
     "unknown"
   )
+}
+
+function requireScope(c: import("hono").Context<{ Variables: { auth: AuthContext } }>, scope: string) {
+  const auth = c.get("auth")
+  if (!auth.scopes.has(scope)) {
+    return c.json({ error: { message: `scope_missing:${scope}`, type: "auth" } }, 403)
+  }
+  return null
 }
 
 // ─── /v1/models ────────────────────────────────────────────────────────
 
 app.get("/v1/models", async (c) => {
   const t0 = Date.now()
-  const keyLabel = c.get("keyLabel" as never) as string | null
+  const auth = c.get("auth")
+  const scopeFail = requireScope(c, "models:list")
+  if (scopeFail) return scopeFail
   const ip = ipOf(c)
-  // If a catalog is configured, return ONLY catalog entries (minus hidden).
+
   if (catalog.size > 0) {
     const data = [...catalog.entries()]
       .filter(([, e]) => !e.hidden)
@@ -277,24 +265,24 @@ app.get("/v1/models", async (c) => {
         display: e.display ?? id,
         description: e.description,
       }))
-    logUsage({ keyLabel, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
+    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
     return c.json({ object: "list", data })
   }
-  // Otherwise mirror what Ollama has installed.
   try {
     const r = await fetch(`${OLLAMA_URL}/api/tags`)
-    const body = (await r.json()) as { models?: Array<{ name: string; size?: number; modified_at?: string }> }
+    const body = (await r.json()) as { models?: Array<{ name: string; modified_at?: string }> }
     const data = (body.models ?? []).map((m) => ({
       id: m.name,
       object: "model",
       created: m.modified_at ? Math.floor(new Date(m.modified_at).getTime() / 1000) : 0,
       owned_by: "ollama",
     }))
-    logUsage({ keyLabel, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
+    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 200, latencyMs: Date.now() - t0 })
     return c.json({ object: "list", data })
   } catch (e) {
     const err = (e as Error).message
-    logUsage({ keyLabel, ip, model: null, endpoint: "/v1/models", status: 502, latencyMs: Date.now() - t0, error: err })
+    emitWebhook("upstream.error", { endpoint: "/v1/models", error: err })
+    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/models", status: 502, latencyMs: Date.now() - t0, error: err })
     return c.json({ error: { message: `upstream Ollama unavailable: ${err}`, type: "upstream" } }, 502)
   }
 })
@@ -317,13 +305,25 @@ interface ChatBody {
 
 app.post("/v1/chat/completions", async (c) => {
   const startedAt = Date.now()
-  const keyLabel = c.get("keyLabel" as never) as string | null
+  const auth = c.get("auth")
+  const scopeFail = requireScope(c, "chat")
+  if (scopeFail) return scopeFail
   const ip = ipOf(c)
+
+  // Quota check (pre-flight)
+  const q = checkQuota(auth)
+  if (!q.allowed) {
+    return c.json(
+      { error: { message: `quota_exceeded: ${q.reason} for period ${q.period}`, type: "quota" } },
+      429,
+    )
+  }
+
   let body: ChatBody
   try {
     body = (await c.req.json()) as ChatBody
   } catch {
-    logUsage({ keyLabel, ip, model: null, endpoint: "/v1/chat/completions", status: 400, latencyMs: 0, error: "bad json" })
+    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/chat/completions", status: 400, latencyMs: 0, error: "bad json" })
     return c.json({ error: { message: "invalid json body", type: "request" } }, 400)
   }
   if (!body.model || !Array.isArray(body.messages)) {
@@ -331,18 +331,15 @@ app.post("/v1/chat/completions", async (c) => {
   }
 
   const { upstreamId, entry } = resolveUpstream(body.model)
-
-  // Optional system-prompt prefix injection from catalog
   if (entry?.systemPrefix) {
     const first = body.messages[0]
-    if (first?.role === "system" && typeof first.content === "string") {
+    if (first && first.role === "system" && typeof first.content === "string") {
       body.messages[0] = { role: "system", content: entry.systemPrefix + "\n\n" + first.content }
     } else {
       body.messages = [{ role: "system", content: entry.systemPrefix }, ...body.messages]
     }
   }
 
-  // Forward to Ollama OpenAI-compatible endpoint
   const upstreamBody = { ...body, model: upstreamId }
   const isStream = body.stream === true
   let upstreamResp: Response
@@ -354,14 +351,16 @@ app.post("/v1/chat/completions", async (c) => {
     })
   } catch (e) {
     const msg = (e as Error).message
-    logUsage({ keyLabel, ip, model: body.model, endpoint: "/v1/chat/completions", status: 502, latencyMs: Date.now() - startedAt, error: msg })
+    emitWebhook("upstream.error", { endpoint: "/v1/chat/completions", model: body.model, error: msg })
+    logUsage({ keyLabel: auth.label, ip, model: body.model, endpoint: "/v1/chat/completions", status: 502, latencyMs: Date.now() - startedAt, error: msg })
     return c.json({ error: { message: `upstream Ollama unreachable: ${msg}`, type: "upstream" } }, 502)
   }
 
   if (!upstreamResp.ok) {
     const txt = await upstreamResp.text().catch(() => "")
+    emitWebhook("upstream.error", { endpoint: "/v1/chat/completions", model: body.model, status: upstreamResp.status })
     logUsage({
-      keyLabel,
+      keyLabel: auth.label,
       ip,
       model: body.model,
       endpoint: "/v1/chat/completions",
@@ -377,24 +376,24 @@ app.post("/v1/chat/completions", async (c) => {
       usage?: { prompt_tokens?: number; completion_tokens?: number }
       [k: string]: unknown
     }
-    // Rewrite model id back to public id so clients see the public name
-    if (typeof (json as { model?: string }).model === "string") {
-      ;(json as { model: string }).model = body.model
-    }
+    if (typeof (json as { model?: string }).model === "string") (json as { model: string }).model = body.model
+    const promptTokens = json.usage?.prompt_tokens ?? 0
+    const completionTokens = json.usage?.completion_tokens ?? 0
+    recordUsage({ ctx: auth, promptTokens, completionTokens })
     logUsage({
-      keyLabel,
+      keyLabel: auth.label,
       ip,
       model: body.model,
       endpoint: "/v1/chat/completions",
       status: 200,
-      promptTokens: json.usage?.prompt_tokens,
-      completionTokens: json.usage?.completion_tokens,
+      promptTokens,
+      completionTokens,
       latencyMs: Date.now() - startedAt,
     })
     return c.json(json)
   }
 
-  // Streaming SSE — pipe through, rewriting `model` field on each frame.
+  // Streaming SSE pipe-through with model rewrite + post-stream usage
   c.header("Content-Type", "text/event-stream")
   c.header("Cache-Control", "no-cache")
   c.header("Connection", "keep-alive")
@@ -438,8 +437,9 @@ app.post("/v1/chat/completions", async (c) => {
         }
       }
     } finally {
+      recordUsage({ ctx: auth, promptTokens, completionTokens })
       logUsage({
-        keyLabel,
+        keyLabel: auth.label,
         ip,
         model: body.model,
         endpoint: "/v1/chat/completions",
@@ -456,12 +456,15 @@ app.post("/v1/chat/completions", async (c) => {
 
 app.post("/v1/embeddings", async (c) => {
   const startedAt = Date.now()
-  const keyLabel = c.get("keyLabel" as never) as string | null
+  const auth = c.get("auth")
+  const scopeFail = requireScope(c, "embed")
+  if (scopeFail) return scopeFail
   const ip = ipOf(c)
-  const body = (await c.req.json().catch(() => ({}))) as {
-    model?: string
-    input?: string | string[]
-  }
+
+  const q = checkQuota(auth)
+  if (!q.allowed) return c.json({ error: { message: `quota_exceeded: ${q.reason}`, type: "quota" } }, 429)
+
+  const body = (await c.req.json().catch(() => ({}))) as { model?: string; input?: string | string[] }
   if (!body.model || body.input === undefined) {
     return c.json({ error: { message: "missing model or input", type: "request" } }, 400)
   }
@@ -474,8 +477,9 @@ app.post("/v1/embeddings", async (c) => {
     })
     if (!r.ok) {
       const t = await r.text().catch(() => "")
+      emitWebhook("upstream.error", { endpoint: "/v1/embeddings", status: r.status })
       logUsage({
-        keyLabel,
+        keyLabel: auth.label,
         ip,
         model: body.model,
         endpoint: "/v1/embeddings",
@@ -487,53 +491,54 @@ app.post("/v1/embeddings", async (c) => {
     }
     const json = (await r.json()) as { model?: string; usage?: { prompt_tokens?: number } }
     if (json.model) json.model = body.model
+    const promptTokens = json.usage?.prompt_tokens ?? 0
+    recordUsage({ ctx: auth, promptTokens, completionTokens: 0 })
     logUsage({
-      keyLabel,
+      keyLabel: auth.label,
       ip,
       model: body.model,
       endpoint: "/v1/embeddings",
       status: 200,
-      promptTokens: json.usage?.prompt_tokens,
+      promptTokens,
       latencyMs: Date.now() - startedAt,
     })
     return c.json(json)
   } catch (e) {
-    return c.json({ error: { message: `upstream unreachable: ${(e as Error).message}`, type: "upstream" } }, 502)
+    const err = (e as Error).message
+    emitWebhook("upstream.error", { endpoint: "/v1/embeddings", error: err })
+    return c.json({ error: { message: `upstream unreachable: ${err}`, type: "upstream" } }, 502)
   }
 })
 
-// ─── Health + admin ────────────────────────────────────────────────────
+// ─── /v1/audio/* (Whisper bridging) ────────────────────────────────────
 
-app.get("/healthz", async (c) => {
-  let upstreamOk = false
-  try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(2000) })
-    upstreamOk = r.ok
-  } catch {
-    /* down */
-  }
-  return c.json({ ok: true, upstream: upstreamOk, version: "0.1.0" })
-})
-
-app.get("/", (c) =>
-  c.json({
-    name: "CrimeOpus API",
-    version: "0.1.0",
-    endpoints: ["/v1/models", "/v1/chat/completions", "/v1/embeddings", "/healthz"],
-  }),
-)
+app.route("/v1/audio", audioRouter())
 
 // ─── Boot ──────────────────────────────────────────────────────────────
 
+const keyCount = (getDb().query("SELECT COUNT(*) AS c FROM keys WHERE disabled = 0").get() as { c: number }).c
 console.log(`✓ CrimeOpus API listening on http://${BIND}:${PORT}`)
 console.log(`  upstream Ollama: ${OLLAMA_URL}`)
-console.log(`  api keys configured: ${apiKeys.size}${ALLOW_ANON ? " (anonymous allowed)" : ""}`)
+console.log(`  upstream Whisper: ${process.env.WHISPER_URL ?? "http://127.0.0.1:9000"}`)
+console.log(`  active keys: ${keyCount}${ALLOW_ANON ? " (+ anonymous allowed)" : ""}`)
 console.log(`  rate limit: ${RATE_LIMIT_RPM} rpm / burst ${RATE_LIMIT_BURST}`)
 console.log(`  catalog: ${catalog.size} model(s)`)
-console.log(`  usage log: ${LOG_DB}`)
+console.log(`  usage log: ${process.env.LOG_DB ?? "./usage.db"}`)
+console.log(`  admin dashboard: ${process.env.ADMIN_PASSWORD ? "enabled at /admin" : "DISABLED (set ADMIN_PASSWORD)"}`)
+console.log(`  jwt: ${process.env.JWT_SECRET ? "HS256" : process.env.JWT_PUBLIC_KEY ? "RS256" : "disabled"}`)
+
+if ((process.env.API_KEYS ?? "") === "" && keyCount === 0 && !ALLOW_ANON) {
+  console.error(
+    "✗ No API keys configured AND no admin keys in DB AND ALLOW_ANON not set.\n" +
+      "  Set API_KEYS env, or boot with ADMIN_PASSWORD and create keys via /admin, or ALLOW_ANON=1 (DEV ONLY).",
+  )
+  process.exit(2)
+}
 
 export default {
   port: PORT,
   hostname: BIND,
   fetch: app.fetch,
+  // Bigger upload limit for audio files (default Bun = 64 MB; bump to 256)
+  maxRequestBodySize: 256 * 1024 * 1024,
 }
