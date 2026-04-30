@@ -33,6 +33,7 @@ import { checkQuota, recordUsage } from "./quota.ts"
 import { emitWebhook } from "./webhooks.ts"
 import { audioRouter } from "./audio.ts"
 import { adminRouter } from "./admin.ts"
+import { licenseRouter } from "./license-routes.ts"
 import {
   acquireSlot,
   buildUpstreamFetch,
@@ -125,6 +126,9 @@ app.use("*", cors({ origin: CORS_ORIGINS, allowHeaders: ["Authorization", "Conte
 
 // Mount admin BEFORE the auth middleware so it can do its own basic-auth.
 app.route("/admin", adminRouter())
+
+// Mount license auth routes (public, no auth required)
+app.route("/license", licenseRouter())
 
 // Public health
 app.get("/healthz", (c) => {
@@ -257,17 +261,22 @@ app.post("/v1/chat/completions", async (c) => {
   // Quota check (pre-flight)
   const q = checkQuota(auth)
   if (!q.allowed) {
-    return c.json(
-      { error: { message: `quota_exceeded: ${q.reason} for period ${q.period}`, type: "quota" } },
-      429,
-    )
+    return c.json({ error: { message: `quota_exceeded: ${q.reason} for period ${q.period}`, type: "quota" } }, 429)
   }
 
   let body: ChatBody
   try {
     body = (await c.req.json()) as ChatBody
   } catch {
-    logUsage({ keyLabel: auth.label, ip, model: null, endpoint: "/v1/chat/completions", status: 400, latencyMs: 0, error: "bad json" })
+    logUsage({
+      keyLabel: auth.label,
+      ip,
+      model: null,
+      endpoint: "/v1/chat/completions",
+      status: 400,
+      latencyMs: 0,
+      error: "bad json",
+    })
     return c.json({ error: { message: "invalid json body", type: "request" } }, 400)
   }
   if (!body.model || !Array.isArray(body.messages)) {
@@ -281,7 +290,15 @@ app.post("/v1/chat/completions", async (c) => {
     slot = await acquireSlot(body.model, auth.label)
   } catch (e) {
     const err = e as UpstreamError
-    logUsage({ keyLabel: auth.label, ip, model: body.model, endpoint: "/v1/chat/completions", status: err.httpStatus ?? 503, latencyMs: Date.now() - startedAt, error: err.code })
+    logUsage({
+      keyLabel: auth.label,
+      ip,
+      model: body.model,
+      endpoint: "/v1/chat/completions",
+      status: err.httpStatus ?? 503,
+      latencyMs: Date.now() - startedAt,
+      error: err.code,
+    })
     return c.json({ error: { message: err.code, type: "upstream" } }, (err.httpStatus ?? 503) as 503)
   }
 
@@ -312,7 +329,15 @@ app.post("/v1/chat/completions", async (c) => {
     release()
     const msg = (e as Error).message
     emitWebhook("upstream.error", { provider: slot.provider.id, model: body.model, error: msg })
-    logUsage({ keyLabel: auth.label, ip, model: body.model, endpoint: "/v1/chat/completions", status: 502, latencyMs: Date.now() - startedAt, error: msg })
+    logUsage({
+      keyLabel: auth.label,
+      ip,
+      model: body.model,
+      endpoint: "/v1/chat/completions",
+      status: 502,
+      latencyMs: Date.now() - startedAt,
+      error: msg,
+    })
     return c.json({ error: { message: `upstream unreachable: ${msg}`, type: "upstream" } }, 502)
   }
 
@@ -329,7 +354,10 @@ app.post("/v1/chat/completions", async (c) => {
       latencyMs: Date.now() - startedAt,
       error: txt.slice(0, 500),
     })
-    return c.json({ error: { message: `upstream error: ${upstreamResp.status} ${txt.slice(0, 200)}`, type: "upstream" } }, 502)
+    return c.json(
+      { error: { message: `upstream error: ${upstreamResp.status} ${txt.slice(0, 200)}`, type: "upstream" } },
+      502,
+    )
   }
 
   if (!isStream) {
