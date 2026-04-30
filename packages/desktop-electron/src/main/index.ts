@@ -41,6 +41,7 @@ const perf = {
 
 import type { InitStep, ServerReadyData, SqliteMigrationProgress, WslConfig } from "../preload/types"
 import { checkAppExists, resolveAppPath, wslPath } from "./apps"
+import { appsRestoreService } from "./apps-restore-service"
 import type { CommandChild } from "./cli"
 import { getSidecarPath, installCli, syncCli } from "./cli"
 import { CHANNEL, UPDATER_ENABLED } from "./constants"
@@ -121,6 +122,9 @@ function setupApp() {
     // migrate()
     perf.mark("app_ready")
     app.setAsDefaultProtocolClient("opencode")
+    // Register the apps-restore lifecycle hook before any window is shown so a
+    // crash in the renderer cannot leave external apps stuck in a hidden state.
+    appsRestoreService.attachLifecycle()
     setDockIcon()
     perf.mark("pre_setup_complete")
     setupAutoUpdater()

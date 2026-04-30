@@ -247,6 +247,16 @@ const createPlatform = (): Platform => {
     subscribeUpdateProgress: () => window.api.subscribeUpdateProgress(),
 
     onUpdateReady: (cb) => window.api.onUpdateReady(cb),
+
+    automation: {
+      getBrowserAllowAll: () => window.api.automation.getBrowserAllowAll(),
+      setBrowserAllowAll: (value) => window.api.automation.setBrowserAllowAll(value),
+      listConnectedBrowsers: () => window.api.automation.listConnectedBrowsers(),
+      getComputerUseStatus: () => window.api.automation.getComputerUseStatus(),
+      setComputerUseEnabled: (value) => window.api.automation.setComputerUseEnabled(value),
+      getRestoreApps: () => window.api.automation.getRestoreApps(),
+      setRestoreApps: (value) => window.api.automation.setRestoreApps(value),
+    },
   }
 }
 
