@@ -1,10 +1,17 @@
 import type { Hono } from "hono"
+import type { Context } from "hono"
 import type { Database } from "bun:sqlite"
 import { randomBytes } from "node:crypto"
 import { userAuth } from "../middleware/user-auth.ts"
 import { DASHBOARD_HTML } from "../dashboard-html.ts"
 import { makeCsrfToken, verifyCsrfToken } from "../csrf.ts"
 import { verifyTokenCrypto } from "../license-auth.ts"
+import {
+  appendSecurityEvent,
+  getUserSettings,
+  upsertUserSettings,
+  getSecurityLog,
+} from "../db.ts"
 
 const DEFAULT_RPM = 60
 const DEFAULT_MONTHLY_TOKEN_QUOTA = 1_000_000
@@ -21,6 +28,18 @@ function previewKey(secret: string): string {
 export type UserRoutesDeps = {
   licenseDb: Database
   usageDb: Database
+}
+
+function ipOf(c: Context): string | null {
+  return (
+    c.req.header("cf-connecting-ip") ??
+    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+    c.req.header("x-real-ip") ??
+    null
+  )
+}
+function uaOf(c: Context): string | null {
+  return c.req.header("user-agent") ?? null
 }
 
 export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
@@ -148,6 +167,14 @@ export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
       .query("SELECT id, created_at FROM keys WHERE secret = ?")
       .get(newSecret) as { id: number; created_at: number }
 
+    appendSecurityEvent(deps.licenseDb, {
+      customerId: cust.id,
+      event: "key_rotated",
+      ip: ipOf(c),
+      userAgent: uaOf(c),
+      metadata: { new_key_id: created.id },
+    })
+
     return c.json({
       key: {
         id: created.id,
@@ -236,26 +263,30 @@ export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
 
   // ─── GET /api/user/settings ───────────────────────────────────
   app.get("/api/user/settings", auth, (c) => {
-    const { getUserSettings } = require("../db.ts") as typeof import("../db.ts")
     const cust = c.get("customer")
     return c.json(getUserSettings(deps.licenseDb, cust.id))
   })
 
   // ─── POST /api/user/settings ──────────────────────────────────
   app.post("/api/user/settings", auth, async (c) => {
-    const { upsertUserSettings } = require("../db.ts") as typeof import("../db.ts")
     const cust = c.get("customer")
     const body = (await c.req.json()) as { theme?: string; language?: string }
     const patch: Record<string, string> = {}
     if (body.theme && ["dark", "light", "auto"].includes(body.theme)) patch.theme = body.theme
     if (body.language && ["it", "en"].includes(body.language)) patch.language = body.language
     const updated = upsertUserSettings(deps.licenseDb, cust.id, patch as any)
+    appendSecurityEvent(deps.licenseDb, {
+      customerId: cust.id,
+      event: "settings_updated",
+      ip: ipOf(c),
+      userAgent: uaOf(c),
+      metadata: patch,
+    })
     return c.json(updated)
   })
 
   // ─── GET /api/user/security-log ───────────────────────────────
   app.get("/api/user/security-log", auth, (c) => {
-    const { getSecurityLog } = require("../db.ts") as typeof import("../db.ts")
     const cust = c.get("customer")
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 200)
     const before = c.req.query("before") ? Number(c.req.query("before")) : undefined
@@ -303,6 +334,13 @@ export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
       cust.id,
       currentSid,
     )
+    appendSecurityEvent(deps.licenseDb, {
+      customerId: cust.id,
+      event: "sessions_revoked_all",
+      ip: ipOf(c),
+      userAgent: uaOf(c),
+      metadata: null,
+    })
     return c.json({ ok: true })
   })
 
@@ -328,9 +366,51 @@ export function mountUserRoutes(app: Hono, deps: UserRoutesDeps) {
     const values = updates.map(([, v]) => v)
     deps.licenseDb.run(`UPDATE customers SET ${setClause} WHERE id = ?`, ...values, cust.id)
 
+    for (const [field, value] of updates) {
+      appendSecurityEvent(deps.licenseDb, {
+        customerId: cust.id,
+        event: "profile_updated",
+        ip: ipOf(c),
+        userAgent: uaOf(c),
+        metadata: { field, old: (cust as any)[field] ?? null, new: value },
+      })
+    }
+
     const fresh = deps.licenseDb
       .query("SELECT id, email, telegram, telegram_user_id, approval_status FROM customers WHERE id = ?")
       .get(cust.id) as any
     return c.json(fresh)
+  })
+
+  // ─── DELETE /api/user/me ──────────────────────────────────────
+  app.delete("/api/user/me", auth, async (c) => {
+    const cust = c.get("customer")
+    const body = (await c.req.json().catch(() => ({}))) as { confirmation?: string }
+    const expected = `DELETE-${cust.email ?? ""}`
+    if (body.confirmation !== expected) {
+      return c.json({ error: "confirmation_mismatch", expected }, 400)
+    }
+
+    appendSecurityEvent(deps.licenseDb, {
+      customerId: cust.id,
+      event: "account_deleted",
+      ip: ipOf(c),
+      userAgent: uaOf(c),
+      metadata: { plan: "cascade_v1" },
+    })
+
+    // Soft-delete keys (preserves usage history)
+    deps.usageDb.run(
+      `UPDATE keys SET disabled = 1, label = 'deleted_' || ? || '_' || label
+       WHERE tenant_id = ?`,
+      String(Date.now()),
+      cust.id,
+    )
+    // Hard-delete sessions (immediately invalidate cookies)
+    deps.licenseDb.run("DELETE FROM auth_sessions WHERE customer_id = ?", cust.id)
+    // Hard-delete customer (CASCADE drops user_settings; security_log SET NULL preserves)
+    deps.licenseDb.run("DELETE FROM customers WHERE id = ?", cust.id)
+
+    return c.body(null, 204)
   })
 }

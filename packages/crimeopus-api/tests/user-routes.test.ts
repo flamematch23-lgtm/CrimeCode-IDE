@@ -377,3 +377,100 @@ test("PATCH /api/user/me rejects invalid email", async () => {
   expect(r.status).toBe(400)
   dbs.cleanup()
 })
+
+// ─── Security event writes ─────────────────────────────────────
+
+test("rotate writes a key_rotated security event", async () => {
+  const { dbs } = bootstrapApp()
+  const { mountUserRoutes } = await import("../src/routes/user")
+  const app = new Hono()
+  mountUserRoutes(app, { licenseDb: dbs.license, usageDb: dbs.usage })
+
+  await authedRequest(app, "/api/user/keys")
+  await authedRequest(app, "/api/user/keys/rotate", { method: "POST" })
+
+  const events = dbs.license
+    .query("SELECT event FROM security_log WHERE customer_id = ? ORDER BY id ASC")
+    .all("cus_alice") as Array<{ event: string }>
+  expect(events.map((e) => e.event)).toContain("key_rotated")
+  dbs.cleanup()
+})
+
+test("profile update writes a profile_updated event", async () => {
+  const { dbs } = bootstrapApp()
+  const { mountUserRoutes } = await import("../src/routes/user")
+  const app = new Hono()
+  mountUserRoutes(app, { licenseDb: dbs.license, usageDb: dbs.usage })
+
+  await authedRequest(app, "/api/user/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "new@x.com" }),
+  })
+
+  const ev = dbs.license
+    .query("SELECT event, metadata FROM security_log WHERE customer_id = ? AND event = 'profile_updated'")
+    .get("cus_alice") as any
+  expect(ev).toBeTruthy()
+  const meta = JSON.parse(ev.metadata)
+  expect(meta.field).toBe("email")
+  expect(meta.new).toBe("new@x.com")
+  dbs.cleanup()
+})
+
+// ─── DELETE /api/user/me ───────────────────────────────────────
+
+test("DELETE /api/user/me cascades + preserves security_log via SET NULL", async () => {
+  const { dbs } = bootstrapApp()
+  const { mountUserRoutes } = await import("../src/routes/user")
+  const app = new Hono()
+  mountUserRoutes(app, { licenseDb: dbs.license, usageDb: dbs.usage })
+
+  // bootstrap with a key + an existing security event
+  await authedRequest(app, "/api/user/keys")
+  dbs.license.run(
+    "INSERT INTO security_log (customer_id, customer_id_snapshot, event, created_at) VALUES (?,?,?,?)",
+    "cus_alice",
+    "cus_alice",
+    "login",
+    Date.now(),
+  )
+
+  // Wrong confirmation → 400
+  const bad = await authedRequest(app, "/api/user/me", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmation: "WRONG" }),
+  })
+  expect(bad.status).toBe(400)
+
+  // Correct confirmation → 204
+  const ok = await authedRequest(app, "/api/user/me", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmation: "DELETE-alice@example.com" }),
+  })
+  expect(ok.status).toBe(204)
+
+  // customer is gone
+  expect(dbs.license.query("SELECT id FROM customers WHERE id = ?").get("cus_alice")).toBeNull()
+  // sessions hard-deleted
+  expect(
+    dbs.license.query("SELECT id FROM auth_sessions WHERE customer_id = ?").all("cus_alice").length,
+  ).toBe(0)
+  // keys soft-deleted (disabled, label prefixed)
+  const keys = dbs.usage.query("SELECT disabled, label FROM keys WHERE tenant_id = ?").all("cus_alice") as any[]
+  expect(keys.length).toBeGreaterThan(0)
+  expect(keys[0].disabled).toBe(1)
+  expect(keys[0].label.startsWith("deleted_")).toBe(true)
+  // security_log rows: customer_id is NULL but snapshot preserved
+  const logRows = dbs.license
+    .query("SELECT customer_id, customer_id_snapshot FROM security_log WHERE customer_id_snapshot = ?")
+    .all("cus_alice") as Array<{ customer_id: string | null; customer_id_snapshot: string }>
+  expect(logRows.length).toBeGreaterThan(0)
+  for (const r of logRows) {
+    expect(r.customer_id).toBeNull()
+    expect(r.customer_id_snapshot).toBe("cus_alice")
+  }
+  dbs.cleanup()
+})
