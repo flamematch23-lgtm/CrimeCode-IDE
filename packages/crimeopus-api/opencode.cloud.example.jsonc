@@ -15,7 +15,7 @@
       "name": "CrimeOpus Cloud",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "https://api.crimeopus.dev/v1",
+        "baseURL": "https://ai.crimecode.cc/v1",
         "apiKey": "{env:CRIMEOPUS_API_KEY}"
       },
       "models": {

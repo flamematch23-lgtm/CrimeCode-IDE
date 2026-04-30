@@ -51,8 +51,14 @@ export interface Provider {
   lastHealthCheck: number
   /** Consecutive failed health checks. Marked unhealthy only after 3+. */
   consecutiveFails: number
-  /** path to call for health check (default /v1/models for openai, /api/tags for ollama) */
+  /** path to call for health check (default /models for openai, /api/tags for ollama) */
   healthPath: string
+  /**
+   * Override the full health-check URL. Use this when the provider's health
+   * endpoint lives at a different base (e.g. RunPod native health vs OpenAI-compat base).
+   * If set, healthPath is ignored.
+   */
+  healthUrl?: string
 }
 
 export interface ProviderRoute {
@@ -119,7 +125,8 @@ export const providers: Provider[] = (() => {
       healthy: true, // optimistic — health check downgrades only after 3 consecutive fails
       lastHealthCheck: 0,
       consecutiveFails: 0,
-      healthPath: kind === "ollama" ? "/api/tags" : "/v1/models",
+      healthPath: kind === "ollama" ? "/api/tags" : "/models",
+      healthUrl: (p as { healthUrl?: string }).healthUrl,
     }
   })
 })()
@@ -326,7 +333,8 @@ export function startHealthChecks(): void {
       try {
         const req: RequestInit = { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) }
         if (p.apiKey) req.headers = { Authorization: `Bearer ${p.apiKey}` }
-        const r = await fetch(`${p.url}${p.healthPath}`, req)
+        const healthTarget = p.healthUrl ?? `${p.url}${p.healthPath}`
+        const r = await fetch(healthTarget, req)
         // 2xx + 401 (wrong key but server alive) + 403 (auth-related) are all "reachable"
         ok = r.ok || r.status === 401 || r.status === 403
         reason = `HTTP ${r.status}`
