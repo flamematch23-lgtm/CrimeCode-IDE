@@ -184,6 +184,21 @@ interface Ca {
 let CA: Ca | null = null
 const CTX_CACHE = new Map<string, SecureContext>()
 
+// Telemetry/CRL/OCSP hosts auto-skipped by intercept (noise filter).
+// Declared BEFORE the top-level cmd dispatch below, otherwise cmdStart()
+// hits a Temporal Dead Zone error (the const is hoisted but uninitialized).
+const DEFAULT_NO_INTERCEPT = new Set([
+  "incoming.telemetry.mozilla.org",
+  "v10.events.data.microsoft.com",
+  "*.update.microsoft.com",
+  "swscan.apple.com",
+  "ocsp.apple.com",
+  "ocsp.digicert.com",
+  "ocsp.sectigo.com",
+  "ocsp.pki.goog",
+  "crl.microsoft.com",
+])
+
 const cmd = cli.args[0]
 
 if (!cmd || ["--help", "-h"].includes(cmd)) usage(0)
@@ -381,18 +396,6 @@ type InterceptAction =
   | { kind: "forward" }
   | { kind: "drop" }
   | { kind: "edit"; method?: string; url?: string; headers?: Record<string, string>; body?: Buffer }
-
-const DEFAULT_NO_INTERCEPT = new Set([
-  "incoming.telemetry.mozilla.org",
-  "v10.events.data.microsoft.com",
-  "*.update.microsoft.com",
-  "swscan.apple.com",
-  "ocsp.apple.com",
-  "ocsp.digicert.com",
-  "ocsp.sectigo.com",
-  "ocsp.pki.goog",
-  "crl.microsoft.com",
-])
 
 async function cmdStart() {
   const port = cli.num("port", 8181)

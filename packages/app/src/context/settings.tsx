@@ -18,6 +18,15 @@ export interface SoundSettings {
   errors: string
 }
 
+export interface AutomationSettings {
+  /** Allow Claude to perform any browser action without per-action confirmation. */
+  browserAllowAll: boolean
+  /** Master toggle for the computer-use capability (screenshots + keyboard + mouse). */
+  computerUseEnabled: boolean
+  /** Restore previously hidden apps when Claude terminates an automation run. */
+  restoreAppsOnExit: boolean
+}
+
 export interface Settings {
   general: {
     autoSave: boolean
@@ -45,6 +54,7 @@ export interface Settings {
     enabled: boolean
     url: string
   }
+  automation?: AutomationSettings
 }
 
 export const monoDefault = "IBM Plex Mono"
@@ -127,6 +137,11 @@ const defaultSettings: Settings = {
   proxy: {
     enabled: false,
     url: "http://localhost:3001",
+  },
+  automation: {
+    browserAllowAll: false,
+    computerUseEnabled: false,
+    restoreAppsOnExit: true,
   },
 }
 
@@ -280,6 +295,23 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         url: withFallback(() => store.proxy?.url, "http://localhost:3001"),
         setUrl(value: string) {
           setStore("proxy", "url", value)
+        },
+      },
+      automation: {
+        // We deliberately read fallbacks from local consts instead of
+        // `defaultSettings.automation!.x` so a future refactor that removes
+        // the field from the default cannot fail silently at runtime.
+        browserAllowAll: withFallback(() => store.automation?.browserAllowAll, false),
+        setBrowserAllowAll(value: boolean) {
+          setStore("automation", "browserAllowAll", value)
+        },
+        computerUseEnabled: withFallback(() => store.automation?.computerUseEnabled, false),
+        setComputerUseEnabled(value: boolean) {
+          setStore("automation", "computerUseEnabled", value)
+        },
+        restoreAppsOnExit: withFallback(() => store.automation?.restoreAppsOnExit, true),
+        setRestoreAppsOnExit(value: boolean) {
+          setStore("automation", "restoreAppsOnExit", value)
         },
       },
     }

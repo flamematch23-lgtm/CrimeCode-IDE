@@ -1,8 +1,88 @@
 {
   "$schema": "https://opencode.ai/config.json",
+
+  // Default: il modello più potente — Qwen3-Coder 480B MoE.
+  // Eccellente in coding e reasoning, generalista forte.
+  "model": "crimeopus/crimeopus-coder",
+
   "provider": {
+    // ────────────────────────────────────────────────────────────────
+    // OpenCode (Zen) — provider di default per lo sviluppo.
+    // ────────────────────────────────────────────────────────────────
     "opencode": {
       "options": {}
+    },
+
+    // ────────────────────────────────────────────────────────────────
+    // CrimeCode Cloud — gateway Hetzner con failover Together/Groq.
+    // Richiede CRIMEOPUS_API_KEY env var.
+    // ────────────────────────────────────────────────────────────────
+    "crimeopus": {
+      "name": "CrimeCode Cloud",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://ai.crimecode.cc/v1",
+        "apiKey": "{env:CRIMEOPUS_API_KEY}"
+      },
+      "models": {
+        "crimeopus-coder": {
+          "name": "CrimeOpus PRO — top brain (coding & reasoning)",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 262144, "output": 16384 }
+        },
+        "crimeopus-fast": {
+          "name": "CrimeOpus FAST — instant replies (~200ms via Groq)",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 131072, "output": 8192 }
+        },
+        "crimeopus-agentic": {
+          "name": "CrimeOpus AGENTIC FullUncensored — RunPod (Huihui-Qwen3.6-35B)",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": true,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 262144, "output": 16384 }
+        },
+        "crimeopus-vision": {
+          "name": "CrimeOpus VISION — Qwen3.5-VL 397B multimodal (image + OCR)",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true,
+          "temperature": true,
+          "limit": { "context": 262144, "output": 16384 }
+        }
+      }
+    },
+
+    // ────────────────────────────────────────────────────────────────
+    // Ollama Local — emergency fallback offline. Solo se hai Ollama
+    // girando su localhost:11434 con qwen2.5-coder pullato.
+    // ────────────────────────────────────────────────────────────────
+    "ollama-local": {
+      "name": "Ollama Local (offline)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "apiKey": "ollama"
+      },
+      "models": {
+        "qwen2.5-coder:7b": {
+          "name": "Qwen Coder 7B (offline)",
+          "type": "chat",
+          "tool_call": true,
+          "limit": { "context": 32768, "output": 8192 }
+        }
+      }
     }
   },
   "permission": {
