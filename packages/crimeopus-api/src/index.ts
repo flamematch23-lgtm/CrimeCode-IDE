@@ -34,6 +34,10 @@ import { emitWebhook } from "./webhooks.ts"
 import { audioRouter } from "./audio.ts"
 import { adminRouter } from "./admin.ts"
 import { licenseRouter } from "./license-routes.ts"
+import { runMigrations } from "./migrations.ts"
+import { getLicenseDb } from "./license-auth.ts"
+import { mountUserRoutes } from "./routes/user.ts"
+import { join } from "node:path"
 import {
   acquireSlot,
   buildUpstreamFetch,
@@ -58,6 +62,15 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? "*").split(",").map((s) => s.t
 getDb()
 syncEnvApiKeys()
 startHealthChecks()
+
+// Apply license DB migrations idempotently before serving traffic.
+{
+  const migrationsDir = join(import.meta.dir, "..", "migrations")
+  const applied = runMigrations(getLicenseDb(), migrationsDir)
+  if (applied.length > 0) {
+    console.log(`✓ Applied ${applied.length} migration(s): ${applied.join(", ")}`)
+  }
+}
 
 // ─── Rate limit (token bucket per key) ─────────────────────────────────
 
@@ -129,6 +142,9 @@ app.route("/admin", adminRouter())
 
 // Mount license auth routes (public, no auth required)
 app.route("/license", licenseRouter())
+
+// Mount user dashboard API routes (session-cookie auth)
+mountUserRoutes(app, { licenseDb: getLicenseDb(), usageDb: getDb() })
 
 // Public health
 app.get("/healthz", (c) => {
