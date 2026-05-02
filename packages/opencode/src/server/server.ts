@@ -86,6 +86,11 @@ export namespace Server {
 
   export const Default = lazy(() => createApp({}))
 
+  // Threshold for "this request was slow enough to investigate".
+  // Logged at WARN so it surfaces with the default --log-level WARN the
+  // desktop sidecar runs with, without flooding the log on healthy traffic.
+  const SLOW_REQUEST_MS = 500
+
   export const createApp = (opts: { cors?: string[] }): Hono => {
     const app = new Hono()
     return app
@@ -111,6 +116,23 @@ export namespace Server {
         return c.json(new NamedError.Unknown({ message }).toObject(), {
           status: 500,
         })
+      })
+      // Request timing — wraps everything (cors, auth, route handlers).
+      // Goal: when the desktop client reports a /global/health timeout we
+      // can immediately see in the sidecar log which request actually took
+      // long, instead of guessing from the silent stderr window.
+      .use(async (c, next) => {
+        const t0 = performance.now()
+        await next()
+        const dt = performance.now() - t0
+        if (dt >= SLOW_REQUEST_MS) {
+          log.warn("slow request", {
+            method: c.req.method,
+            path: c.req.path,
+            ms: Math.round(dt),
+            status: c.res.status,
+          })
+        }
       })
       // CORS must run BEFORE basicAuth so that 401 responses still carry the
       // Access-Control-Allow-Origin header; otherwise browsers surface the
@@ -680,6 +702,24 @@ export namespace Server {
     }
     const server = opts.port === 0 ? (tryServe(4096) ?? tryServe(0)) : tryServe(opts.port)
     if (!server) throw new Error(`Failed to start server on port ${opts.port}`)
+
+    // Event-loop lag monitor. Bun is single-threaded JS: any sync block
+    // (heavy parse, sync I/O, child_process.execSync, very large regex)
+    // freezes ALL HTTP including /global/health. This timer measures how
+    // late its own callback fires compared to the scheduled interval; the
+    // delta is the lag. Logged at WARN so it shows up in the existing
+    // --log-level WARN sidecar capture without rebuilding anything else.
+    const LAG_INTERVAL_MS = 200
+    const LAG_THRESHOLD_MS = 250
+    let lastTick = performance.now()
+    setInterval(() => {
+      const now = performance.now()
+      const lag = now - lastTick - LAG_INTERVAL_MS
+      lastTick = now
+      if (lag > LAG_THRESHOLD_MS) {
+        log.warn("event-loop lag", { lagMs: Math.round(lag) })
+      }
+    }, LAG_INTERVAL_MS).unref()
 
     // Initialise Sentry first so any errors during the rest of boot are
     // reported. No-op when SENTRY_DSN is unset (local dev).
