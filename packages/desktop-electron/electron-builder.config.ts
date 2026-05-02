@@ -35,6 +35,14 @@ const getBase = (): Configuration => ({
   files: ["out/**/*", "resources/**/*"],
   asarUnpack: ["resources/opencode-cli*"],
   extraResources: [
+    // The runtime tray reads `process.resourcesPath/icons/icon.ico` (see
+    // tray.ts). Without this entry the icons end up packed inside app.asar
+    // which is not where the tray code looks — Tray() would throw and the
+    // splash overlay would never get destroyed.
+    {
+      from: "resources/icons/",
+      to: "icons/",
+    },
     {
       from: "native/",
       to: "native/",
