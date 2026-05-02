@@ -226,11 +226,22 @@ async function initialize() {
     deepLinks: pendingDeepLinks,
   }
 
-  // Up to maxSpawnAttempts launches. If the sidecar exits inside
-  // earlyDeathWindowMs the most likely cause is a port-bind failure
-  // (transient race the kernel didn't surface to listen(0), TIME_WAIT
-  // residue, or an antivirus hooking the bind). Reallocate the port and
-  // retry instead of failing the launch.
+  // Create the splash up front so it loads in parallel with the sidecar
+  // spawn and is guaranteed to be live by the time we emit `phase: "done"`.
+  // Creating it after the spawn loop introduced an IPC race: with the
+  // splash created late, its first `awaitInitialization` call could land
+  // after `setInitStep("done")` had already fired, and the explicit
+  // `init-step` send raced the invoke reply that tore down the renderer
+  // listener — the splash sometimes never saw "done" and stuck on
+  // "Just a moment..." forever.
+  overlay = createLoadingWindow(globals)
+  perf.mark("loading_window_created")
+
+  // Up to maxSpawnAttempts launches. If the sidecar exits before becoming
+  // healthy (or within earlyDeathWindowMs) the most likely cause is a
+  // port-bind failure — a transient race the kernel didn't surface to
+  // listen(0), TIME_WAIT residue, or an antivirus hooking the bind.
+  // Reallocate the port and retry instead of failing the launch.
   const maxSpawnAttempts = 3
   const earlyDeathWindowMs = 3000
   const stderrLines: string[] = []
@@ -242,6 +253,12 @@ async function initialize() {
   const onError = (msg: string) => {
     logger.error("sidecar spawn error", { error: msg, binary })
     stderrLines.push(`[spawn error] ${msg}`)
+  }
+  const onSqlite = (progress: SqliteMigrationProgress) => {
+    setInitStep({ phase: "sqlite_waiting" })
+    if (overlay) sendSqliteMigrationProgress(overlay, progress)
+    if (mainWindow) sendSqliteMigrationProgress(mainWindow, progress)
+    if (progress.type === "Done") sqliteDone?.resolve()
   }
 
   let port = 0
@@ -259,9 +276,24 @@ async function initialize() {
     const candidate = spawnLocalServer(hostname, port, password)
     candidate.events.on("stderr", onStderr)
     candidate.events.on("error", onError)
+    candidate.events.on("sqlite", onSqlite)
 
+    // Outcome of this attempt:
+    //  - "alive" if the sidecar reached a healthy /global/health (fast path)
+    //    or stayed up past earlyDeathWindowMs without dying (slow start —
+    //    usually a SQLite migration; loadingTask will keep waiting on
+    //    health.wait below).
+    //  - "terminated" if the process exited before either of those, which
+    //    is the bind-failure signature we want to retry.
     const death = await new Promise<{ code: number | null; signal: number | null } | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), earlyDeathWindowMs)
+      candidate.health.wait.then(
+        () => {
+          clearTimeout(timer)
+          resolve(null)
+        },
+        () => undefined, // the terminated listener below carries the payload
+      )
       candidate.events.once("terminated", (payload: { code: number | null; signal: number | null }) => {
         clearTimeout(timer)
         resolve(payload)
@@ -283,6 +315,8 @@ async function initialize() {
   }
 
   if (!spawned) {
+    overlay?.close()
+    overlay = null
     logger.error("sidecar failed to start after retries", {
       attempts: maxSpawnAttempts,
       lastCode: lastDeathCode,
@@ -314,16 +348,6 @@ async function initialize() {
 
   const { child, health, events } = spawned
   sidecar = child
-
-  events.on("sqlite", (progress: SqliteMigrationProgress) => {
-    setInitStep({ phase: "sqlite_waiting" })
-    if (overlay) sendSqliteMigrationProgress(overlay, progress)
-    if (mainWindow) sendSqliteMigrationProgress(mainWindow, progress)
-    if (progress.type === "Done") sqliteDone?.resolve()
-  })
-
-  overlay = createLoadingWindow(globals)
-  perf.mark("loading_window_created")
 
   const loadingTask = (async () => {
     logger.log("sidecar connection started", { url })
