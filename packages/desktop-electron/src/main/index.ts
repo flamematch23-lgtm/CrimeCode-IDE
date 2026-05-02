@@ -315,7 +315,7 @@ async function initialize() {
   }
 
   if (!spawned) {
-    overlay?.close()
+    overlay?.destroy()
     overlay = null
     logger.error("sidecar failed to start after retries", {
       attempts: maxSpawnAttempts,
@@ -370,7 +370,8 @@ async function initialize() {
   try {
     await loadingTask
   } catch (error: any) {
-    overlay?.close()
+    overlay?.destroy()
+    overlay = null
     logger.error("sidecar failed to start", { error: error.message, stderr: stderrLines })
     const detail = stderrLines.length
       ? stderrLines.slice(-20).join("\n")
@@ -466,7 +467,20 @@ async function initialize() {
     },
   })
 
-  overlay?.close()
+  // Use destroy() instead of close(): close() requests a graceful shutdown
+  // and on Windows with `frame: false` it sometimes leaves the splash window
+  // visible even after the main window is up. destroy() guarantees the
+  // window is gone synchronously. Wrap in try/catch so a failure here can
+  // never prevent the perf summary or the rest of post-startup wiring.
+  try {
+    if (overlay) {
+      logger.log("destroying loading window")
+      overlay.destroy()
+      overlay = null
+    }
+  } catch (err: any) {
+    logger.error("failed to destroy loading window", { error: err?.message ?? String(err) })
+  }
 
   // Log startup summary
   perf.measure("app ready → port allocated", "app_ready", "port_allocated")
