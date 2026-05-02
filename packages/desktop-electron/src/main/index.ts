@@ -207,10 +207,7 @@ async function initialize() {
   let overlay: BrowserWindow | null = null
 
   perf.mark("init_start")
-  const port = await getSidecarPort()
-  perf.mark("port_allocated")
   const hostname = "127.0.0.1"
-  const url = `http://${hostname}:${port}`
   const password = randomUUID()
 
   const binary = getSidecarPath()
@@ -229,22 +226,94 @@ async function initialize() {
     deepLinks: pendingDeepLinks,
   }
 
-  logger.log("spawning sidecar", { url, binary })
-  perf.mark("sidecar_spawn_start")
-  const { child, health, events } = spawnLocalServer(hostname, port, password)
-  perf.mark("sidecar_spawned")
-  sidecar = child
-
+  // Up to maxSpawnAttempts launches. If the sidecar exits inside
+  // earlyDeathWindowMs the most likely cause is a port-bind failure
+  // (transient race the kernel didn't surface to listen(0), TIME_WAIT
+  // residue, or an antivirus hooking the bind). Reallocate the port and
+  // retry instead of failing the launch.
+  const maxSpawnAttempts = 3
+  const earlyDeathWindowMs = 3000
   const stderrLines: string[] = []
-  events.on("stderr", (line: string) => {
-    stderrLines.push(line.trimEnd())
-    logger.log("sidecar stderr", { line: line.trimEnd() })
-  })
-
-  events.on("error", (msg: string) => {
+  const onStderr = (line: string) => {
+    const trimmed = line.trimEnd()
+    stderrLines.push(trimmed)
+    logger.log("sidecar stderr", { line: trimmed })
+  }
+  const onError = (msg: string) => {
     logger.error("sidecar spawn error", { error: msg, binary })
     stderrLines.push(`[spawn error] ${msg}`)
-  })
+  }
+
+  let port = 0
+  let url = ""
+  let spawned: ReturnType<typeof spawnLocalServer> | null = null
+  let lastDeathCode: number | null = null
+
+  perf.mark("sidecar_spawn_start")
+  for (let attempt = 1; attempt <= maxSpawnAttempts; attempt += 1) {
+    port = await getSidecarPort()
+    url = `http://${hostname}:${port}`
+    if (attempt === 1) perf.mark("port_allocated")
+
+    logger.log("spawning sidecar", { url, binary, attempt, maxSpawnAttempts })
+    const candidate = spawnLocalServer(hostname, port, password)
+    candidate.events.on("stderr", onStderr)
+    candidate.events.on("error", onError)
+
+    const death = await new Promise<{ code: number | null; signal: number | null } | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), earlyDeathWindowMs)
+      candidate.events.once("terminated", (payload: { code: number | null; signal: number | null }) => {
+        clearTimeout(timer)
+        resolve(payload)
+      })
+    })
+
+    if (!death) {
+      spawned = candidate
+      break
+    }
+
+    lastDeathCode = death.code
+    logger.log("sidecar died before becoming healthy — retrying with a fresh port", {
+      port,
+      attempt,
+      code: death.code,
+      signal: death.signal,
+    })
+  }
+
+  if (!spawned) {
+    logger.error("sidecar failed to start after retries", {
+      attempts: maxSpawnAttempts,
+      lastCode: lastDeathCode,
+      stderrTail: stderrLines.slice(-10),
+    })
+    const detail = stderrLines.length
+      ? stderrLines.slice(-20).join("\n")
+      : "No output captured from the sidecar process."
+    const response = await dialog.showMessageBox({
+      type: "error",
+      title: "OpenCode — Server Error",
+      message: "The local server could not be started.",
+      detail: `Sidecar exited before becoming healthy after ${maxSpawnAttempts} attempts (last code=${lastDeathCode}).\n\nSidecar binary: ${binary}\nLast port: ${port}\n\nLast output:\n${detail}`,
+      buttons: ["Retry", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response.response === 0) {
+      logger.log("user chose retry — relaunching")
+      app.relaunch()
+      app.exit(0)
+      return
+    }
+    logger.log("user chose quit")
+    app.exit(1)
+    return
+  }
+  perf.mark("sidecar_spawned")
+
+  const { child, health, events } = spawned
+  sidecar = child
 
   events.on("sqlite", (progress: SqliteMigrationProgress) => {
     setInitStep({ phase: "sqlite_waiting" })
