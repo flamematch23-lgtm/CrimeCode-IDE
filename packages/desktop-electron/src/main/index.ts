@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { existsSync } from "node:fs"
@@ -476,20 +477,69 @@ async function getSidecarPort() {
     if (!Number.isNaN(parsed)) return parsed
   }
 
-  return await new Promise<number>((resolve, reject) => {
-    const server = createServer()
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (typeof address !== "object" || !address) {
-        server.close()
-        reject(new Error("Failed to get port"))
-        return
-      }
-      const port = address.port
-      server.close(() => resolve(port))
+  // On Windows, Hyper-V/winnat reserves chunks of the ephemeral range. The OS
+  // can hand us a port via listen(0) that the spawned sidecar cannot then bind
+  // (Bun fails with "Failed to start server on port X"). Filter against the
+  // kernel's exclusion list and retry until we land outside it.
+  const excluded = process.platform === "win32" ? await getWindowsExcludedPortRanges() : []
+  const isExcluded = (port: number) => excluded.some(([from, to]) => port >= from && port <= to)
+
+  const pickPort = () =>
+    new Promise<number>((resolve, reject) => {
+      const server = createServer()
+      server.on("error", reject)
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address()
+        if (typeof address !== "object" || !address) {
+          server.close()
+          reject(new Error("Failed to get port"))
+          return
+        }
+        const port = address.port
+        server.close(() => resolve(port))
+      })
     })
+
+  const maxAttempts = 20
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const port = await pickPort()
+    if (!isExcluded(port)) return port
+    logger.log("port in Windows exclusion range, retrying", { port, attempt })
+  }
+  throw new Error(`Failed to allocate a non-excluded port after ${maxAttempts} attempts`)
+}
+
+let excludedPortRangesCache: Promise<Array<[number, number]>> | null = null
+
+function getWindowsExcludedPortRanges(): Promise<Array<[number, number]>> {
+  if (excludedPortRangesCache) return excludedPortRangesCache
+  excludedPortRangesCache = new Promise((resolve) => {
+    execFile(
+      "netsh",
+      ["interface", "ipv4", "show", "excludedportrange", "protocol=tcp"],
+      { windowsHide: true, timeout: 3000 },
+      (error, stdout) => {
+        if (error) {
+          logger.log("failed to read Windows excluded port ranges", { error: error.message })
+          resolve([])
+          return
+        }
+        const ranges: Array<[number, number]> = []
+        for (const line of stdout.split(/\r?\n/)) {
+          const match = line.trim().match(/^(\d+)\s+(\d+)\b/)
+          if (!match) continue
+          const from = Number.parseInt(match[1], 10)
+          const to = Number.parseInt(match[2], 10)
+          if (Number.isNaN(from) || Number.isNaN(to)) continue
+          if (from < 1024 || to > 65535 || from > to) continue
+          ranges.push([from, to])
+        }
+        logger.log("Windows excluded port ranges", { count: ranges.length, ranges })
+        resolve(ranges)
+      },
+    )
   })
+  return excludedPortRangesCache
 }
 
 function sqliteFileExists() {
