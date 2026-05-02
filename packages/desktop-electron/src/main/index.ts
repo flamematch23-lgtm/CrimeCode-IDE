@@ -69,6 +69,27 @@ const pendingDeepLinks: string[] = []
 const serverReady = defer<ServerReadyData>()
 const logger = initLogging()
 
+// Surface async failures that would otherwise terminate the main process
+// silently on modern Node (Electron 40 ships Node 22, which throws on
+// unhandled rejections by default). Concrete recent example: a missing
+// icons/icon.ico made createTray() throw inside initialize(); without
+// this handler that rejection propagated up and aborted the rest of
+// post-startup wiring (overlay.destroy(), perf summary, crash dialog
+// listener) without leaving any trace in the log.
+process.on("unhandledRejection", (reason: unknown) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason))
+  logger.error("unhandled rejection in main process", {
+    message: err.message,
+    stack: err.stack,
+  })
+})
+process.on("uncaughtException", (err: Error) => {
+  logger.error("uncaught exception in main process", {
+    message: err.message,
+    stack: err.stack,
+  })
+})
+
 logger.log("app starting", {
   version: app.getVersion(),
   packaged: app.isPackaged,
