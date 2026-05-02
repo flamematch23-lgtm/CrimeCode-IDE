@@ -426,7 +426,13 @@ export function registerIpcHandlers(deps: Deps) {
 
   ipcMain.handle("window-close", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    win?.close()
+    // destroy() instead of close(): the main window is `frame: false` on
+    // Windows and BrowserWindow.close() can leave the window visible on
+    // that path (same quirk that stuck the splash overlay). The app's own
+    // "Quit" path uses app.exit(0) which is even more aggressive, and
+    // there is no beforeunload handler in any renderer of this monorepo,
+    // so the graceful path that close() would protect is unused here.
+    win?.destroy()
   })
 
   ipcMain.handle("window-is-maximized", (event: IpcMainInvokeEvent) => {
