@@ -89,6 +89,49 @@ export namespace Snapshot {
             const args = (cmd: string[]) => ["--git-dir", state.gitdir, "--work-tree", state.worktree, ...cmd]
 
             const lockRe = /index\.lock|cannot lock ref|Unable to create.*\.lock|fatal: Unable to create.*lock/i
+
+            // Windows-reserved file names. Cannot exist as real files on Windows
+            // (they're device names), but the user can accidentally create one
+            // via `cmd > nul` typed in PowerShell or via a script that copies a
+            // "nul" target. When the snapshot system tries to `git add` such a
+            // file, git fails with "error: nul: failed to insert into database"
+            // and the whole add() short-circuits — meaning Snapshot.track()
+            // returns undefined and downstream features (revert, diff,
+            // session entry that auto-tracks) all break. We strip these
+            // entries from the list before they reach `git add`.
+            const WINDOWS_RESERVED_NAMES = new Set([
+              "con",
+              "prn",
+              "aux",
+              "nul",
+              ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+              ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+            ])
+            const isReservedWindowsName = (file: string) => {
+              if (process.platform !== "win32") return false
+              const base = path.basename(file).toLowerCase()
+              const stem = base.includes(".") ? base.slice(0, base.indexOf(".")) : base
+              return WINDOWS_RESERVED_NAMES.has(stem)
+            }
+
+            // Stale-lock auto-cleanup. If the previous sidecar process crashed
+            // mid-write, the snapshot git index.lock survives forever. Without
+            // intervention, EVERY future revert/track/diff hangs for ~60s on
+            // the retry loop and eventually fails — we observed sessions
+            // appearing empty for users because the lock was 9 days old.
+            const STALE_LOCK_AGE_MS = 30_000
+            const tryRemoveStaleLock = Effect.fnUntraced(function* () {
+              const lockPath = path.join(state.gitdir, "index.lock")
+              const stat = yield* fs.stat(lockPath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+              if (!stat) return false
+              const mtime = stat.mtime instanceof Date ? stat.mtime.getTime() : 0
+              const age = Date.now() - mtime
+              if (age < STALE_LOCK_AGE_MS) return false
+              log.warn("removing stale snapshot index.lock", { lockPath, ageMs: age })
+              yield* fs.remove(lockPath).pipe(Effect.catch(() => Effect.void))
+              return true
+            })
+
             const once = Effect.fnUntraced(
               function* (cmd: string[], opts?: { cwd?: string; env?: Record<string, string> }) {
                 const proc = ChildProcess.make("git", cmd, {
@@ -122,6 +165,13 @@ export namespace Snapshot {
                 for (let attempt = 0; attempt < 6; attempt++) {
                   last = yield* once(cmd, opts)
                   if (last.code === 0 || !lockRe.test(last.stderr)) return last
+                  // BUG-FIX (sessione vuota dopo crash sidecar): se il retry
+                  // sta sbattendo contro index.lock, prova a rimuovere il
+                  // lock se è stale (>30s vecchio) prima del prossimo retry.
+                  // Senza questo, un lock orfano da una sessione precedente
+                  // bloccava revert/track/diff per sempre fino a riavvio
+                  // manuale.
+                  yield* tryRemoveStaleLock()
                   const delay = Math.min(100 * 2 ** attempt, 2000) + Math.random() * 50
                   log.warn("git lock contention, retrying", { attempt: attempt + 1, delay, stderr: last.stderr })
                   yield* Effect.sleep(Duration.millis(delay))
@@ -186,7 +236,20 @@ export namespace Snapshot {
               }
 
               const tracked = diff.text.split("\0").filter(Boolean)
-              const all = Array.from(new Set([...tracked, ...other.text.split("\0").filter(Boolean)]))
+              const allRaw = Array.from(new Set([...tracked, ...other.text.split("\0").filter(Boolean)]))
+              // BUG-FIX (snapshot bloccato da nul su Windows): rimuovi i file
+              // con nomi Windows-riservati (nul, con, prn, aux, com1-9, lpt1-9).
+              // git add fallisce con "error: nul: failed to insert into database"
+              // se questi sono presenti, e la fallita di add() rompe tutto il
+              // snapshot pipeline → revert/track/diff falliscono → la UI
+              // mostra schermate vuote o pendenti. Su altre piattaforme
+              // isReservedWindowsName ritorna sempre false, quindi no-op.
+              const all = allRaw.filter((item) => !isReservedWindowsName(item))
+              if (all.length !== allRaw.length) {
+                log.warn("skipping Windows-reserved file names from snapshot", {
+                  skipped: allRaw.filter((item) => isReservedWindowsName(item)),
+                })
+              }
               if (!all.length) return
 
               const large = (yield* Effect.all(
