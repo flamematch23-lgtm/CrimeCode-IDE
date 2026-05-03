@@ -161,12 +161,72 @@ export namespace LLM {
       },
     )
 
-    const maxOutputTokens =
-      isOpenaiOauth || provider.id.includes("github-copilot")
-        ? undefined
-        : ProviderTransform.maxOutputTokens(input.model)
-
     const tools = await resolveTools(input)
+
+    // Dynamically cap maxOutputTokens so that `input + output <= context`.
+    //
+    // Background: many providers (vLLM, OpenAI-compatible gateways) hard-reject
+    // a request when `prompt_tokens + max_output_tokens > context_limit` with
+    // an error like:
+    //   "your prompt contains 81921 input tokens, you requested 16384
+    //    output tokens, total 98305 > context_limit 98304"
+    // This bites on long sessions and especially during compaction, where the
+    // compaction call replays the full conversation plus a summarisation
+    // prompt. Statically returning `model.limit.output` (16384) is not safe
+    // when the prompt itself is already close to the context window.
+    //
+    // We don't have the provider's exact tokenizer, so we use a chars/4
+    // heuristic plus a generous safety margin (4k tokens) to absorb tool
+    // schemas, system prompts, message-envelope overhead, and tokenizer drift.
+    const maxOutputTokens = (() => {
+      if (isOpenaiOauth || provider.id.includes("github-copilot")) return undefined
+      const baseMax = ProviderTransform.maxOutputTokens(input.model)
+      const context = input.model.limit.context
+      if (!context) return baseMax
+
+      let inputChars = 0
+      for (const m of messages) {
+        if (typeof m.content === "string") {
+          inputChars += m.content.length
+        } else if (Array.isArray(m.content)) {
+          for (const p of m.content) {
+            if (p && typeof p === "object" && "text" in p && typeof (p as any).text === "string") {
+              inputChars += (p as any).text.length
+            } else {
+              try {
+                inputChars += JSON.stringify(p).length
+              } catch {}
+            }
+          }
+        }
+      }
+      // Tool schemas (description + JSON schema) are inlined into the model
+      // context by every provider — count them too.
+      for (const t of Object.values(tools)) {
+        if ((t as any).description) inputChars += String((t as any).description).length
+        const schema = (t as any).inputSchema
+        if (schema) {
+          try {
+            inputChars += JSON.stringify(schema).length
+          } catch {}
+        }
+      }
+      const estimatedInput = Math.ceil(inputChars / 4)
+      const safetyMargin = 4_000
+      const available = context - estimatedInput - safetyMargin
+      if (available >= baseMax) return baseMax
+      // Floor at 512: if even 512 tokens don't fit, the call will likely fail
+      // anyway, but at least the provider returns a clear error rather than
+      // silently producing a truncated/empty response.
+      const capped = Math.max(512, available)
+      l.info("maxOutputTokens dynamic cap", {
+        context,
+        estimatedInput,
+        baseMax,
+        capped,
+      })
+      return capped
+    })()
 
     // LiteLLM and some Anthropic proxies require the tools parameter to be present
     // when message history contains tool calls, even if no tools are being used.
