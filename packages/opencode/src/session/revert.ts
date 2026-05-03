@@ -21,11 +21,39 @@ export namespace SessionRevert {
   export type RevertInput = z.infer<typeof RevertInput>
 
   export async function revert(input: RevertInput) {
-    SessionPrompt.assertNotBusy(input.sessionID)
-    const all = await Session.messages({ sessionID: input.sessionID })
-    let lastUser: MessageV2.User | undefined
+    // Defensive: assertNotBusy throws when the assistant is still streaming
+    // — the client SHOULD wait, but the desktop occasionally fires revert
+    // automatically on session-enter and we don't want a 500 to bubble up
+    // and freeze the UI in "loading". Treat busy as "no-op return current session".
+    try {
+      SessionPrompt.assertNotBusy(input.sessionID)
+    } catch (err) {
+      log.warn("revert called while session busy — returning current state", {
+        sessionID: input.sessionID,
+        err: err instanceof Error ? err.message : String(err),
+      })
+      return Session.get(input.sessionID)
+    }
+
+    const all = await Session.messages({ sessionID: input.sessionID }).catch((err) => {
+      log.warn("revert: Session.messages failed, treating as empty", { err: err?.message })
+      return [] as MessageV2.WithParts[]
+    })
     const session = await Session.get(input.sessionID)
 
+    // Empty session, missing messageID, or no messages match → nothing to revert.
+    // Return the current session unchanged (no 500). This is the path the desktop
+    // hits when it auto-reverts on session-enter for a fresh session.
+    if (all.length === 0) return session
+    if (!all.some((msg) => msg.info.id === input.messageID)) {
+      log.info("revert: messageID not in session — no-op", {
+        sessionID: input.sessionID,
+        messageID: input.messageID,
+      })
+      return session
+    }
+
+    let lastUser: MessageV2.User | undefined
     let revert: Session.Info["revert"]
     const patches: Snapshot.Patch[] = []
     for (const msg of all) {
@@ -54,26 +82,39 @@ export namespace SessionRevert {
     }
 
     if (revert) {
-      const session = await Session.get(input.sessionID)
-      revert.snapshot = session.revert?.snapshot ?? (await Snapshot.track())
-      await Snapshot.revert(patches)
-      if (revert.snapshot) revert.diff = await Snapshot.diff(revert.snapshot)
-      const rangeMessages = all.filter((msg) => msg.info.id >= revert!.messageID)
-      const diffs = await SessionSummary.computeDiff({ messages: rangeMessages })
-      await Storage.write(["session_diff", input.sessionID], diffs)
-      Bus.publish(Session.Event.Diff, {
-        sessionID: input.sessionID,
-        diff: diffs,
-      })
-      return Session.setRevert({
-        sessionID: input.sessionID,
-        revert,
-        summary: {
-          additions: diffs.reduce((sum, x) => sum + x.additions, 0),
-          deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
-          files: diffs.length,
-        },
-      })
+      try {
+        const session = await Session.get(input.sessionID)
+        revert.snapshot = session.revert?.snapshot ?? (await Snapshot.track().catch(() => undefined))
+        if (patches.length > 0) await Snapshot.revert(patches).catch((err) => {
+          log.warn("Snapshot.revert failed, skipping", { err: err?.message })
+        })
+        if (revert.snapshot) {
+          revert.diff = await Snapshot.diff(revert.snapshot).catch(() => undefined)
+        }
+        const rangeMessages = all.filter((msg) => msg.info.id >= revert!.messageID)
+        const diffs = await SessionSummary.computeDiff({ messages: rangeMessages }).catch(() => [])
+        await Storage.write(["session_diff", input.sessionID], diffs).catch(() => undefined)
+        Bus.publish(Session.Event.Diff, {
+          sessionID: input.sessionID,
+          diff: diffs,
+        })
+        return Session.setRevert({
+          sessionID: input.sessionID,
+          revert,
+          summary: {
+            additions: diffs.reduce((sum, x) => sum + x.additions, 0),
+            deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
+            files: diffs.length,
+          },
+        })
+      } catch (err) {
+        log.error("revert: snapshot/diff pipeline failed", {
+          sessionID: input.sessionID,
+          err: err instanceof Error ? err.message : String(err),
+        })
+        // Don't 500 — return the current session; the desktop UI stays alive.
+        return session
+      }
     }
     return session
   }

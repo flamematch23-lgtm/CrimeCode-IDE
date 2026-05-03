@@ -6,7 +6,11 @@ import { useCheckServerHealth } from "@/utils/server-health"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
-const HEALTH_POLL_INTERVAL_MS = 10_000
+// Era 10_000. Aumentato a 30s perché un refresh ogni 10s era aggressivo:
+// quando il valore cambia, triggera re-render dell'intera UI che leggeva
+// state.healthy (es. session timeline). 30s è abbastanza per mostrare uno
+// stato "down" entro tempo ragionevole senza spammare re-render.
+const HEALTH_POLL_INTERVAL_MS = 30_000
 
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
@@ -195,6 +199,11 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         void check(conn)
           .then((next) => {
             if (!alive) return
+            // BUG-FIX (refresh 10s scroll reset): no-op se stato invariato.
+            // setState scatena re-render anche se il valore è identico, e
+            // questo faceva rimontare la session timeline ogni 10s perdendo
+            // la posizione di scroll dell'utente.
+            if (state.healthy === next) return
             setState("healthy", next)
           })
           .finally(() => {

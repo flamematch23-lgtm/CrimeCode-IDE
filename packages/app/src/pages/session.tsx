@@ -456,15 +456,16 @@ export default function Page() {
   const messages = createMemo(() => {
     const id = params.id
     if (!id) return []
-    const list = sync.data.message[id] ?? []
-    if (sync.data.message[id] !== undefined && list.length === 0) {
-      console.info("[session.messages] empty list for loaded session", { sessionID: id })
-    }
-    return list
+    return sync.data.message[id] ?? []
   })
   const messagesReady = createMemo(() => {
     const id = params.id
     if (!id) return true
+    // BUG-FIX (schermata vuota): sync.data.message[id] può essere "[]" come
+    // placeholder PRIMA che la fetch sia completata. Trattando questo come
+    // "loaded" la timeline appariva vuota mentre la fetch era ancora in corso.
+    // Aspettiamo esplicitamente che la sync NON sia in flight.
+    if (sync.session.history.loading(id)) return false
     return sync.data.message[id] !== undefined
   })
   const historyMore = createMemo(() => {
