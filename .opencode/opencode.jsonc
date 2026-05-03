@@ -14,8 +14,9 @@
     },
 
     // ────────────────────────────────────────────────────────────────
-    // CrimeCode Cloud — gateway Hetzner con failover Together/Groq.
-    // Richiede CRIMEOPUS_API_KEY env var.
+    // CrimeCode Cloud — gateway Hetzner con failover Together/Groq/RunPod.
+    // Tutti e 9 i modelli del catalog del gateway sono esposti qui.
+    // Set CRIMEOPUS_API_KEY env var to authenticate.
     // ────────────────────────────────────────────────────────────────
     "crimeopus": {
       "name": "CrimeCode Cloud",
@@ -25,8 +26,17 @@
         "apiKey": "{env:CRIMEOPUS_API_KEY}"
       },
       "models": {
+        "crimeopus-default": {
+          "name": "CrimeOpus 4.7 Code Elite — flagship 235B MoE (default)",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 262144, "output": 16384 }
+        },
         "crimeopus-coder": {
-          "name": "CrimeOpus PRO — top brain (coding & reasoning)",
+          "name": "CrimeOpus 4.7 CODER — Qwen3-Coder 480B MoE",
           "type": "chat",
           "tool_call": true,
           "reasoning": false,
@@ -35,13 +45,49 @@
           "limit": { "context": 262144, "output": 16384 }
         },
         "crimeopus-fast": {
-          "name": "CrimeOpus FAST — instant replies (~200ms via Groq)",
+          "name": "CrimeOpus 4.7 FAST — instant replies (~200ms via Groq LPU)",
           "type": "chat",
           "tool_call": true,
           "reasoning": false,
           "attachment": false,
           "temperature": true,
           "limit": { "context": 131072, "output": 8192 }
+        },
+        "crimeopus-think-low": {
+          "name": "CrimeOpus 4.7 Reasoning · Low — gpt-oss-20b",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": true,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 131072, "output": 8192 }
+        },
+        "crimeopus-think-high": {
+          "name": "CrimeOpus 4.7 Reasoning · High — DeepSeek-R1",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": true,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 131072, "output": 16384 }
+        },
+        "crimeopus-research": {
+          "name": "CrimeOpus 4.7 RESEARCH — Kimi-K2.6 long context",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 1048576, "output": 16384 }
+        },
+        "crimeopus-italian": {
+          "name": "CrimeOpus 4.7 Italiano — Qwen3-235B multilingue",
+          "type": "chat",
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "temperature": true,
+          "limit": { "context": 262144, "output": 8192 }
         },
         "crimeopus-agentic": {
           "name": "CrimeOpus AGENTIC FullUncensored — RunPod (Huihui-Qwen3.6-35B)",
