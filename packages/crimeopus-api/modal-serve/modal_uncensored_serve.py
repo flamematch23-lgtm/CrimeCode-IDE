@@ -26,15 +26,27 @@ import modal
 
 # ── Configurazione ──────────────────────────────────────────────────
 APP_NAME = "crimeopus-uncensored-serve"
+# "Ferrari uncensored" finale: DavidAU's Qwen3.6-40B Heretic Deckard.
+#
+# Caratteristiche distintive:
+#  - Dense 40B (no MoE) → più preciso del 35B-A3B su task complessi
+#  - "Heretic" abliteration: tecnica multi-stage post-RLHF, refusal rate ~0%
+#  - Distillato da Claude 4.6 Opus (chain-of-thought ereditato)
+#  - "Thinking" native (reasoning chain interno automatico)
+#  - "Deckard" style: high creativity + reasoning balance
+#
+# Footprint: BF16 ~80 GB pesi + ~15 GB KV cache + ~10 GB CUDA graphs ≈ 105 GB
+# → NON entra in H100 80GB (provato → OOM 372 MiB short).
+# H200 141GB ci sta largo, no quantization runtime → modello BF16 nativo
+# (qualità massima). Costo: $3.95/h H200, idle $0. Free tier $30 ≈ 7-8h GPU.
 HF_MODEL = os.environ.get(
     "HF_MODEL",
-    "sakamakismile/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-NVFP4",
+    "DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking",
 )
-# Lascia vuoto per auto-detect dal model config (compressed-tensors / fp4 / awq).
-# Se vuoi forzare: "compressed-tensors", "awq", "fp4", "gptq", ecc.
+# Empty = BF16 nativo (auto-detect dal config). Niente quant lossy.
 QUANTIZATION = os.environ.get("QUANTIZATION", "")
 SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "crimeopus-agentic")
-GPU_TYPE = os.environ.get("GPU_TYPE", "H100")
+GPU_TYPE = os.environ.get("GPU_TYPE", "H200")
 MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", "32768"))
 IDLE_TIMEOUT = int(os.environ.get("IDLE_TIMEOUT", "300"))
 GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", "0.92"))
@@ -83,7 +95,7 @@ hf_secret = modal.Secret.from_name("huggingface", required_keys=["HF_TOKEN"])
 )
 @modal.concurrent(max_inputs=20)
 class UncensoredVLLM:
-    @modal.web_server(port=VLLM_PORT, startup_timeout=60 * 10)
+    @modal.web_server(port=VLLM_PORT, startup_timeout=60 * 30)
     def serve(self):
         """Spawn vLLM's official OpenAI-compatible API server on VLLM_PORT.
         Modal forwards the port as an HTTPS endpoint and gives back a *.modal.run URL."""
@@ -106,6 +118,15 @@ class UncensoredVLLM:
             # Reasoning parser: Qwen3.x emette <think>...</think> chain-of-thought
             # nativo. Senza questo, il <think> finisce nel content visibile.
             "--reasoning-parser", "qwen3",
+            # Modelli ibridi (Mamba + attention) hanno cache blocks limitati.
+            # max_num_seqs 256 entra largo nei Mamba cache blocks tipici.
+            "--max-num-seqs", "256",
+            # Riduce conflitti tra chunked prefill e mamba state caching.
+            "--no-enable-chunked-prefill",
+            # Skip torch.compile + cudagraph capture (richiede 15+ min su
+            # modelli Mamba ibridi → supera startup_timeout). Inference 30%
+            # più lenta ma boot in ~2 min invece di 15+.
+            "--enforce-eager",
         ]
         if QUANTIZATION:
             cmd.extend(["--quantization", QUANTIZATION])
