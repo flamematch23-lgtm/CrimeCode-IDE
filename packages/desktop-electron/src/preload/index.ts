@@ -113,6 +113,15 @@ const api: ElectronAPI = {
     startBurp: (port: number) => ipcRenderer.invoke("proxy-start-burp", port),
     stopBurp: () => ipcRenderer.invoke("proxy-stop-burp"),
     statusBurp: () => ipcRenderer.invoke("proxy-status-burp"),
+    // System proxy auto-config: setta il proxy Windows così le app respect
+    // il system proxy (Edge, Chrome, Electron, .NET) instradano sul MITM.
+    systemEnable: (port: number) => ipcRenderer.invoke("proxy-system-enable", port),
+    systemDisable: () => ipcRenderer.invoke("proxy-system-disable"),
+    systemStatus: () => ipcRenderer.invoke("proxy-system-status"),
+    // Importa la CA del proxy nello store Trusted Root dell'utente Windows
+    caInstall: () => ipcRenderer.invoke("proxy-ca-install"),
+    // Spara una richiesta GET attraverso il proxy per verificare cattura.
+    testCapture: (port: number) => ipcRenderer.invoke("proxy-test-capture", port),
   },
   teams: {
     list: () => ipcRenderer.invoke("teams-list"),

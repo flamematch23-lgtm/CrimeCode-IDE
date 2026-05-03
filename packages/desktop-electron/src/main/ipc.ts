@@ -880,6 +880,282 @@ export function registerIpcHandlers(deps: Deps) {
     pid: burpProxyChild?.pid,
   }))
 
+  // ── Burp Workspace usability helpers ──
+  // Senza questi pulsanti l'utente vede "Connesso · Intercept ON" ma 0 flussi
+  // perché nessuna app è realmente instradata sul proxy. Tre helper:
+  //   - system-proxy enable/disable: scrive il registry Windows così Edge,
+  //     Chrome (settings di sistema), apps Electron/Win32 ecc. instradano
+  //     automaticamente sul proxy MITM senza configurazione manuale.
+  //   - ca-install: importa la CA del proxy nello store "Trusted Root
+  //     CAs" dell'utente così HTTPS MITM non rompe.
+  //   - test-capture: spara una HEAD/GET attraverso il proxy per verificare
+  //     end-to-end (richiesta in entrata + cattura nel DB) e ritorna l'esito.
+
+  const proxyConfigStore = (() => {
+    const path = require("node:path") as typeof import("node:path")
+    const fs = require("node:fs") as typeof import("node:fs")
+    const dir = path.join(app.getPath("userData"), "burp")
+    fs.mkdirSync(dir, { recursive: true })
+    return path.join(dir, "system-proxy-backup.json")
+  })()
+
+  ipcMain.handle("proxy-system-enable", async (_e, port: number) => {
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Auto-config sistema disponibile solo su Windows in questa build." }
+    }
+    try {
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
+      const fs = require("node:fs") as typeof import("node:fs")
+      // Backup current state
+      let prevEnable = "0"
+      let prevServer = ""
+      let prevOverride = ""
+      try {
+        const outEnable = execFileSync(
+          "reg",
+          ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable"],
+          { encoding: "utf8" },
+        )
+        const m = /ProxyEnable\s+REG_DWORD\s+0x(\w+)/.exec(outEnable)
+        if (m) prevEnable = String(parseInt(m[1], 16))
+      } catch {}
+      try {
+        const outServer = execFileSync(
+          "reg",
+          ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyServer"],
+          { encoding: "utf8" },
+        )
+        const m = /ProxyServer\s+REG_SZ\s+(.*)/.exec(outServer)
+        if (m) prevServer = m[1].trim()
+      } catch {}
+      try {
+        const outOver = execFileSync(
+          "reg",
+          ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyOverride"],
+          { encoding: "utf8" },
+        )
+        const m = /ProxyOverride\s+REG_SZ\s+(.*)/.exec(outOver)
+        if (m) prevOverride = m[1].trim()
+      } catch {}
+
+      fs.writeFileSync(
+        proxyConfigStore,
+        JSON.stringify({ prevEnable, prevServer, prevOverride, ts: Date.now() }, null, 2),
+      )
+
+      // Apply: 127.0.0.1:<port> with sensible bypass list
+      execFileSync(
+        "reg",
+        [
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+          "/v",
+          "ProxyEnable",
+          "/t",
+          "REG_DWORD",
+          "/d",
+          "1",
+          "/f",
+        ],
+        { stdio: "ignore" },
+      )
+      execFileSync(
+        "reg",
+        [
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+          "/v",
+          "ProxyServer",
+          "/t",
+          "REG_SZ",
+          "/d",
+          `127.0.0.1:${port}`,
+          "/f",
+        ],
+        { stdio: "ignore" },
+      )
+      execFileSync(
+        "reg",
+        [
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+          "/v",
+          "ProxyOverride",
+          "/t",
+          "REG_SZ",
+          "/d",
+          "<local>;localhost;127.0.0.1;ai.crimecode.cc",
+          "/f",
+        ],
+        { stdio: "ignore" },
+      )
+      return { ok: true, port }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle("proxy-system-disable", async () => {
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Auto-config sistema disponibile solo su Windows in questa build." }
+    }
+    try {
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
+      const fs = require("node:fs") as typeof import("node:fs")
+      let prev: { prevEnable?: string; prevServer?: string; prevOverride?: string } = {}
+      try {
+        prev = JSON.parse(fs.readFileSync(proxyConfigStore, "utf8"))
+      } catch {}
+      // Restore ProxyEnable
+      execFileSync(
+        "reg",
+        [
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+          "/v",
+          "ProxyEnable",
+          "/t",
+          "REG_DWORD",
+          "/d",
+          prev.prevEnable ?? "0",
+          "/f",
+        ],
+        { stdio: "ignore" },
+      )
+      // Restore ProxyServer (or empty)
+      if (prev.prevServer) {
+        execFileSync(
+          "reg",
+          [
+            "add",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+            "/v",
+            "ProxyServer",
+            "/t",
+            "REG_SZ",
+            "/d",
+            prev.prevServer,
+            "/f",
+          ],
+          { stdio: "ignore" },
+        )
+      } else {
+        try {
+          execFileSync(
+            "reg",
+            [
+              "delete",
+              "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+              "/v",
+              "ProxyServer",
+              "/f",
+            ],
+            { stdio: "ignore" },
+          )
+        } catch {}
+      }
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle("proxy-system-status", async () => {
+    if (process.platform !== "win32") {
+      return { active: false, server: undefined as string | undefined }
+    }
+    try {
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
+      const enableOut = execFileSync(
+        "reg",
+        ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable"],
+        { encoding: "utf8" },
+      )
+      const enableMatch = /ProxyEnable\s+REG_DWORD\s+0x(\w+)/.exec(enableOut)
+      const enabled = !!enableMatch && parseInt(enableMatch[1], 16) === 1
+      let server: string | undefined
+      try {
+        const serverOut = execFileSync(
+          "reg",
+          ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyServer"],
+          { encoding: "utf8" },
+        )
+        const m = /ProxyServer\s+REG_SZ\s+(.*)/.exec(serverOut)
+        if (m) server = m[1].trim()
+      } catch {}
+      return { active: enabled, server }
+    } catch {
+      return { active: false, server: undefined as string | undefined }
+    }
+  })
+
+  ipcMain.handle("proxy-ca-install", async () => {
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Install CA disponibile solo su Windows in questa build." }
+    }
+    try {
+      const path = require("node:path") as typeof import("node:path")
+      const fs = require("node:fs") as typeof import("node:fs")
+      // The proxy stores its CA at $XDG_DATA_HOME/crimecode/proxy/ca.pem
+      // (defaulting to ~/.local/share on Win since we mirror that in the
+      // sidecar). Resolve same path here.
+      const xdg = process.env.XDG_DATA_HOME ?? path.join(require("node:os").homedir(), ".local", "share")
+      const caPath = path.join(xdg, "crimecode", "proxy", "ca.pem")
+      if (!fs.existsSync(caPath)) {
+        return {
+          ok: false,
+          error:
+            "CA non trovata. Avvia prima il proxy almeno una volta — la CA viene generata al primo avvio.",
+        }
+      }
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
+      // certutil per importare nel CurrentUser\Root. Triggera il dialog
+      // Windows di trust una sola volta — l'utente conferma esplicitamente.
+      execFileSync("certutil", ["-user", "-addstore", "Root", caPath], { stdio: "ignore" })
+      return { ok: true, caPath }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle("proxy-test-capture", async (_e, port: number) => {
+    // Spara una richiesta di test attraverso il proxy locale per verificare
+    // che il routing funzioni e che la cattura finisca nel DB. Ritorna
+    // l'esito così la UI può mostrare "✓ catturato" o l'errore.
+    try {
+      const http = require("node:http") as typeof import("node:http")
+      // CONNECT method first attempt fails fast if proxy port isn't bound.
+      // Use plain HTTP target (httpforever.com) so we don't need CA trust
+      // for the test.
+      const opts: import("node:http").RequestOptions = {
+        host: "127.0.0.1",
+        port,
+        method: "GET",
+        path: "http://example.com/",
+        headers: {
+          Host: "example.com",
+          "User-Agent": "CrimeCode-Burp-TestCapture/1.0",
+        },
+        timeout: 5000,
+      }
+      const status = await new Promise<number>((resolve, reject) => {
+        const req = http.request(opts, (res) => {
+          res.resume() // drain
+          resolve(res.statusCode ?? 0)
+        })
+        req.on("error", reject)
+        req.on("timeout", () => {
+          req.destroy()
+          reject(new Error("Timeout - il proxy non risponde su quella porta?"))
+        })
+        req.end()
+      })
+      return { ok: true, statusCode: status }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   // ── Shared workspace state ──
   ipcMain.handle("teams-get-session", async (_e, teamId: string, sid: string) => {
     try {

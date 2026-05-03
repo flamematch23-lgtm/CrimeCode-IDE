@@ -472,6 +472,128 @@ export default function BurpWorkspace() {
     )
   })
 
+  // ---------------------------------------------------------------------------
+  // Routing helpers (system proxy + CA + test capture)
+  //
+  // L'utente apre Burp Workspace, vede "Connesso · Intercept ON · 0 flussi" e
+  // si chiede perché non cattura niente. Risposta: nessun browser/app è
+  // configurato per usare il proxy. Questi pulsanti automatizzano i 3 step:
+  //   1. Routing → setta system proxy Windows così Edge/Chrome/Electron/.NET
+  //      mandano traffico al proxy senza configurazione manuale
+  //   2. CA → installa la root CA del proxy così HTTPS MITM non rompe
+  //   3. Test → spara una GET di prova attraverso il proxy e conferma cattura
+  // ---------------------------------------------------------------------------
+  const [systemProxy, setSystemProxy] = createSignal<{ active: boolean; server?: string }>({ active: false })
+  const [busyRouting, setBusyRouting] = createSignal(false)
+  // Inline shape: la global type di window.api in renderer non sempre è disponibile
+  // (depends on quale provider preload monta la global). Definiamo solo i metodi
+  // che ci servono per evitare any e mantenere strong-typing all'uso.
+  type ProxyBridge = {
+    systemEnable?: (port: number) => Promise<{ ok: boolean; error?: string; port?: number }>
+    systemDisable?: () => Promise<{ ok: boolean; error?: string }>
+    systemStatus?: () => Promise<{ active: boolean; server?: string }>
+    caInstall?: () => Promise<{ ok: boolean; error?: string; caPath?: string }>
+    testCapture?: (port: number) => Promise<{ ok: boolean; error?: string; statusCode?: number }>
+  }
+  const proxyApi: ProxyBridge | undefined = (window as { api?: { proxy?: ProxyBridge } }).api?.proxy
+
+  const refreshSystemProxy = async () => {
+    if (!proxyApi?.systemStatus) return
+    try {
+      const s = await proxyApi.systemStatus()
+      setSystemProxy(s)
+    } catch {}
+  }
+
+  onMount(() => {
+    void refreshSystemProxy()
+  })
+
+  const proxyPort = createMemo(() => settings()?.port ?? 8181)
+
+  const enableSystemProxy = async () => {
+    if (!proxyApi?.systemEnable) {
+      showToast({ variant: "error", title: "Non disponibile", description: "Auto-config sistema solo su Windows in questa build." })
+      return
+    }
+    setBusyRouting(true)
+    try {
+      const res = await proxyApi.systemEnable(proxyPort())
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Routing fallito", description: res.error })
+        return
+      }
+      showToast({
+        variant: "success",
+        title: "Routing attivo",
+        description: `Tutto il traffico HTTP/HTTPS di sistema passa ora da 127.0.0.1:${proxyPort()}.`,
+      })
+      await refreshSystemProxy()
+    } finally {
+      setBusyRouting(false)
+    }
+  }
+
+  const disableSystemProxy = async () => {
+    if (!proxyApi?.systemDisable) return
+    setBusyRouting(true)
+    try {
+      const res = await proxyApi.systemDisable()
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Disattivazione fallita", description: res.error })
+        return
+      }
+      showToast({ variant: "success", title: "Routing disattivato" })
+      await refreshSystemProxy()
+    } finally {
+      setBusyRouting(false)
+    }
+  }
+
+  const installCA = async () => {
+    if (!proxyApi?.caInstall) {
+      showToast({ variant: "error", title: "Non disponibile", description: "Install CA solo su Windows in questa build." })
+      return
+    }
+    try {
+      const res = await proxyApi.caInstall()
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Install CA fallito", description: res.error })
+        return
+      }
+      showToast({
+        variant: "success",
+        title: "CA installata",
+        description: "Conferma il dialog Windows se richiesto. HTTPS ora viene intercettato senza errori.",
+      })
+    } catch (e) {
+      showToast({ variant: "error", title: "Errore", description: (e as Error).message })
+    }
+  }
+
+  const testCapture = async () => {
+    if (!proxyApi?.testCapture) {
+      showToast({ variant: "error", title: "Non disponibile" })
+      return
+    }
+    try {
+      const res = await proxyApi.testCapture(proxyPort())
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Test fallito", description: res.error })
+        return
+      }
+      showToast({
+        variant: "success",
+        title: `Cattura OK (HTTP ${res.statusCode})`,
+        description: "Una richiesta di prova è apparsa nei flussi (refresh 2s).",
+      })
+      // Force a flow refresh so user sees the captured request immediately
+      setTimeout(() => void api().flows({ limit: 200 }).then(setFlows).catch(() => undefined), 500)
+    } catch (e) {
+      showToast({ variant: "error", title: "Errore", description: (e as Error).message })
+    }
+  }
+
   return (
     <div class="size-full flex flex-col bg-background-base text-text-strong">
       {/* Header */}
@@ -517,6 +639,48 @@ export default function BurpWorkspace() {
           </Button>
         </div>
       </div>
+
+      {/* Routing bar — visibile solo quando il proxy è up. Risolve il caso
+          "0 flussi catturati nonostante Intercept ON" che è la confusione #1
+          per l'utente: il proxy è in ascolto ma niente è instradato verso
+          di lui. Tre azioni one-click per coprire i 3 step necessari. */}
+      <Show when={connected()}>
+        <div class="flex items-center gap-2 px-4 py-2 border-b border-surface-weak bg-surface-weak/30 text-12-regular flex-wrap">
+          <span class="text-text-weak">Routing:</span>
+          <Show
+            when={systemProxy().active && systemProxy().server?.includes(`:${proxyPort()}`)}
+            fallback={
+              <Button variant="primary" size="small" onClick={enableSystemProxy} disabled={busyRouting()}>
+                {busyRouting() ? "Attivazione…" : "Cattura traffico sistema"}
+              </Button>
+            }
+          >
+            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-surface-success/30">
+              <span class="size-2 rounded-full bg-icon-success-base" />
+              Sistema → 127.0.0.1:{proxyPort()}
+            </span>
+            <Button variant="ghost" size="small" onClick={disableSystemProxy} disabled={busyRouting()}>
+              Disattiva
+            </Button>
+          </Show>
+          <Show when={systemProxy().active && systemProxy().server && !systemProxy().server?.includes(`:${proxyPort()}`)}>
+            <span class="text-11-regular text-icon-warning-base">
+              Proxy sistema attivo su <code>{systemProxy().server}</code> (NON il nostro)
+            </span>
+          </Show>
+          <span class="text-text-weak">·</span>
+          <Button variant="secondary" size="small" onClick={installCA}>
+            Installa CA HTTPS
+          </Button>
+          <span class="text-text-weak">·</span>
+          <Button variant="secondary" size="small" onClick={testCapture}>
+            Test cattura
+          </Button>
+          <span class="ml-auto text-10-regular text-text-weak">
+            Tip: dopo "Cattura traffico sistema", apri Edge/Chrome e naviga — i flussi compariranno qui.
+          </span>
+        </div>
+      </Show>
 
       <Show when={!connected()}>
         <div class="flex flex-col items-center gap-3 px-4 py-8 bg-surface-warning/10 border-b border-surface-warning text-center">

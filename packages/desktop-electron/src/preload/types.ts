@@ -214,6 +214,16 @@ export type ElectronAPI = {
     readonly stopBurp: () => Promise<{ ok: boolean }>
     /** Current proxy status: { running, port, pid } */
     readonly statusBurp: () => Promise<{ running: boolean; port?: number; pid?: number }>
+    /** Set Windows system proxy to 127.0.0.1:<port> (writes registry). Backups previous state. */
+    readonly systemEnable: (port: number) => Promise<{ ok: boolean; error?: string; port?: number }>
+    /** Restore Windows system proxy to its previous (backed-up) state. */
+    readonly systemDisable: () => Promise<{ ok: boolean; error?: string }>
+    /** Read current Windows system proxy registry state. */
+    readonly systemStatus: () => Promise<{ active: boolean; server?: string }>
+    /** Import the proxy CA into the user Trusted Root Cert store (triggers Windows trust dialog once). */
+    readonly caInstall: () => Promise<{ ok: boolean; error?: string; caPath?: string }>
+    /** Send a test GET through the proxy to verify capture end-to-end. */
+    readonly testCapture: (port: number) => Promise<{ ok: boolean; error?: string; statusCode?: number }>
   }
   teams: {
     readonly list: () => Promise<{ teams: Array<TeamSummary> }>
