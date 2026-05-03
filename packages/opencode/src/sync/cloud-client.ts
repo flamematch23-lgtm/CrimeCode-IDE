@@ -60,6 +60,17 @@ const POLL_INTERVAL_MS = 60_000
 const PUSH_BATCH_SIZE = 200
 
 export namespace CloudClient {
+  /**
+   * Cloud rejected our Bearer token. Distinguished from generic network /
+   * server errors so syncOnce() can wipe the dead config and surface a
+   * "please sign in again" message instead of leaving the user staring
+   * at "pull HTTP 401: Unauthorized" forever (the previous behaviour: the
+   * token in cloud-sync.json was kept, every retry returned the same 401).
+   */
+  class AuthError extends Error {
+    readonly authFailed = true as const
+  }
+
   type Config = { api: string; token: string }
   type Status = {
     configured: boolean
@@ -174,6 +185,16 @@ export namespace CloudClient {
       status.lastError = null
       return { ok: true, pushed, pulled }
     } catch (err) {
+      if (err instanceof AuthError) {
+        // Cloud rejected our token. Clear local config so we don't keep
+        // hammering with a dead Bearer; the renderer's "Sign in again"
+        // path is the user's recovery — see Account page sync stats.
+        log.warn("cloud rejected token; clearing local sync config", { error: err.message })
+        reset()
+        const friendly = "your cloud session is invalid — please sign in again"
+        status.lastError = friendly
+        return { ok: false, pushed, pulled, error: friendly }
+      }
       const msg = err instanceof Error ? err.message : String(err)
       status.lastError = msg
       log.error("sync round-trip failed", { error: msg })
@@ -186,6 +207,15 @@ export namespace CloudClient {
     if (pushDebounce) clearTimeout(pushDebounce)
     pushDebounce = setTimeout(() => {
       pushPending().catch((err) => {
+        if (err instanceof AuthError) {
+          // Same auto-reset as syncOnce — a bus-triggered push that 401s
+          // must not silently leave a dead token in place for the next
+          // round-trip.
+          log.warn("debounced push got 401; clearing local sync config", { error: err.message })
+          reset()
+          status.lastError = "your cloud session is invalid — please sign in again"
+          return
+        }
         const msg = err instanceof Error ? err.message : String(err)
         status.lastError = msg
         log.error("debounced push failed", { error: msg })
@@ -222,7 +252,9 @@ export namespace CloudClient {
         body: JSON.stringify({ events: wire }),
       })
       if (!res.ok) {
-        throw new Error(`push HTTP ${res.status}: ${await res.text().catch(() => "")}`)
+        const body = await res.text().catch(() => "")
+        if (res.status === 401) throw new AuthError(`push HTTP 401: ${body}`)
+        throw new Error(`push HTTP ${res.status}: ${body}`)
       }
 
       const newCursor = batch[batch.length - 1].id
@@ -246,7 +278,9 @@ export namespace CloudClient {
         headers: { Authorization: `Bearer ${config.token}` },
       })
       if (!res.ok) {
-        throw new Error(`pull HTTP ${res.status}: ${await res.text().catch(() => "")}`)
+        const body = await res.text().catch(() => "")
+        if (res.status === 401) throw new AuthError(`pull HTTP 401: ${body}`)
+        throw new Error(`pull HTTP ${res.status}: ${body}`)
       }
       const body = (await res.json()) as {
         events: Array<{ id: string; aggregateID: string; seq: number; type: string; data: Record<string, unknown> }>
