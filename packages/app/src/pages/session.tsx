@@ -487,8 +487,18 @@ export default function Page() {
   const visibleUserMessages = createMemo(
     () => {
       const revert = revertMessageID()
-      if (!revert) return userMessages()
-      return userMessages().filter((m) => m.id < revert)
+      const all = userMessages()
+      if (!revert) return all
+      const filtered = all.filter((m) => m.id < revert)
+      // BUG-FIX (sessione vuota inspiegabile): se il revert filtra TUTTI i
+      // messaggi utente ma ne esistono, è quasi certamente uno stato di revert
+      // stale o malformato (es: revert.messageID puntava al primissimo
+      // messaggio per via di un bug pre-v2.29.6). Senza questo guard l'utente
+      // vedeva la chat vuota senza alcun indizio del perché. Mostriamo tutti i
+      // messaggi così la conversazione torna visibile; l'utente può sempre
+      // ri-revertere se davvero lo voleva.
+      if (filtered.length === 0 && all.length > 0) return all
+      return filtered
     },
     emptyUserMessages,
     {
@@ -731,15 +741,43 @@ export default function Page() {
       refreshDebounceTimer = undefined
       if (!id) return
 
+      // BUG-FIX (sessione vuota dopo click progetto/entry): se la cache è
+      // un array vuoto, lancia subito una force-sync (senza aspettare i 500ms
+      // di debounce di doRefresh) così la flag `loading` diventa true e
+      // `messagesReady` ritorna false → mostra "Loading..." invece di un
+      // timeline silenziosamente vuoto. Senza questo, l'utente vedeva la
+      // chat vuota per 500ms-2s prima che il refresh la riempisse, oppure
+      // mai (se la prefetch entry era ancora "fresca" e quindi non stale).
+      untrack(() => {
+        const m = sync.data.message[id]
+        if (m !== undefined && m.length === 0) {
+          void sync.session.sync(id, { force: true })
+        }
+      })
+
       const doRefresh = () => {
         const cached = untrack(() => sync.data.message[id] !== undefined)
-        const stale = !cached
-          ? false
-          : (() => {
-              const info = getSessionPrefetch(sdk.directory, id)
-              if (!info) return true
-              return Date.now() - info.at > SESSION_PREFETCH_TTL
-            })()
+        // BUG-FIX (sessione vuota su click progetto): se la cache è "[]"
+        // (array vuoto, non undefined), trattala come stale e forza re-sync.
+        // Questo si verifica quando una fetch precedente ha restituito 0
+        // messaggi (rete instabile, race condition, oppure il backend ha
+        // cancellato la sessione e l'ha ri-creata) e l'entry di prefetch è
+        // ancora "fresca" (< 60s), quindi il check di staleness normale non
+        // scatta. Senza questo guard, il timeline resta vuoto fino al
+        // prossimo TTL.
+        const cachedEmpty = untrack(() => {
+          const m = sync.data.message[id]
+          return m !== undefined && m.length === 0
+        })
+        const stale = cachedEmpty
+          ? true
+          : !cached
+            ? false
+            : (() => {
+                const info = getSessionPrefetch(sdk.directory, id)
+                if (!info) return true
+                return Date.now() - info.at > SESSION_PREFETCH_TTL
+              })()
         const todos = untrack(() => sync.data.todo[id] !== undefined || globalSync.data.session_todo[id] !== undefined)
         untrack(() => {
           void sync.session.sync(id)
