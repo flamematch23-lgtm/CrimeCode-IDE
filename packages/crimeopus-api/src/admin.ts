@@ -21,7 +21,7 @@ import { getDb } from "./db.ts"
 import { signJwt } from "./auth.ts"
 import { listWebhooks, createWebhook, deleteWebhook, toggleWebhook, recentDeliveries } from "./webhooks.ts"
 import { resetCurrentPeriod, getQuotaStatus } from "./quota.ts"
-import { getProviderStats } from "./upstream.ts"
+import { getProviderStats, resetInflight } from "./upstream.ts"
 
 export function adminRouter() {
   const r = new Hono()
@@ -98,6 +98,18 @@ export function adminRouter() {
 
   // Provider pool stats — visibile in dashboard come la card "Backends"
   r.get("/api/providers", (c) => c.json(getProviderStats()))
+
+  // Operator escape hatch for leaked in-flight slots: when an upstream
+  // hangs and we never managed to release the reservation (now far rarer
+  // thanks to the fetch timeout, but still possible if e.g. the gateway
+  // is killed -9 mid-stream), every subsequent request from that key
+  // sees `per_key_concurrency_exceeded`. Calling this with no body wipes
+  // all keys; with `{ keyLabel: "..." }` wipes just one.
+  r.post("/api/reset-inflight", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { keyLabel?: string }
+    const result = resetInflight(typeof body.keyLabel === "string" ? body.keyLabel : undefined)
+    return c.json(result)
+  })
 
   // Keys CRUD
   r.get("/api/keys", (c) => {

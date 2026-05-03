@@ -77,7 +77,13 @@ export interface CatalogEntry {
 const RAW_PROVIDERS = process.env.UPSTREAM_PROVIDERS ?? ""
 const QUEUE_TIMEOUT_MS = Number(process.env.QUEUE_TIMEOUT_MS ?? 30_000)
 const QUEUE_MAX = Number(process.env.QUEUE_MAX ?? 50)
-const PER_KEY_CONCURRENCY = Number(process.env.PER_KEY_CONCURRENCY ?? 2)
+// Default raised from 2 → 8 because agentic models routinely fan out
+// 2-4 calls in parallel from a single chat (main turn + title generation
+// + tool calls + sub-agent tasks). 2 was hit immediately by anyone using
+// CrimeOpus AGENTIC and it surfaced in the UI as endless 429 retry loops
+// ("nuovo tentativo tra 29s — tentativo #5"). Operators can still pin
+// a tighter cap with PER_KEY_CONCURRENCY=N for shared deployments.
+const PER_KEY_CONCURRENCY = Number(process.env.PER_KEY_CONCURRENCY ?? 8)
 
 export const providers: Provider[] = (() => {
   if (!RAW_PROVIDERS) {
@@ -399,6 +405,48 @@ export function getProviderStats() {
     perKeyInflight: Object.fromEntries(perKeyInflight),
     catalog: catalog.size,
   }
+}
+
+/**
+ * Manually clear leaked in-flight counters. The slot bookkeeping is in-
+ * memory and gets out of sync only when both (1) the upstream fetch
+ * hangs without ever resolving and (2) the request handler is killed
+ * mid-flight (process restart of just the request, not the whole gateway).
+ * The fetch timeout fix covers the common case; this is the operator
+ * escape hatch for everything else, called from /admin/api/reset-inflight.
+ *
+ * - `keyLabel` undefined → wipe every key
+ * - `keyLabel` set       → wipe just that one
+ * Returns the number of cleared entries plus the per-provider inflight
+ * deltas so /admin can report what it actually did.
+ */
+export function resetInflight(keyLabel?: string): {
+  clearedKeys: string[]
+  providerDeltas: Array<{ id: string; before: number; after: number }>
+} {
+  const clearedKeys: string[] = []
+  if (keyLabel) {
+    if (perKeyInflight.has(keyLabel)) {
+      perKeyInflight.delete(keyLabel)
+      clearedKeys.push(keyLabel)
+    }
+  } else {
+    for (const k of perKeyInflight.keys()) clearedKeys.push(k)
+    perKeyInflight.clear()
+  }
+  // Provider inflight is harder: we can't tell which slot belonged to
+  // which key without tracking it explicitly. Best effort: when wiping
+  // ALL keys, also zero out provider counters, since "every key zero"
+  // is the only state where "every provider zero" is consistent.
+  const providerDeltas: Array<{ id: string; before: number; after: number }> = []
+  if (!keyLabel) {
+    for (const p of providers) {
+      const before = p.inflight
+      p.inflight = 0
+      providerDeltas.push({ id: p.id, before, after: 0 })
+    }
+  }
+  return { clearedKeys, providerDeltas }
 }
 
 export function listPublicModels(): Array<{ id: string; display: string; description?: string; hidden?: boolean }> {

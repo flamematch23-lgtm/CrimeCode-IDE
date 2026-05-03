@@ -56,6 +56,14 @@ const ALLOW_ANON = process.env.ALLOW_ANON === "1"
 const RATE_LIMIT_RPM = Number(process.env.RATE_LIMIT_RPM ?? 60)
 const RATE_LIMIT_BURST = Number(process.env.RATE_LIMIT_BURST ?? 10)
 const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? "*").split(",").map((s) => s.trim())
+// Hard ceiling for a single upstream chat/embed call — without this, a
+// hung provider (RunPod cold start that never finishes loading a 35B
+// model, network blip, etc.) keeps the slot reserved indefinitely and
+// every subsequent request from that key gets `per_key_concurrency_
+// exceeded` until the gateway is restarted. 5 minutes is generous enough
+// for legitimate cold starts but short enough that a real hang recovers
+// on its own.
+const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS ?? 5 * 60_000)
 
 // Boot: open the DB so the schema is in place, then sync env keys
 // and start the upstream health-check loop.
@@ -340,6 +348,9 @@ app.post("/v1/chat/completions", async (c) => {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(upstreamBody),
+      // Bounded timeout so the slot can never leak forever — see
+      // UPSTREAM_TIMEOUT_MS comment near the top of this file.
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     })
   } catch (e) {
     release()
@@ -491,6 +502,7 @@ app.post("/v1/embeddings", async (c) => {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify({ model: slot.upstreamModel, input: body.input }),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     })
     if (!r.ok) {
       const t = await r.text().catch(() => "")
