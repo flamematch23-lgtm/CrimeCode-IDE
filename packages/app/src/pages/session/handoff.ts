@@ -1,8 +1,16 @@
 import type { SelectedLineRange } from "@/context/file"
+import type { Prompt } from "@/context/prompt"
 
 type HandoffSession = {
   prompt: string
   files: Record<string, SelectedLineRange | null>
+  /**
+   * Prompt parts to apply to the composer the first time it becomes ready.
+   * Consumed (set back to undefined) by the composer after applying — so
+   * deep-links like Burp Workspace can pre-fill `@pentester` + a body
+   * without overwriting whatever the user is currently typing on revisits.
+   */
+  pendingPrompt?: Prompt
 }
 
 const MAX = 40

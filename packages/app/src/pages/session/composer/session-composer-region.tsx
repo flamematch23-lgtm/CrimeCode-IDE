@@ -60,6 +60,21 @@ export function SessionComposerRegion(props: {
       .join("")
       .trim()
 
+  // Consume any pending prompt from a deep-link (e.g. Burp Workspace's
+  // "Apri composer agente" / quick actions). One-shot: apply once the
+  // composer is ready and clear the field, so revisits don't overwrite
+  // whatever the user has typed in the meantime.
+  let pendingPromptApplied = false
+  createEffect(() => {
+    if (!prompt.ready()) return
+    if (pendingPromptApplied) return
+    const pending = getSessionHandoff(route.sessionKey())?.pendingPrompt
+    if (!pending || pending.length === 0) return
+    pendingPromptApplied = true
+    prompt.set(pending)
+    setSessionHandoff(route.sessionKey(), { pendingPrompt: undefined })
+  })
+
   createEffect(() => {
     if (!prompt.ready()) return
     setSessionHandoff(route.sessionKey(), { prompt: previewPrompt() })

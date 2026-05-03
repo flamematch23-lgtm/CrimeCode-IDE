@@ -5,6 +5,10 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
+import { base64Encode } from "@opencode-ai/util/encode"
+import type { Prompt } from "@/context/prompt"
+import { useGlobalSync } from "@/context/global-sync"
+import { setSessionHandoff } from "@/pages/session/handoff"
 
 /**
  * Burp Workspace — interactive UI on top of the local Burp-style toolkit.
@@ -166,8 +170,49 @@ interface QuickAction {
 
 export default function BurpWorkspace() {
   const navigate = useNavigate()
+  const sync = useGlobalSync()
   const [apiBase, setApiBase] = createSignal(localStorage.getItem("burp.apiBase") ?? "http://127.0.0.1:8182")
   const api = createMemo(() => makeApi(apiBase()))
+
+  /**
+   * Build the canonical "@pentester <text>" prompt parts and pre-fill them
+   * into the most-recent project's composer. Returns false when the user
+   * has no project open yet — caller decides what to show in that case.
+   *
+   * The pentester agent is the one that has `burp_toolkit: "allow"` in its
+   * permission set (see opencode/src/agent/agent.ts), so the prompts the
+   * Burp Workspace generates only work end-to-end with that agent. Pre-
+   * selecting it removes a step from the user flow.
+   */
+  const dispatchToAgent = (text: string): boolean => {
+    const project = sync.data.project
+      .slice()
+      .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))[0]
+    if (!project) {
+      showToast({
+        variant: "error",
+        title: "Nessun progetto aperto",
+        description: "Apri un progetto dalla home per usare l'agente pentester.",
+      })
+      return false
+    }
+    const trimmed = text.trim()
+    const agentMention = "@pentester"
+    const body = trimmed ? ` ${trimmed}` : ""
+    const parts: Prompt = [
+      { type: "agent", name: "pentester", content: agentMention, start: 0, end: agentMention.length },
+      {
+        type: "text",
+        content: body,
+        start: agentMention.length,
+        end: agentMention.length + body.length,
+      },
+    ]
+    const dirSlug = base64Encode(project.worktree)
+    setSessionHandoff(dirSlug, { pendingPrompt: parts })
+    navigate(`/${dirSlug}/session`)
+    return true
+  }
 
   const [panel, setPanel] = createSignal<Panel>("flows")
   const [filter, setFilter] = createSignal("")
@@ -570,7 +615,10 @@ export default function BurpWorkspace() {
               flows={flows()}
               pending={pending()}
               api={api}
-              onNavigateToAgent={() => navigate("/")}
+              onSendToAgent={dispatchToAgent}
+              onNavigateToAgent={() => {
+                if (!dispatchToAgent("")) navigate("/")
+              }}
             />
           </Match>
         </Switch>
@@ -1110,6 +1158,13 @@ function AgentPanel(props: {
   flows: FlowSummary[]
   pending: PendingItem[]
   api: () => ReturnType<typeof makeApi>
+  /**
+   * Send an already-built prompt straight into the pentester composer of the
+   * most-recent project. Returns true when a project was found and we
+   * navigated; false when no project is open (caller may want to fall back
+   * to a "copy to clipboard" flow).
+   */
+  onSendToAgent: (text: string) => boolean
   onNavigateToAgent: () => void
 }) {
   const [intent, setIntent] = createSignal("Analizza questo flusso, evidenzia anomalie e suggerisci attacchi pertinenti.")
@@ -1125,6 +1180,21 @@ function AgentPanel(props: {
     setCopied(true)
     flashTimer = setTimeout(() => setCopied(false), 2000)
     showToast({ variant: "success", title: label })
+  }
+
+  /**
+   * Try to push the prompt straight into the pentester composer; if that
+   * fails (no project open) fall back to copying it for the user to paste
+   * manually. The preview pane is always populated either way so the user
+   * can review what was sent.
+   */
+  const dispatchOrCopy = (text: string, copyLabel: string) => {
+    setSnippet(text)
+    if (props.onSendToAgent(text)) {
+      showToast({ variant: "success", title: "Aperto il composer pentester con il prompt pronto" })
+    } else {
+      copyAndFlash(text, copyLabel)
+    }
   }
 
   const buildPrompt = async () => {
@@ -1168,8 +1238,7 @@ function AgentPanel(props: {
         `- collaborator: token OOB per SSRF / XXE / blind XSS`,
         `- comparer: diff due response → { subtool: "comparer", args: ["from-flows", "${f.id}", "<other_id>"] }`,
       ].join("\n")
-      setSnippet(prompt)
-      copyAndFlash(prompt, "Prompt copiato negli appunti")
+      dispatchOrCopy(prompt, "Prompt copiato negli appunti")
     } catch (e) {
       showToast({ variant: "error", title: "Errore generazione prompt", description: (e as Error).message })
     }
@@ -1198,8 +1267,7 @@ function AgentPanel(props: {
       ``,
       `Analizza la richiesta, identifica eventuali parametri interessanti per il testing, e suggerisci se/come modificarla.`,
     ].join("\n")
-    setSnippet(prompt)
-    copyAndFlash(prompt, "Prompt intercept copiato")
+    dispatchOrCopy(prompt, "Prompt intercept copiato")
   }
 
   const selectedFlowHost = createMemo(() => {
@@ -1336,7 +1404,7 @@ function AgentPanel(props: {
                       showToast({ variant: "error", title: "Seleziona prima un flusso nella tab Flussi" })
                       return
                     }
-                    copyAndFlash(qa.prompt, `"${qa.label}" copiato`)
+                    dispatchOrCopy(qa.prompt, `"${qa.label}" copiato`)
                   }}
                   class="w-full text-left p-3 rounded-lg hover:bg-surface-raised-base-hover transition-colors group"
                   classList={{
