@@ -5,6 +5,7 @@ import { existsSync, mkdirSync } from "fs"
 import { join } from "path"
 import { randomUUID } from "crypto"
 import { homedir } from "os"
+import { Automation } from "../automation"
 
 const DESCRIPTION = "Take screenshots of the entire screen or a specific region"
 
@@ -32,6 +33,18 @@ export const ScreenshotTool = Tool.define("screenshot", {
       .describe("Region to capture (for region action)"),
   }),
   async execute(params) {
+    // Capturing the screen is the canonical computer-use capability. Refuse
+    // to run when the master toggle in Settings → Automation is off, so an
+    // agent can't quietly take screenshots without the user opting in.
+    if (!Automation.computerUseEnabled()) {
+      return {
+        title: "Screenshot",
+        output:
+          "Computer use is disabled. Enable “Uso del computer (Beta)” in Settings → Automation to allow this tool.",
+        metadata: { action: "screenshot", type: params.action, result: "disabled", screenshotPath: "" },
+      }
+    }
+
     const isWin = process.platform === "win32"
     const tmpDir = getScreenshotDir()
     const filename = `screenshot_${randomUUID()}.png`

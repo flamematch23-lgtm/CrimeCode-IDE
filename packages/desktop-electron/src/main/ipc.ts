@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process"
-import { mkdirSync, statSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { dirname, join as joinPath } from "node:path"
 import { BrowserWindow, Menu, Notification, app, clipboard, desktopCapturer, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 
@@ -339,6 +339,12 @@ export function registerIpcHandlers(deps: Deps) {
   // The renderer's settings page reads/writes through this small surface.
   // Persistence is handled here (electron-store) so the toggles survive
   // across reboots; the runtime services keep their own in-memory flags.
+  //
+  // The same values are mirrored to a small JSON file at
+  // `{userData}/openworm/automation.json` because the opencode sidecar
+  // (separate process) reads them from disk via `Automation.read()` to
+  // gate browser/screenshot tools. Without this mirror, flipping a toggle
+  // in the UI would never reach the agent runtime.
   // ─────────────────────────────────────────────────────────────────────
   const AUTOMATION_KEYS = {
     browserAllowAll: "automation.browserAllowAll",
@@ -346,8 +352,50 @@ export function registerIpcHandlers(deps: Deps) {
     restoreApps: "automation.restoreAppsOnExit",
   } as const
 
+  type AutomationFileState = {
+    browserAllowAll: boolean
+    computerUseEnabled: boolean
+    restoreAppsOnExit: boolean
+  }
+
+  const automationStatePath = () =>
+    joinPath(app.getPath("userData"), "openworm", "automation.json")
+
+  function readAutomationFile(): Partial<AutomationFileState> {
+    try {
+      const buf = readFileSync(automationStatePath(), "utf8")
+      const parsed = JSON.parse(buf)
+      if (parsed && typeof parsed === "object") return parsed
+    } catch {
+      /* missing file is fine — first launch */
+    }
+    return {}
+  }
+
+  function writeAutomationFile(patch: Partial<AutomationFileState>) {
+    const path = automationStatePath()
+    try {
+      mkdirSync(dirname(path), { recursive: true })
+      const merged: AutomationFileState = {
+        browserAllowAll: false,
+        computerUseEnabled: false,
+        restoreAppsOnExit: true,
+        ...readAutomationFile(),
+        ...patch,
+      }
+      writeFileSync(path, JSON.stringify(merged, null, 2), "utf8")
+    } catch (err) {
+      // Failing to mirror to disk shouldn't break the UI toggle. The next
+      // change will retry, and the in-memory service state is still correct
+      // for whatever runs in this process.
+      console.warn("[automation] failed to write state file", err)
+    }
+  }
+
   // Hydrate the runtime services from persisted values on startup so the
   // first read returns the user's last choice — not the constructor default.
+  // The state file is also written so a freshly-spawned sidecar sees the
+  // same values without having to wait for the user to toggle anything.
   try {
     const settings = getStore()
     const persistedAllowAll = settings.get(AUTOMATION_KEYS.browserAllowAll)
@@ -355,10 +403,16 @@ export function registerIpcHandlers(deps: Deps) {
 
     const persistedRestore = settings.get(AUTOMATION_KEYS.restoreApps)
     // default to true if the key has never been set
-    appsRestoreService.setEnabled(persistedRestore === false ? false : true)
+    const restoreEnabled = persistedRestore === false ? false : true
+    appsRestoreService.setEnabled(restoreEnabled)
 
     // computer-use is intentionally NOT auto-activated — re-asking the user
     // every session is a deliberate safety choice for an experimental feature
+    writeAutomationFile({
+      browserAllowAll: persistedAllowAll === true,
+      computerUseEnabled: false,
+      restoreAppsOnExit: restoreEnabled,
+    })
   } catch {
     /* electron-store unavailable in tests */
   }
@@ -374,6 +428,8 @@ export function registerIpcHandlers(deps: Deps) {
     } catch {
       /* ignore — runtime flag is still applied for this session */
     }
+    writeAutomationFile({ browserAllowAll: v })
+    return v
   })
 
   ipcMain.handle("automation-list-connected-browsers", async () => {
@@ -392,6 +448,7 @@ export function registerIpcHandlers(deps: Deps) {
     } catch {
       /* ignore */
     }
+    writeAutomationFile({ computerUseEnabled: status.enabled })
     return status
   })
 
@@ -405,6 +462,7 @@ export function registerIpcHandlers(deps: Deps) {
     } catch {
       /* ignore */
     }
+    writeAutomationFile({ restoreAppsOnExit: status.enabled })
     return status
   })
 

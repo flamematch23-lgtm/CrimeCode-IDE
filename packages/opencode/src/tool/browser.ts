@@ -5,6 +5,7 @@ import { join } from "path"
 import { randomUUID } from "crypto"
 import { homedir } from "os"
 import DESCRIPTION from "./browser.txt"
+import { Automation } from "../automation"
 
 let browserInstance: { browser: any; page: any } | null = null
 
@@ -58,9 +59,24 @@ export const BrowserTool = Tool.define("browser", async () => {
         .describe("Action to perform"),
       timeout: z.number().optional().describe("Timeout in milliseconds (default: 15000)"),
     }),
-    async execute(params): Promise<BrowserResult> {
+    async execute(params, ctx): Promise<BrowserResult> {
       const timeout = params.timeout ?? 15000
       const action = params.action ?? "navigate"
+
+      // Honour the desktop "Automation → Consenti tutte le azioni del browser"
+      // toggle. When OFF, ask the user per-action — same gate the rest of
+      // opencode uses for sensitive tools. The "always" pattern is `*` so
+      // approving once whitelists every subsequent browser call in this
+      // session, mirroring the global toggle.
+      if (!Automation.browserAllowAll()) {
+        const targetUrl = action === "navigate" ? params.url : undefined
+        await ctx.ask({
+          permission: "browser",
+          patterns: [action],
+          metadata: { action, url: targetUrl },
+          always: ["*"],
+        })
+      }
 
       if (action === "close") {
         await closeBrowser()
