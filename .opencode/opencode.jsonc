@@ -90,7 +90,7 @@
           "limit": { "context": 262144, "output": 8192 }
         },
         "crimeopus-agentic": {
-          "name": "CrimeOpus AGENTIC FullUncensored — RunPod (Huihui-Qwen3.6-35B)",
+          "name": "CrimeOpus AGENTIC — Qwen3-235B tool calling (RunPod uncensored offline)",
           "type": "chat",
           "tool_call": true,
           "reasoning": true,
