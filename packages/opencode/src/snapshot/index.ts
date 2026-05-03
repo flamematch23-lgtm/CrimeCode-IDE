@@ -159,22 +159,36 @@ export namespace Snapshot {
                 }),
               ),
             )
+            // PERF (2.30.0): retry budget ridotto 6→3 con backoff più aggressivo.
+            // Prima ogni git call su lock contention bruciava ~5s (100+200+400+
+            // 800+1600+~2000 = 5100ms) prima di rendersi conto che il lock era
+            // stale. Su un singolo Snapshot.track() con 3 git call (init/add/
+            // write-tree) si arrivava a 15s di blocco. Con 3 retry e backoff
+            // 100/200/400 il caso peggiore è ~700ms. Lo stale-lock cleanup ora
+            // gira al primo retry, quindi normalmente basta 1 retry.
+            const MAX_GIT_RETRIES = 3
             const git = (cmd: string[], opts?: { cwd?: string; env?: Record<string, string> }) =>
               Effect.gen(function* () {
                 let last: GitResult = { code: ChildProcessSpawner.ExitCode(1), text: "", stderr: "" }
-                for (let attempt = 0; attempt < 6; attempt++) {
+                for (let attempt = 0; attempt < MAX_GIT_RETRIES; attempt++) {
                   last = yield* once(cmd, opts)
                   if (last.code === 0 || !lockRe.test(last.stderr)) return last
-                  // BUG-FIX (sessione vuota dopo crash sidecar): se il retry
-                  // sta sbattendo contro index.lock, prova a rimuovere il
-                  // lock se è stale (>30s vecchio) prima del prossimo retry.
-                  // Senza questo, un lock orfano da una sessione precedente
-                  // bloccava revert/track/diff per sempre fino a riavvio
-                  // manuale.
+                  // Self-healing per lock orfano: se vecchio >30s, rimuovi.
                   yield* tryRemoveStaleLock()
-                  const delay = Math.min(100 * 2 ** attempt, 2000) + Math.random() * 50
-                  log.warn("git lock contention, retrying", { attempt: attempt + 1, delay, stderr: last.stderr })
+                  const delay = Math.min(100 * 2 ** attempt, 800) + Math.random() * 50
+                  // Solo l'ultima failure logga a WARN — i retry intermedi sono
+                  // rumore (con il lock self-heal il retry di solito basta).
+                  // Prima ogni retry generava 6 lines di log per ogni git call,
+                  // riempiendo il main.log a 1000+ linee/giorno solo di "git
+                  // lock contention". Ora restano silenziosi a meno che
+                  // davvero falliamo dopo MAX_GIT_RETRIES.
                   yield* Effect.sleep(Duration.millis(delay))
+                }
+                if (lockRe.test(last.stderr)) {
+                  log.warn("git lock contention exhausted retries", {
+                    attempts: MAX_GIT_RETRIES,
+                    stderr: last.stderr,
+                  })
                 }
                 return last
               })
@@ -295,7 +309,26 @@ export namespace Snapshot {
               )
             })
 
+            // PERF (2.30.0): circuit breaker. Snapshot.track() viene chiamato
+            // su OGNI revert e su OGNI inizio turno assistant. Quando fallisce
+            // (lock contention, file system slow, antivirus, etc) il pipeline
+            // chiamante perde tempo a fare retry/wait → la UI sembra freezata.
+            // Se il track è appena fallito, salta i prossimi N secondi e
+            // ritorna undefined immediatamente. Il caller (revert.ts e
+            // session/index.ts) tratta undefined come "no snapshot disponibile",
+            // che è già un caso supportato (è la stessa cosa che succede in
+            // sessioni nuove dove non c'è ancora niente da trackare). Quando
+            // il backoff scade ritentiamo normalmente.
+            const TRACK_FAILURE_BACKOFF_MS = 60_000
+            let lastTrackFailureAt = 0
             const track = Effect.fnUntraced(function* () {
+              const now = Date.now()
+              if (now - lastTrackFailureAt < TRACK_FAILURE_BACKOFF_MS) {
+                log.warn("Snapshot.track skipped — circuit breaker open", {
+                  remainingMs: TRACK_FAILURE_BACKOFF_MS - (now - lastTrackFailureAt),
+                })
+                return
+              }
               return yield* locked(
                 Effect.gen(function* () {
                   if (!(yield* enabled())) return
@@ -313,7 +346,23 @@ export namespace Snapshot {
                   }
                   yield* add()
                   const result = yield* git(args(["write-tree"]), { cwd: state.directory })
+                  if (result.code !== 0) {
+                    // Apri circuit breaker — i prossimi track() per i prossimi
+                    // 60s diventano no-op. Evita che ogni turno assistant si
+                    // mangi 5+ secondi di retry inutili sullo stesso problema.
+                    lastTrackFailureAt = Date.now()
+                    log.warn("Snapshot.track failed — opening circuit breaker", {
+                      exitCode: result.code,
+                      stderr: result.stderr,
+                      backoffMs: TRACK_FAILURE_BACKOFF_MS,
+                    })
+                    return
+                  }
                   const hash = result.text.trim()
+                  if (lastTrackFailureAt > 0) {
+                    log.info("Snapshot.track recovered — closing circuit breaker")
+                    lastTrackFailureAt = 0
+                  }
                   log.info("tracking", { hash, cwd: state.directory, git: state.gitdir })
                   return hash
                 }),
