@@ -100,9 +100,12 @@ class UncensoredVLLM:
             "--gpu-memory-utilization", str(GPU_MEM_UTIL),
             "--dtype", "auto",
             "--trust-remote-code",
-            # Tool calling nativo (come template RunPod che funzionava)
+            # Tool calling Qwen3-MoE (non hermes — quello era per Qwen2)
             "--enable-auto-tool-choice",
-            "--tool-call-parser", "hermes",
+            "--tool-call-parser", "qwen3_xml",
+            # Reasoning parser: Qwen3.x emette <think>...</think> chain-of-thought
+            # nativo. Senza questo, il <think> finisce nel content visibile.
+            "--reasoning-parser", "qwen3",
         ]
         if QUANTIZATION:
             cmd.extend(["--quantization", QUANTIZATION])
