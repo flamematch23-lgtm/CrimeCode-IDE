@@ -47,9 +47,12 @@ HF_MODEL = os.environ.get(
 QUANTIZATION = os.environ.get("QUANTIZATION", "")
 SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "crimeopus-agentic")
 GPU_TYPE = os.environ.get("GPU_TYPE", "H200")
-MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", "32768"))
+# 98304 = 96k context. 128k testato → OOM su H200 (KV cache > 50 GB
+# + modello 128 GB totale = sopra 140 GB H200). 96k è il sweet spot:
+# KV cache ~40 GB + modello = ~115 GB → sta in H200 con margine.
+MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", "98304"))
 IDLE_TIMEOUT = int(os.environ.get("IDLE_TIMEOUT", "300"))
-GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", "0.92"))
+GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", "0.94"))
 
 VLLM_PORT = 8000
 

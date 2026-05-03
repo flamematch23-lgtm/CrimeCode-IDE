@@ -90,13 +90,13 @@
           "limit": { "context": 262144, "output": 8192 }
         },
         "crimeopus-agentic": {
-          "name": "CrimeOpus AGENTIC FullUncensored — Modal (Huihui-Qwen3.6-35B abliterated)",
+          "name": "CrimeOpus 4.7 BEAST FullUncensored — Qwen3.6-40B Heretic Thinking (Modal H200)",
           "type": "chat",
           "tool_call": true,
           "reasoning": true,
           "attachment": false,
           "temperature": true,
-          "limit": { "context": 262144, "output": 16384 }
+          "limit": { "context": 98304, "output": 16384 }
         },
         "crimeopus-vision": {
           "name": "CrimeOpus VISION — Qwen3.5-VL 397B multimodal (image + OCR)",
