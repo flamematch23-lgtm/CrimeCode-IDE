@@ -1326,6 +1326,22 @@ export default function Page() {
     if (!el) return
     scheduleScrollState(el)
     fill()
+    // BUG-FIX (scroll resetta in cima dopo refresh/force-sync): quando
+    // messagesReady() flippa false→true (capita su force-sync, polling,
+    // remount del session panel, etc.), MessageTimeline si re-mounta e il
+    // nuovo scroller parte da scrollTop=0. Il createAutoScroll ha
+    // `working: () => true` (costante) → l'effect non si re-fire al remount
+    // → niente auto-scroll all'ultimo messaggio. Risultato: la chat si
+    // posiziona in cima al primissimo messaggio della conversazione, l'utente
+    // deve scrollare manualmente fino in fondo per vedere quello che stava
+    // leggendo. Qui forziamo lo scroll-to-bottom dopo l'attach del nuovo
+    // scroller, ma SOLO se l'utente non era già scrollato indietro
+    // (autoScroll.userScrolled): in quel caso preservare la posizione è più
+    // utile. requestAnimationFrame per aspettare che il layout della
+    // timeline sia completo prima di calcolare scrollHeight.
+    requestAnimationFrame(() => {
+      if (!autoScroll.userScrolled()) autoScroll.forceScrollToBottom()
+    })
   }
 
   const markUserScroll = () => {
