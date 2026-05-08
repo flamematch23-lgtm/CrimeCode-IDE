@@ -1362,12 +1362,20 @@ function AgentPanel(props: {
   }
 
   const buildPrompt = async () => {
-    if (!props.selectedFlow) {
-      showToast({ variant: "error", title: "Seleziona prima un flusso nella tab Flussi" })
+    // Usa effectiveFlow: il flusso selezionato manualmente, oppure (se nessuna
+    // selezione) il più recente disponibile. Senza nessun flusso, errore chiaro
+    // con istruzioni concrete.
+    const flowId = effectiveFlow()
+    if (!flowId) {
+      showToast({
+        variant: "error",
+        title: "Nessun flusso da usare",
+        description: "Cattura traffico prima: 'Cattura traffico sistema' nella routing bar, poi naviga in Edge/Chrome.",
+      })
       return
     }
     try {
-      const f = await props.api().flow(props.selectedFlow)
+      const f = await props.api().flow(flowId)
       const headers = Object.entries(f.req_headers)
         .slice(0, 30)
         .map(([k, v]) => `  ${k}: ${v}`)
@@ -1434,31 +1442,54 @@ function AgentPanel(props: {
     dispatchOrCopy(prompt, "Prompt intercept copiato")
   }
 
-  const selectedFlowHost = createMemo(() => {
-    if (!props.selectedFlow) return null
-    const flow = props.flows.find((f) => f.id === props.selectedFlow)
+  // Effective flow: usa quello esplicitamente selezionato, altrimenti
+  // automaticamente il più recente. Risolve il dolore UX in cui le quick
+  // actions erano disabled finché l'utente non andava manualmente nella
+  // tab Flussi a cliccare su uno. Ora basta avere ALMENO 1 flusso captured
+  // e le actions sono usabili istantaneamente.
+  const effectiveFlow = createMemo(() => {
+    if (props.selectedFlow) return props.selectedFlow
+    // Flows ordinati dal sync per timestamp DESC, quindi flows[0] = più recente
+    if (props.flows.length > 0) return props.flows[0].id
+    return null
+  })
+
+  const effectiveFlowHost = createMemo(() => {
+    const id = effectiveFlow()
+    if (!id) return null
+    const flow = props.flows.find((f) => f.id === id)
     return flow ? `${flow.scheme}://${flow.host}` : null
+  })
+
+  // Hint visibile sopra le actions per chiarire cosa stiamo usando come target
+  const flowHint = createMemo(() => {
+    const id = effectiveFlow()
+    if (!id) return "⚠ Nessun flusso catturato — naviga in Edge/Chrome dopo aver attivato 'Cattura traffico sistema' e 'Installa CA'."
+    if (props.selectedFlow === id) return `Target: flusso #${id} (selezionato manualmente)`
+    return `Target auto: flusso #${id} (più recente). Clicca su un altro nella tab Flussi per cambiarlo.`
   })
 
   const quickActions = createMemo<QuickAction[]>(() => [
     {
       label: "Scan passivo dei flussi recenti",
       description: "Analizza le ultime 200 richieste per vulnerabilità passive (CSP, cookie, error fingerprint, secrets leak)",
+      disabled: props.flows.length === 0,
       prompt:
         'Usa burp_toolkit { subtool: "scanner", args: ["batch", "--limit", "200"], as_json: true }. ' +
         "Classifica i finding per categoria (CSP mancante, cookie insicuri, error fingerprint, secret exposure) con priorità alta/media/bassa e il flow ID di riferimento per ciascuno. Formato tabella.",
     },
     {
-      label: `Fuzz parametri sul flusso #${props.selectedFlow ?? "—"}`,
+      label: `Fuzz parametri sul flusso #${effectiveFlow() ?? "—"}`,
       description: "Identifica parametri query/body e lancia un intruder sniper con payload XSS",
-      disabled: !props.selectedFlow,
-      prompt: props.selectedFlow
-        ? `Per il flow #${props.selectedFlow}: 1) Usa burp_toolkit { subtool: "proxy", args: ["show", "${props.selectedFlow}"], as_json: true } per analizzare la richiesta. 2) Identifica tutti i parametri iniettabili (query string, body, header custom). 3) Per ciascuno, lancia burp_toolkit { subtool: "intruder", args: ["sniper", "--from-flow", "${props.selectedFlow}", "--builtin", "xss-basic"], as_json: true }. 4) Mostra solo i top-5 per differenza di response.`
-        : "Seleziona prima un flusso nella tab Flussi.",
+      disabled: !effectiveFlow(),
+      prompt: effectiveFlow()
+        ? `Per il flow #${effectiveFlow()}: 1) Usa burp_toolkit { subtool: "proxy", args: ["show", "${effectiveFlow()}"], as_json: true } per analizzare la richiesta. 2) Identifica tutti i parametri iniettabili (query string, body, header custom). 3) Per ciascuno, lancia burp_toolkit { subtool: "intruder", args: ["sniper", "--from-flow", "${effectiveFlow()}", "--builtin", "xss-basic"], as_json: true }. 4) Mostra solo i top-5 per differenza di response.`
+        : "Cattura prima almeno un flusso (vedi tab Flussi).",
     },
     {
       label: "Mappa autorizzazioni (auth-matrix)",
       description: "Replay delle ultime 30 richieste con identità diverse per trovare BOLA/IDOR",
+      disabled: props.flows.length === 0,
       prompt:
         'Usa burp_toolkit { subtool: "auth-matrix", args: ["from-history", "--limit", "30"], as_json: true } per generare la matrice di autorizzazione. Chiedimi i Cookie/header per ciascuna identità (admin, utente normale, non autenticato), poi esegui il test con --baseline admin.',
     },
@@ -1469,20 +1500,20 @@ function AgentPanel(props: {
         'Usa burp_toolkit { subtool: "collaborator", args: ["payload", "--type", "http"], as_json: true } per generare un URL di callback. Poi suggerisci 5 payload concreti per: 1) SSRF, 2) XXE, 3) SSTI (Jinja2/Twig), 4) blind XSS, 5) Log4Shell — ciascuno con l\'URL appena generato come target callback.',
     },
     {
-      label: "Genera CSRF PoC per flusso selezionato",
+      label: `Genera CSRF PoC per flusso #${effectiveFlow() ?? "—"}`,
       description: "Crea un HTML auto-submit che riproduce la richiesta state-changing",
-      disabled: !props.selectedFlow,
-      prompt: props.selectedFlow
-        ? `Usa burp_toolkit { subtool: "csrf-poc", args: ["from-flow", "${props.selectedFlow}", "--include-cookies"] } per generare un file HTML di CSRF PoC. Analizza se il flusso #${props.selectedFlow} è effettivamente vulnerabile (assenza di token CSRF, cookie SameSite=None, no custom header requirement).`
-        : "Seleziona prima un flusso nella tab Flussi.",
+      disabled: !effectiveFlow(),
+      prompt: effectiveFlow()
+        ? `Usa burp_toolkit { subtool: "csrf-poc", args: ["from-flow", "${effectiveFlow()}", "--include-cookies"] } per generare un file HTML di CSRF PoC. Analizza se il flusso #${effectiveFlow()} è effettivamente vulnerabile (assenza di token CSRF, cookie SameSite=None, no custom header requirement).`
+        : "Cattura prima almeno un flusso (vedi tab Flussi).",
     },
     {
-      label: "Content discovery sull'host selezionato",
+      label: `Content discovery su ${effectiveFlowHost() ?? "host (—)"}`,
       description: "Brute-force di directory/file nascosti con wordlist API",
-      disabled: !props.selectedFlow,
-      prompt: props.selectedFlow
-        ? `Usa burp_toolkit { subtool: "content-discovery", args: ["--url", "${selectedFlowHost() ?? "https://target"}/", "--builtin", "api", "--ext", "json,php,bak,old,txt"], as_json: true } per scoprire endpoint nascosti su ${selectedFlowHost() ?? "target"}. Mostra solo i path con status 200/301/302/403 e ordina per interesse (403 = potenzialmente protetto, 200 con contenuto = leak).`
-        : "Seleziona prima un flusso nella tab Flussi.",
+      disabled: !effectiveFlow(),
+      prompt: effectiveFlow()
+        ? `Usa burp_toolkit { subtool: "content-discovery", args: ["--url", "${effectiveFlowHost() ?? "https://target"}/", "--builtin", "api", "--ext", "json,php,bak,old,txt"], as_json: true } per scoprire endpoint nascosti su ${effectiveFlowHost() ?? "target"}. Mostra solo i path con status 200/301/302/403 e ordina per interesse (403 = potenzialmente protetto, 200 con contenuto = leak).`
+        : "Cattura prima almeno un flusso (vedi tab Flussi).",
     },
   ])
 
@@ -1501,6 +1532,36 @@ function AgentPanel(props: {
             <code class="bg-surface-weak px-1 rounded">burp_toolkit</code> per replay, fuzz, scan, decode, ecc.
           </p>
 
+          {/* Hint live: chiarisce all'utente quale flusso verrà usato come
+              target. Se 0 flussi → mostra empty state con istruzioni concrete
+              di setup invece di lasciare buttons disabled silenziosi. */}
+          <Show
+            when={props.flows.length > 0}
+            fallback={
+              <div class="mb-4 px-3 py-2.5 rounded bg-surface-warning/10 border border-surface-warning/30 text-12-regular leading-relaxed">
+                <div class="font-semibold text-text-strong mb-1">⚠ Nessun flusso catturato ancora</div>
+                <div class="text-text-weak">
+                  Le quick actions sotto richiedono almeno un flusso HTTP catturato. Setup in 3 step:
+                  <ol class="mt-2 ml-5 list-decimal space-y-0.5">
+                    <li>Click <span class="font-medium text-text-strong">"Cattura traffico sistema"</span> nella routing bar in alto</li>
+                    <li>Click <span class="font-medium text-text-strong">"Installa CA HTTPS"</span> per HTTPS senza errori</li>
+                    <li>Apri Edge/Chrome e naviga su un sito qualsiasi — i flussi compariranno nella tab Flussi</li>
+                  </ol>
+                  <div class="mt-2 italic">Tip: per testare subito senza aprire il browser, click "Test cattura" nella routing bar.</div>
+                </div>
+              </div>
+            }
+          >
+            <div
+              class="mb-4 px-3 py-2 rounded bg-surface-base/50 text-11-regular text-text-weak"
+              classList={{
+                "border border-surface-weak": !!effectiveFlow(),
+              }}
+            >
+              {flowHint()}
+            </div>
+          </Show>
+
           <div class="space-y-3">
             <TextField type="text" label="Intento (cosa vuoi che faccia l'agente)" value={intent()} onChange={setIntent} />
             <label class="flex items-center gap-2 text-12-regular cursor-pointer">
@@ -1513,8 +1574,8 @@ function AgentPanel(props: {
               Includi body request/response (max 6 KB)
             </label>
             <div class="flex flex-wrap gap-2">
-              <Button variant="primary" onClick={buildPrompt} disabled={!props.selectedFlow}>
-                Genera prompt dal flusso #{props.selectedFlow ?? "—"}
+              <Button variant="primary" onClick={buildPrompt} disabled={!effectiveFlow()}>
+                Genera prompt dal flusso #{effectiveFlow() ?? "—"}
               </Button>
               <Button variant="secondary" onClick={buildPendingPrompt} disabled={props.pending.length === 0}>
                 Prompt da intercept pendente ({props.pending.length})
