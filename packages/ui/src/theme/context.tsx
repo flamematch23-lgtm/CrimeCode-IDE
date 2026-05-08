@@ -163,7 +163,12 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
   name: "Theme",
   init: (props: { defaultTheme?: string; onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark") => void }) => {
     const themeId = normalize(read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme) ?? "oc-2"
-    const colorScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
+    // Default colorScheme = "dark" per i nuovi installer. Prima era "system"
+    // (segue OS) — molti dev hanno OS in light mode di sistema ma vogliono
+    // dark sull'IDE. CrimeCode IDE è branded scuro (OC-2 fallback dark è
+    // l'identity di prodotto), partire da dark riduce friction primo
+    // avvio. L'utente può sempre tornare a "system" dalle Appearance settings.
+    const colorScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "dark"
     const mode = colorScheme === "system" ? getSystemMode() : colorScheme
     const [store, setStore] = createStore({
       themes: {

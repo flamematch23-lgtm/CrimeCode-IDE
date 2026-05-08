@@ -105,9 +105,13 @@ const defaultSettings: Settings = {
     autoSave: true,
     releaseNotes: true,
     followup: "steer",
-    showReasoningSummaries: false,
-    shellToolPartsExpanded: false,
-    editToolPartsExpanded: false,
+    // Default-on per i nuovi utenti: questi 3 toggle migliorano sensibilmente
+    // la leggibilità della timeline agente (summary del reasoning + tool parts
+    // espansi per default). Un utente che NON li vuole può sempre toglierli
+    // dalle Settings → General; ma il default opt-in è meno friction.
+    showReasoningSummaries: true,
+    shellToolPartsExpanded: true,
+    editToolPartsExpanded: true,
   },
   updates: {
     startup: true,

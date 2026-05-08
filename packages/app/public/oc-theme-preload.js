@@ -9,7 +9,9 @@
     localStorage.removeItem("opencode-theme-css-dark")
   }
 
-  var scheme = localStorage.getItem("opencode-color-scheme") || "system"
+  // Default colorScheme = "dark" per nuovi installer (CrimeCode IDE è
+  // branded scuro). L'utente può cambiare via Appearance settings.
+  var scheme = localStorage.getItem("opencode-color-scheme") || "dark"
   var isDark = scheme === "dark" || (scheme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   var mode = isDark ? "dark" : "light"
 
