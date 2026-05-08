@@ -87,6 +87,21 @@ jobs:
           cp "$SIDECAR" packages/desktop-electron/sidecar/opencode-cli.exe
           ls -la packages/desktop-electron/sidecar/
 
+      # Compile the Burp Workspace MITM proxy as a standalone Windows exe.
+      # Senza questo step l'utente vedrebbe "Script http-proxy.ts non trovato"
+      # cliccando "Avvia proxy ora" nella UI Burp Workspace, perché lo script
+      # ts richiede il bun runtime che non shippiamo separatamente.
+      - name: Build Burp proxy CLI (standalone)
+        shell: bash
+        run: |
+          bun build --compile --target=bun-windows-x64 \
+            packages/opencode/script/agent-tools/security/http-proxy.ts \
+            --outfile packages/desktop-electron/sidecar/burp-proxy-cli.exe
+          ls -la packages/desktop-electron/sidecar/burp-proxy-cli.exe || {
+            echo "::error::burp-proxy-cli.exe was not produced"
+            exit 1
+          }
+
       # ────────────────────────────────────────────────────────────────────
       # 2. Decode Windows code-signing certificate (optional)
       # ────────────────────────────────────────────────────────────────────

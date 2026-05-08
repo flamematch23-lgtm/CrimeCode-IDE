@@ -23,6 +23,12 @@ const unpacked = join(root, "dist", "win-unpacked", "resources")
 const target = join(unpacked, "opencode-cli.exe")
 const proxySource = join(root, "..", "proxy", "dist")
 const proxyTarget = join(unpacked, "proxy")
+// Burp proxy compiled standalone — built via `bun build --compile` da
+// packages/opencode/script/agent-tools/security/http-proxy.ts. Spawnabile
+// senza bun runtime al lato utente.
+const burpProxySource = join(root, "..", "opencode", "script", "agent-tools", "security", "http-proxy.ts")
+const burpProxyBinary = join(sidecar, "burp-proxy-cli.exe")
+const burpProxyTarget = join(unpacked, "burp-proxy-cli.exe")
 
 function size(path: string) {
   return (statSync(path).size / 1024 / 1024).toFixed(1)
@@ -36,6 +42,25 @@ async function main() {
     process.exit(1)
   }
   console.log(`[build-win] Sidecar binary: ${binary} (${size(binary)} MB)`)
+
+  // Step 0: compile burp-proxy-cli (Burp Workspace MITM proxy) into a
+  // standalone exe via `bun build --compile`. Senza questo step la UI mostra
+  // "Script http-proxy.ts non trovato" cliccando "Avvia proxy ora".
+  if (existsSync(burpProxySource)) {
+    console.log(`[build-win] Step 0: Compiling burp-proxy-cli.exe da ${burpProxySource}`)
+    try {
+      await $`bun build --compile --target=bun-windows-x64 ${burpProxySource} --outfile ${burpProxyBinary}`.cwd(root)
+      if (existsSync(burpProxyBinary)) {
+        console.log(`[build-win] burp-proxy-cli.exe built (${size(burpProxyBinary)} MB)`)
+      } else {
+        console.warn(`[build-win] WARN: bun build completed but binary missing at ${burpProxyBinary}`)
+      }
+    } catch (err) {
+      console.error(`[build-win] WARN: failed to build burp-proxy-cli.exe — proseguo senza`, err)
+    }
+  } else {
+    console.warn(`[build-win] WARN: burp-proxy source not found at ${burpProxySource}, Burp Workspace verrà shippato senza il binario.`)
+  }
 
   // Step 1: stash sidecar out of project tree
   console.log(`[build-win] Step 1: Moving sidecar to ${stash}`)
@@ -59,6 +84,17 @@ async function main() {
     mkdirSync(unpacked, { recursive: true })
     copyFileSync(stashed, target)
     console.log(`[build-win] Sidecar copied (${size(target)} MB)`)
+
+    // Step 4a: copy burp-proxy-cli (if built) so ipc.ts → spawn lo trova
+    // anche se electron-builder filter non l'ha incluso (es: filter di
+    // sicurezza che salta i .exe non firmati durante la fase prepackaged).
+    if (existsSync(burpProxyBinary)) {
+      console.log(`[build-win] Step 4a: Copying burp-proxy-cli to ${burpProxyTarget}`)
+      copyFileSync(burpProxyBinary, burpProxyTarget)
+      console.log(`[build-win] burp-proxy-cli copied (${size(burpProxyTarget)} MB)`)
+    } else {
+      console.log(`[build-win] Step 4a: skipping burp-proxy-cli copy — binary missing`)
+    }
 
     // Step 4b: copy proxy into unpacked resources/proxy
     console.log(`[build-win] Step 4b: Copying proxy to ${proxyTarget}`)

@@ -752,27 +752,48 @@ export function registerIpcHandlers(deps: Deps) {
   let burpProxyChild: import("node:child_process").ChildProcess | null = null
   let burpProxyPort = 0
 
-  const findBurpScript = (): string | null => {
-    // Resolution order:
-    //   1. Repo path during dev (parents of __dirname)
-    //   2. asar.unpacked layout in production
+  // Production: ship un binario standalone `burp-proxy-cli[.exe]` compilato
+  // con `bun build --compile`. Niente bun runtime needed at user side. Lo
+  // shipping path è gestito da electron-builder filter "burp-proxy-cli*"
+  // su sidecar/.
+  // Dev: fall back allo source .ts + bun runtime.
+  const findBurpProxyBin = (): { kind: "binary"; path: string } | { kind: "script"; path: string } | null => {
     const fs = require("node:fs") as typeof import("node:fs")
     const path = require("node:path") as typeof import("node:path")
-    const candidates = [
+    const exeName = process.platform === "win32" ? "burp-proxy-cli.exe" : "burp-proxy-cli"
+    const binCandidates = [
+      // Prod: shipped via extraResources next to opencode-cli
+      path.join(process.resourcesPath ?? "", exeName),
+      path.join(process.resourcesPath ?? "", "app.asar.unpacked", exeName),
+      // Dev fallback (if developer pre-compiles locally)
+      path.join(__dirname, "..", "..", "sidecar", exeName),
+    ]
+    for (const c of binCandidates) {
+      try {
+        if (fs.existsSync(c)) return { kind: "binary", path: c }
+      } catch {
+        /* ignore */
+      }
+    }
+    // Source .ts (dev only — needs bun on PATH)
+    const scriptCandidates = [
       path.join(__dirname, "..", "..", "..", "opencode", "script", "agent-tools", "security", "http-proxy.ts"),
-      path.join(process.resourcesPath ?? "", "app.asar.unpacked", "out", "main", "http-proxy.ts"),
-      path.join(__dirname, "..", "..", "out", "main", "http-proxy.ts"),
       path.join(process.resourcesPath ?? "", "app.asar.unpacked", "packages", "opencode", "script", "agent-tools", "security", "http-proxy.ts"),
     ]
-    for (const c of candidates) {
+    for (const c of scriptCandidates) {
       try {
-        if (fs.existsSync(c)) return c
+        if (fs.existsSync(c)) return { kind: "script", path: c }
       } catch {
         /* ignore */
       }
     }
     return null
   }
+
+  // Legacy alias kept for any external caller — returns just the path or null
+  // so it never breaks. Internal code uses findBurpProxyBin which knows the kind.
+  const findBurpScript = (): string | null => findBurpProxyBin()?.path ?? null
+  void findBurpScript
 
   const findBunBin = (): string | null => {
     const fs = require("node:fs") as typeof import("node:fs")
@@ -814,21 +835,33 @@ export function registerIpcHandlers(deps: Deps) {
       if (burpProxyPort === port) return { ok: true, pid: burpProxyChild.pid }
       return { ok: false, error: `proxy già in esecuzione su porta ${burpProxyPort}` }
     }
-    const script = findBurpScript()
-    if (!script) {
+    const found = findBurpProxyBin()
+    if (!found) {
       return {
         ok: false,
         error:
-          "Script http-proxy.ts non trovato nel pacchetto installato. Avvia manualmente con il comando indicato.",
+          "Binario `burp-proxy-cli` non trovato nel pacchetto installato. Reinstalla l'app o avvia manualmente con: bun packages/opencode/script/agent-tools/security/http-proxy.ts start --intercept --api-port " +
+          port,
       }
-    }
-    const bun = findBunBin()
-    if (!bun) {
-      return { ok: false, error: "Runtime Bun non disponibile per spawnare il proxy." }
     }
     const { spawn } = require("node:child_process") as typeof import("node:child_process")
     try {
-      const child = spawn(bun, [script, "start", "--intercept", "--api-port", String(port)], {
+      // Standalone binary path: spawn directly, NO bun needed at runtime.
+      // Source script path: fall back a bun runtime (dev mode).
+      let exe: string
+      let args: string[]
+      if (found.kind === "binary") {
+        exe = found.path
+        args = ["start", "--intercept", "--api-port", String(port)]
+      } else {
+        const bun = findBunBin()
+        if (!bun) {
+          return { ok: false, error: "Runtime Bun non disponibile per eseguire lo script .ts del proxy." }
+        }
+        exe = bun
+        args = [found.path, "start", "--intercept", "--api-port", String(port)]
+      }
+      const child = spawn(exe, args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
         detached: false,

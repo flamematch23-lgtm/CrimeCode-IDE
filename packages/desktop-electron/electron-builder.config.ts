@@ -54,7 +54,12 @@ const getBase = (): Configuration => ({
           {
             from: "sidecar/",
             to: ".",
-            filter: ["opencode-cli*"],
+            // Sidecar opencode (l'agent CLI) + Burp proxy compilato standalone
+            // (bun-built binary di http-proxy.ts). Senza il pattern
+            // burp-proxy-cli* l'utente vede "Script http-proxy.ts non trovato"
+            // cliccando "Avvia proxy ora" perché ipc.ts trova solo
+            // opencode-cli.exe nel resourcesPath.
+            filter: ["opencode-cli*", "burp-proxy-cli*"],
           },
         ]),
     {
