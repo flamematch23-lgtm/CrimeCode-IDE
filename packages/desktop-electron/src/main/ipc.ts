@@ -1134,13 +1134,81 @@ export function registerIpcHandlers(deps: Deps) {
       // sidecar). Resolve same path here.
       const xdg = process.env.XDG_DATA_HOME ?? path.join(require("node:os").homedir(), ".local", "share")
       const caPath = path.join(xdg, "crimecode", "proxy", "ca.pem")
+
+      // BUG-FIX UX (v2.33.1): se la CA non esiste, era impossibile installarla
+      // perché viene generata SOLO al primo avvio del proxy. Prima costringevamo
+      // l'utente a fare 2 click in ordine: "Avvia proxy" → aspetta → "Installa
+      // CA". Ora auto-startiamo il proxy se la CA manca, aspettiamo che
+      // appaia, e procediamo con l'install. Un solo click anche al primissimo
+      // utilizzo. Se il proxy era già up, lo lasciamo così; se lo startiamo
+      // noi, lo lasciamo running anche dopo (l'utente probabilmente vuole
+      // usarlo).
       if (!fs.existsSync(caPath)) {
-        return {
-          ok: false,
-          error:
-            "CA non trovata. Avvia prima il proxy almeno una volta — la CA viene generata al primo avvio.",
+        // Avvia il proxy se non gira già. Riusa la stessa logica dello
+        // handler proxy-start-burp ma sincrono qui dentro.
+        if (!burpProxyChild || burpProxyChild.killed) {
+          const found = findBurpProxyBin()
+          if (!found) {
+            return {
+              ok: false,
+              error:
+                "CA non trovata e binario `burp-proxy-cli` non disponibile. Reinstalla l'app o avvia manualmente il proxy.",
+            }
+          }
+          const apiPort = 8182
+          const { spawn } = require("node:child_process") as typeof import("node:child_process")
+          let exe: string
+          let args: string[]
+          if (found.kind === "binary") {
+            exe = found.path
+            args = ["start", "--intercept", "--api-port", String(apiPort)]
+          } else {
+            const bun = findBunBin()
+            if (!bun) {
+              return { ok: false, error: "CA non trovata e Bun runtime non disponibile per generarla." }
+            }
+            exe = bun
+            args = [found.path, "start", "--intercept", "--api-port", String(apiPort)]
+          }
+          try {
+            const child = spawn(exe, args, {
+              windowsHide: true,
+              stdio: ["ignore", "pipe", "pipe"],
+              detached: false,
+            })
+            burpProxyChild = child
+            burpProxyPort = apiPort
+            child.on("exit", () => {
+              if (burpProxyChild === child) {
+                burpProxyChild = null
+                burpProxyPort = 0
+              }
+            })
+          } catch (e) {
+            return {
+              ok: false,
+              error: `Auto-start proxy fallito: ${e instanceof Error ? e.message : String(e)}`,
+            }
+          }
+        }
+
+        // Polling: aspetta fino a 10 secondi che la CA materialize.
+        // Il proxy la genera in fase di init (sub-secondo di solito), ma
+        // diamo budget per spawn lento + I/O su disco.
+        const startedAt = Date.now()
+        while (Date.now() - startedAt < 10_000) {
+          if (fs.existsSync(caPath)) break
+          await new Promise((r) => setTimeout(r, 250))
+        }
+        if (!fs.existsSync(caPath)) {
+          return {
+            ok: false,
+            error:
+              "CA non generata entro 10 secondi dopo lo start del proxy. Apri Burp Workspace, verifica che il proxy parta correttamente, poi riprova.",
+          }
         }
       }
+
       const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
       // certutil per importare nel CurrentUser\Root. Triggera il dialog
       // Windows di trust una sola volta — l'utente conferma esplicitamente.
