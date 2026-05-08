@@ -12,7 +12,13 @@ import type { MessageV2 } from "./message-v2"
 const log = Log.create({ service: "instruction" })
 
 const FILES = [
+  // AGENTS.md è lo standard de-facto cross-tool (Cursor, Aider, Cline, OpenCode)
+  // — preferito per portabilità del progetto.
   "AGENTS.md",
+  // .crimecoderules per chi preferisce un nome brand-aligned (analogo a
+  // .cursorrules). Funzionale identico a AGENTS.md, è solo un alias.
+  ".crimecoderules",
+  "CRIMECODE.md",
   "CLAUDE.md",
   "CONTEXT.md", // deprecated
 ]
