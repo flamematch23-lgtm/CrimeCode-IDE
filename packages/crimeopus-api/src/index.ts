@@ -61,7 +61,22 @@ const BIND = process.env.BIND ?? "0.0.0.0"
 const ALLOW_ANON = process.env.ALLOW_ANON === "1"
 const RATE_LIMIT_RPM = Number(process.env.RATE_LIMIT_RPM ?? 60)
 const RATE_LIMIT_BURST = Number(process.env.RATE_LIMIT_BURST ?? 10)
-const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? "*").split(",").map((s) => s.trim())
+// CORS configuration. Hono `cors({ origin })` treats:
+//   - string  → either a single allowed origin OR "*" (wildcard)
+//   - string[] → exact-match list (no wildcard semantics on elements)
+// So we can NOT pass `["*"]` — Hono would try to exactly match the
+// literal "*" against the request Origin and never emit ACAO. The split
+// below collapses to a single string when there is one entry, else an
+// array. This was the root cause of "Failed to fetch" on crimecode.cc:
+// `/community/dm/inbox` returned 401 with no Access-Control-Allow-Origin
+// header, so the browser refused to expose the response to JS.
+const CORS_ORIGINS = (() => {
+  const raw = process.env.CORS_ORIGINS ?? "*"
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean)
+  if (parts.length === 0) return "*"
+  if (parts.length === 1) return parts[0]
+  return parts
+})()
 // Hard ceiling for a single upstream chat/embed call — without this, a
 // hung provider (RunPod cold start that never finishes loading a 35B
 // model, network blip, etc.) keeps the slot reserved indefinitely and
