@@ -97,6 +97,7 @@ function resolveAdapterEntry(): string {
   const fromEnv = process.env.OPENCODE_CLAUDE_CODE_ACP_ENTRY
   if (fromEnv) {
     log.info("adapter entry from env", { path: fromEnv })
+    ensureVendorLink(fromEnv)
     return fromEnv
   }
   // Dev / CLI direct invocation: walk workspace symlinks via Bun's resolver.
@@ -110,6 +111,37 @@ function resolveAdapterEntry(): string {
         `OPENCODE_CLAUDE_CODE_ACP_ENTRY (currently unset). In dev, run \`bun install\` first. ` +
         `Underlying: ${(e as Error).message}`,
     )
+  }
+}
+
+/** electron-builder strips dirs named `node_modules` from extraResources
+ *  targets, so stage-claude-acp.ts ships them as `vendor/`. Here at first
+ *  spawn we ensure `node_modules/` exists (as a Windows junction or unix
+ *  symlink → `vendor/`) so Node's ESM resolver finds the deps. Idempotent:
+ *  if `node_modules/` already exists we leave it alone. */
+function ensureVendorLink(entryPath: string) {
+  try {
+    const fs = require("node:fs") as typeof import("node:fs")
+    const path = require("node:path") as typeof import("node:path")
+    // entryPath is `<bundle>/dist/index.js` → bundle root is two levels up.
+    const bundleRoot = path.resolve(path.dirname(entryPath), "..")
+    const nm = path.join(bundleRoot, "node_modules")
+    const vendor = path.join(bundleRoot, "vendor")
+    if (fs.existsSync(nm)) return // already linked or present
+    if (!fs.existsSync(vendor)) {
+      log.warn("vendor dir missing, adapter will fail to resolve deps", { vendor })
+      return
+    }
+    // Junction on Windows (no admin needed, same volume). Symlink elsewhere.
+    if (process.platform === "win32") {
+      fs.symlinkSync(vendor, nm, "junction")
+    } else {
+      fs.symlinkSync(vendor, nm, "dir")
+    }
+    log.info("created node_modules → vendor link", { nm, vendor })
+  } catch (e) {
+    log.warn("ensureVendorLink failed", { err: String(e).slice(0, 200) })
+    // Non-fatal: the spawn that follows will reveal the real issue.
   }
 }
 

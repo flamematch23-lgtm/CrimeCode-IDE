@@ -64,6 +64,16 @@ execSync("bun install --production --no-save --backend=copyfile --linker=hoisted
 // Step 3 — flatten so the entry script lives at top-level (matches what
 // the OPENCODE_CLAUDE_CODE_ACP_ENTRY env var assumes:
 // `<resources>/claude-code-acp/dist/index.js`).
+//
+// IMPORTANT: electron-builder silently STRIPS any directory named
+// `node_modules` from `extraResources` (legacy behavior to avoid
+// duplicating modules with the main app's node_modules). To work around
+// this we rename node_modules → vendor in the staged dir, and the
+// runtime side (acp-client.ts) creates a `node_modules` junction
+// pointing at `vendor` on first spawn so Node's ESM resolver finds the
+// deps. Without this, the installed bundle ends up missing every
+// dependency and the adapter crashes with "Cannot find package
+// 'minimatch'" or similar on first import.
 const acpInstalled = join(STAGE_DIR, "node_modules", "@zed-industries", "claude-code-acp")
 if (!existsSync(acpInstalled)) {
   throw new Error(`bun install completed but ${acpInstalled} doesn't exist`)
@@ -137,4 +147,15 @@ const flat = staged.filter((d) => !d.startsWith("@"))
 const all = [...scoped, ...flat].sort()
 console.log(`stage-claude-acp: staged ${all.length} deps`)
 console.log(`stage-claude-acp: deps: ${all.join(", ")}`)
+
+// Step 4 — RENAME node_modules → vendor. electron-builder strips
+// directories named `node_modules` from extraResources targets (legacy
+// dedup). We rename so the dir survives the package step; the runtime
+// (acp-client.ts) creates a `node_modules` junction back to `vendor` on
+// first spawn so Node's resolver finds the deps.
+import { renameSync } from "node:fs"
+const VENDOR_DIR = join(STAGE_DIR, "vendor")
+if (existsSync(VENDOR_DIR)) rmSync(VENDOR_DIR, { recursive: true, force: true })
+renameSync(TEMP_NM, VENDOR_DIR)
+console.log(`stage-claude-acp: renamed node_modules → vendor (electron-builder workaround)`)
 console.log(`stage-claude-acp: done → ${STAGE_DIR}`)
