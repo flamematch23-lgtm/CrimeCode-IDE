@@ -1138,4 +1138,13 @@ export const dict = {
   "builder.empty.prompt": "Type something or pick an example to start.",
   "builder.error.noModel": "Connect at least one provider before launching the builder.",
   "builder.error.sessionCreate": "Could not create the session: {{error}}",
+  "builder.toolbar.attach": "Attach file",
+  "builder.toolbar.agent": "Agent",
+  "builder.toolbar.mic": "Voice",
+  "builder.toolbar.submit": "Send",
+  "builder.hint.cloneUrl": "Clone any website with just a URL",
+  "builder.hint.addAi": "Add AI features with CrimeCode integrations",
+  "builder.hint.addAuth": "Add authentication with CrimeCode Auth",
+  "builder.hint.addDb": "Store data with CrimeCode Database",
+  "builder.modelPicker.choose": "Choose model",
 }

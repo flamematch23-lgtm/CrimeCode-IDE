@@ -1039,4 +1039,13 @@ export const dict = {
   "builder.empty.prompt": "Scrivi qualcosa o scegli un esempio per partire.",
   "builder.error.noModel": "Collega almeno un provider prima di lanciare il builder.",
   "builder.error.sessionCreate": "Impossibile creare la sessione: {{error}}",
+  "builder.toolbar.attach": "Allega file",
+  "builder.toolbar.agent": "Agent",
+  "builder.toolbar.mic": "Voce",
+  "builder.toolbar.submit": "Invia",
+  "builder.hint.cloneUrl": "Clona un sito web partendo da un URL",
+  "builder.hint.addAi": "Aggiungi feature AI con le integrazioni CrimeCode",
+  "builder.hint.addAuth": "Aggiungi auth con CrimeCode Auth",
+  "builder.hint.addDb": "Salva dati con CrimeCode Database",
+  "builder.modelPicker.choose": "Scegli modello",
 } satisfies typeof en
