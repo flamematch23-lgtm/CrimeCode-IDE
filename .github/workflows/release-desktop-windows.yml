@@ -184,9 +184,10 @@ jobs:
       # 5. Auto-post release announcement al canale Telegram CrimeCode IDE
       # ────────────────────────────────────────────────────────────────────
       # Skip se TELEGRAM_BOT_TOKEN o TELEGRAM_CHANNEL_ID non sono settati
-      # (es. PR/fork/dev). In quei casi continua silently.
+      # (es. PR/fork/dev). In quei casi continua silently. NON usiamo
+      # `if: env.X != ''` perché env step-scoped non è visibile al if-time
+      # — controlliamo invece dentro il run script con `[ -z "$X" ]`.
       - name: Post release to Telegram channel
-        if: ${{ env.TELEGRAM_CHANNEL_ID != '' && env.TELEGRAM_BOT_TOKEN != '' }}
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -194,23 +195,30 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHANNEL_ID" ]; then
+            echo "::notice::Telegram secrets not configured — skipping channel post"
+            exit 0
+          fi
           # Estrai il body release notes da GitHub (max 800 char per Telegram limit)
           NOTES=$(gh release view "$TAG" --json body --jq '.body' 2>/dev/null | head -c 800 || echo "")
           DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/opencode-electron-win-x64.exe"
 
           # Markdown V2 per Telegram (escaping necessario per `_*[]()~\`>#+-=|{}.!`)
-          # Per simplicità usiamo HTML mode che è meno fragile.
+          # Per simplicità usiamo HTML mode che è meno fragile. Lo `run: |`
+          # YAML block scalar strippa l'indentazione comune prima che bash
+          # veda lo script, quindi il heredoc body indentato qui sotto
+          # arriva a Telegram pulito.
           MSG=$(cat <<EOF
-🚀 <b>CrimeCode IDE $TAG</b>
+          🚀 <b>CrimeCode IDE $TAG</b>
 
-$(echo "$NOTES" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+          $(echo "$NOTES" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
-📥 <a href="$DOWNLOAD_URL">Download Windows installer</a>
-📋 <a href="https://github.com/$REPO/releases/tag/$TAG">Release notes complete</a>
+          📥 <a href="$DOWNLOAD_URL">Download Windows installer</a>
+          📋 <a href="https://github.com/$REPO/releases/tag/$TAG">Release notes complete</a>
 
-#crimecode #release
-EOF
-)
+          #crimecode #release
+          EOF
+          )
           # Invia con disable_web_page_preview=false per mostrare preview download
           curl -sS --max-time 15 -X POST \
             "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
