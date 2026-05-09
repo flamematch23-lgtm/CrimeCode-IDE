@@ -11,6 +11,13 @@ type HandoffSession = {
    * without overwriting whatever the user is currently typing on revisits.
    */
   pendingPrompt?: Prompt
+  /**
+   * If true (paired with pendingPrompt), the composer auto-fires the
+   * submit immediately after applying the pending prompt — used by the
+   * Builder modal so the user lands directly on a session that's
+   * already running the requested task. Consumed once like pendingPrompt.
+   */
+  autoSubmit?: boolean
 }
 
 const MAX = 40

@@ -30,6 +30,8 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { setSessionHandoff } from "@/pages/session/handoff"
+import type { Prompt } from "@/context/prompt"
 import {
   agentNameForTab,
   fetchBuilderTemplates,
@@ -153,23 +155,45 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
         })
         return
       }
-      try {
-        localStorage.setItem(
-          "builder.pending",
-          JSON.stringify({
-            sessionId: created.id,
-            prompt: text,
-            tab: activeTab(),
-            providerId: model.providerId,
-            modelId: model.modelId,
-            agent: agentOn() ? agentNameForTab(activeTab()) : undefined,
-            system: systemPromptForTab(activeTab()),
-            ts: Date.now(),
-          }),
-        )
-      } catch {}
+
+      // Build the Prompt parts the composer will pre-fill: agent mention
+      // (if Agent toggle on) + a small "[Builder system prompt]" prefix
+      // + the user's text. The system prompt prefix tells the agent which
+      // persona to adopt for this engagement (pentest/exploit/osint/etc.).
+      const dirSlug = base64Encode(props.workspaceDirectory)
+      const sessionKey = `${dirSlug}/${created.id}`
+      const tab = activeTab()
+      const agentName = agentOn() ? agentNameForTab(tab) : null
+      const systemPrefix = `[${tab.toUpperCase()} engagement]\n${systemPromptForTab(tab)}\n\n---\n\n`
+      const fullText = systemPrefix + text
+
+      const parts: Prompt = []
+      let cursor = 0
+      if (agentName) {
+        const mention = `@${agentName}`
+        parts.push({ type: "agent", name: agentName, content: mention, start: cursor, end: cursor + mention.length })
+        cursor += mention.length
+        const sep = " "
+        parts.push({ type: "text", content: sep, start: cursor, end: cursor + sep.length })
+        cursor += sep.length
+      }
+      parts.push({ type: "text", content: fullText, start: cursor, end: cursor + fullText.length })
+
+      // Hand off via the existing handoff store. The composer at
+      // session-composer-region.tsx consumes pendingPrompt on first ready
+      // and (if autoSubmit:true) immediately fires a real form submit.
+      setSessionHandoff(sessionKey, { pendingPrompt: parts, autoSubmit: true })
+
+      // Note about model selection: setting `selectedModel` mid-flight
+      // requires plumbing into the composer's currentModel signal which
+      // varies per harness. For now we let the composer use the user's
+      // last-selected model. A proper "force model X for this session"
+      // path is TODO — track in providerId/modelId from this builder.
+      void model.providerId
+      void model.modelId
+
       dialog.close()
-      navigate(`/${base64Encode(props.workspaceDirectory)}/session/${created.id}`)
+      navigate(`/${dirSlug}/session/${created.id}`)
     } catch (e) {
       showToast({
         variant: "error",

@@ -61,18 +61,45 @@ export function SessionComposerRegion(props: {
       .trim()
 
   // Consume any pending prompt from a deep-link (e.g. Burp Workspace's
-  // "Apri composer agente" / quick actions). One-shot: apply once the
-  // composer is ready and clear the field, so revisits don't overwrite
-  // whatever the user has typed in the meantime.
+  // "Apri composer agente" / quick actions, or the Builder modal). One-
+  // shot: apply once the composer is ready and clear the field, so
+  // revisits don't overwrite whatever the user has typed in the meantime.
+  // If the handoff also carries `autoSubmit: true` (set by the Builder
+  // modal), we trigger a real form submit on the next tick so the user
+  // lands on a session that's already executing — no manual click.
   let pendingPromptApplied = false
   createEffect(() => {
     if (!prompt.ready()) return
     if (pendingPromptApplied) return
-    const pending = getSessionHandoff(route.sessionKey())?.pendingPrompt
+    const handoff = getSessionHandoff(route.sessionKey())
+    const pending = handoff?.pendingPrompt
     if (!pending || pending.length === 0) return
     pendingPromptApplied = true
     prompt.set(pending)
-    setSessionHandoff(route.sessionKey(), { pendingPrompt: undefined })
+    const shouldAutoSubmit = handoff?.autoSubmit === true
+    setSessionHandoff(route.sessionKey(), { pendingPrompt: undefined, autoSubmit: undefined })
+    if (shouldAutoSubmit) {
+      // Defer until the composer DOM has reflected the prompt.set() so
+      // form.requestSubmit() picks up the right content. Two animation
+      // frames is overkill but reliable across slow renders.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const form = document.querySelector<HTMLFormElement>(
+            '[data-component="prompt-input"] form, form[data-prompt-input]',
+          )
+          if (form && typeof form.requestSubmit === "function") {
+            form.requestSubmit()
+          } else {
+            // Fallback: bubble a synthetic submit event the same way the
+            // user would (Enter on the textarea).
+            const ta = document.querySelector<HTMLTextAreaElement>(
+              '[data-component="prompt-input"] textarea',
+            )
+            ta?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+          }
+        })
+      })
+    }
   })
 
   createEffect(() => {
