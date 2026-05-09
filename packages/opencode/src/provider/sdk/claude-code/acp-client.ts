@@ -144,31 +144,62 @@ function findNodeRuntime(): string {
   // so process.execPath can NOT execute arbitrary .js files. We need a
   // real Node interpreter. Probe common locations:
   //   - $OPENCODE_NODE_BINARY override
-  //   - bare `node` (PATH)
-  //   - Common Windows install dirs
-  // Returns absolute path or "node" (rely on PATH) — caller wraps in try/catch.
+  //   - Common Windows install dirs (absolute paths first — more reliable
+  //     than bare `node` because the sidecar's PATH often lacks them)
+  //   - bare `node` (PATH) as last resort
   const override = process.env["OPENCODE_NODE_BINARY"]
   if (override) return override
   if (process.platform === "win32") {
     const candidates = [
-      "node",
       "C:\\Program Files\\nodejs\\node.exe",
       "C:\\Program Files (x86)\\nodejs\\node.exe",
       `${process.env.LOCALAPPDATA}\\Programs\\nodejs\\node.exe`,
+      `${process.env.APPDATA}\\nvm\\node.exe`,
     ]
     const fs = require("node:fs") as typeof import("node:fs")
     for (const c of candidates) {
-      if (c === "node") return c // PATH probe handled by spawn
-      if (fs.existsSync(c)) return c
+      try {
+        if (fs.existsSync(c)) return c
+      } catch {}
     }
-    return "node"
+    return "node" // fallback to PATH; sync verify happens in verifyNodeAvailable()
   }
   return "node"
+}
+
+/** Sync check — does `<nodeBin> --version` actually succeed? Throws with
+ *  a user-friendly message if not, so the chat surfaces an actionable
+ *  error instead of hanging forever in "Thinking…". */
+function verifyNodeAvailable(nodeBin: string): void {
+  const sync = require("node:child_process").spawnSync as typeof import("node:child_process").spawnSync
+  try {
+    const r = sync(nodeBin, ["--version"], {
+      timeout: 3000,
+      shell: process.platform === "win32" && nodeBin === "node",
+      windowsHide: true,
+    })
+    if (r.status !== 0) {
+      throw new Error(`exit ${r.status}: ${(r.stderr ?? "").toString().slice(0, 100)}`)
+    }
+    log.info("node verified", { bin: nodeBin, version: (r.stdout ?? "").toString().trim() })
+  } catch (e: any) {
+    throw new Error(
+      `Node.js runtime not found (tried: ${nodeBin}). Install Node 18+ from https://nodejs.org ` +
+        `or set OPENCODE_NODE_BINARY=<absolute path to node.exe>. ` +
+        `Underlying: ${e?.code || e?.message || String(e).slice(0, 100)}`,
+    )
+  }
 }
 
 function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
   const adapterEntry = opts.adapterEntry || resolveAdapterEntry()
   const nodeBin = findNodeRuntime()
+  // Fail fast if Node is missing — without this check the spawn would
+  // succeed at OS level (ENOENT comes async) and our `ready` promise
+  // would await initialize() forever, leaving the chat UI in
+  // "Thinking…" with no error. The user reported exactly this hang on
+  // v2.41.5: "ciao" → Riflessione → loop infinito.
+  verifyNodeAvailable(nodeBin)
   log.info("spawning adapter", { entry: adapterEntry, node: nodeBin })
 
   const child = spawn(nodeBin, [adapterEntry], {
@@ -293,19 +324,50 @@ function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
     })
   })
 
+  // Cold-start timeout: the adapter has to boot Node + load
+  // claude-code-acp + handshake protocol with us. On a fast machine this
+  // is ~2s, on a slow one ~10-15s. 60s is generous and bounded — beyond
+  // that something is wrong (adapter crashed silently, ACP version
+  // mismatch, etc.) and we'd rather error than hang the chat forever.
+  const READY_TIMEOUT_MS = 60_000
   const ready = (async () => {
-    const init = await conn.initialize({
-      protocolVersion: 1,
-      clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true },
-        terminal: false,
-      },
-    })
+    const result = await Promise.race([
+      conn.initialize({
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: true },
+          terminal: false,
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `ACP adapter did not respond to initialize() within ${READY_TIMEOUT_MS / 1000}s. ` +
+                  `Check that Node.js is installed and the bundle at ${adapterEntry} is intact. ` +
+                  `Try: \`node ${adapterEntry}\` in a terminal — should print JSON-RPC notifications.`,
+              ),
+            ),
+          READY_TIMEOUT_MS,
+        ),
+      ),
+    ])
     log.info("initialize ok", {
-      protocolVersion: init.protocolVersion,
-      hasModes: Array.isArray((init as any).availableModes),
+      protocolVersion: result.protocolVersion,
+      hasModes: Array.isArray((result as any).availableModes),
     })
-  })()
+  })().catch((err) => {
+    // Reset the singleton so the next attempt re-spawns instead of
+    // re-using a dead/half-init'd adapter. Re-throw so callers see the
+    // real failure.
+    log.warn("adapter init failed", { err: String(err) })
+    if (_shared?.child === child) {
+      try { child.kill("SIGKILL") } catch {}
+      _shared = null
+    }
+    throw err
+  })
 
   return { child, conn, router, ready, closed }
 }
@@ -353,8 +415,28 @@ export async function acquireSession(opts: AcpClientOptions = {}): Promise<AcpSe
     sessionId,
     async prompt(blocks: ContentBlock[], cb: (n: SessionNotification) => void) {
       onUpdate = cb
+      // Hard cap: 5 minutes per turn. Real Claude responses (even with
+      // tool-use loops) finish in <60s on Pro/Max. Anything beyond 5min
+      // means the adapter or Claude is wedged and we'd rather error
+      // than leave the chat in "Thinking…" forever.
+      const PROMPT_TIMEOUT_MS = 5 * 60_000
       try {
-        const res = await s.conn.prompt({ sessionId, prompt: blocks })
+        const res = await Promise.race([
+          s.conn.prompt({ sessionId, prompt: blocks }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Claude Code agent did not finish within ${PROMPT_TIMEOUT_MS / 1000 / 60} minutes. ` +
+                      `Likely causes: subscription quota exhausted (resets at 8am Europe/Rome), ` +
+                      `network issue, or the adapter wedged. Check the diagnostic log.`,
+                  ),
+                ),
+              PROMPT_TIMEOUT_MS,
+            ),
+          ),
+        ])
         return {
           stopReason: res.stopReason,
           usage: extractUsage(res),
