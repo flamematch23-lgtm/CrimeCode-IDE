@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CrimeCode — Telegram channel avatar (circle-safe).
+
+  Telegram crops avatars in a circle. This SVG keeps every distinctive
+  element inside the inscribed circle of the 512×512 viewport (radius 256
+  from center 256,256), with the radial-gradient background blending the
+  edges so the circular crop reads as a deliberate vignette rather than a
+  cropped square. Glitch streaks are clipped to a horizontal band that
+  stays well inside the circle. The C glyph itself sits on a 320-px
+  bounding box centered on the canvas, leaving ~96 px of breathing room
+  on each side which Telegram's crop respects at every avatar size
+  (40×40 chat list, 80×80 profile, 512×512 channel page).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Radial backdrop: deep red at center fading to pure black at edges.
+         Reads identically before and after circular crop. -->
+    <radialGradient id="bg" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#3a0006"/>
+      <stop offset="40%" stop-color="#150003"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+
+    <!-- Crystal red gradient for the C body (matches the existing
+         crimecode-icon.png aesthetic but cleaner). -->
+    <linearGradient id="cFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff2a3d"/>
+      <stop offset="50%" stop-color="#d10018"/>
+      <stop offset="100%" stop-color="#7a000c"/>
+    </linearGradient>
+
+    <!-- Inner glow under the C -->
+    <radialGradient id="cGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff2a3d" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#7a000c" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Glitch streak band — clipped to a horizontal strip well inside
+         the safe circle (y 230..282) so the crop never lops off a half-
+         streak. -->
+    <clipPath id="streakBand">
+      <rect x="64" y="230" width="384" height="52"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- Soft center glow under the glyph -->
+  <circle cx="256" cy="256" r="170" fill="url(#cGlow)"/>
+
+  <!-- Glitch streaks (subtle, inside safe band) -->
+  <g clip-path="url(#streakBand)" opacity="0.45">
+    <rect x="80"  y="244" width="80"  height="2" fill="#ff2a3d"/>
+    <rect x="180" y="252" width="36"  height="1" fill="#ff5566"/>
+    <rect x="296" y="244" width="120" height="2" fill="#ff2a3d"/>
+    <rect x="430" y="252" width="14"  height="1" fill="#ff5566"/>
+    <rect x="100" y="266" width="48"  height="1" fill="#7a000c"/>
+    <rect x="320" y="270" width="80"  height="1" fill="#7a000c"/>
+  </g>
+
+  <!-- The C glyph: a hexagonal C-shape inspired by the existing icon.
+       Drawn as one path so the inner cutout follows the outer outline.
+       Bounds: x 116..396 (width 280), y 96..416 (height 320). -->
+  <g>
+    <!-- Outer hex with C-cut -->
+    <path
+      d="
+        M 256 96
+        L 396 176
+        L 396 240
+        L 316 194
+        L 196 194
+        L 156 264
+        L 196 334
+        L 316 334
+        L 396 288
+        L 396 352
+        L 256 432
+        L 116 352
+        L 116 176
+        Z
+      "
+      fill="url(#cFill)"
+      stroke="#ff2a3d"
+      stroke-width="2"
+      stroke-linejoin="miter"
+    />
+
+    <!-- Inner crystal facet (the bright diamond inside the C) -->
+    <path
+      d="M 256 222 L 296 264 L 256 306 L 216 264 Z"
+      fill="#ff5566"
+      opacity="0.85"
+    />
+    <path
+      d="M 256 222 L 256 306 M 216 264 L 296 264"
+      stroke="#ffb3b3"
+      stroke-width="1.5"
+      opacity="0.6"
+    />
+
+    <!-- Specular highlight on the upper-left of the C -->
+    <path
+      d="M 256 96 L 256 138 L 154 196 L 116 176 Z"
+      fill="#ffffff"
+      opacity="0.10"
+    />
+  </g>
+
+  <!-- Subtle outer ring to define the avatar shape (visible only to
+       full-size viewers; vanishes under Telegram's circular crop because
+       it sits exactly on the inscribed-circle boundary). -->
+  <circle cx="256" cy="256" r="252" fill="none"
+          stroke="#ff2a3d" stroke-width="1" opacity="0.18"/>
+</svg>
