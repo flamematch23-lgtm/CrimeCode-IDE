@@ -131,7 +131,7 @@ jobs:
           # a un canale diverso. È baked nel bundle (import.meta.env), quindi
           # serve un nuovo build per propagare il cambio. Default fallback in
           # codice è lo stesso URL (community.tsx).
-          VITE_TELEGRAM_CHANNEL_URL: "https://t.me/OpCrimeGPT"
+          VITE_TELEGRAM_CHANNEL_URL: "https://t.me/CrimeCodeDev"
           SIGN_PASS: ${{ secrets.SIGN_PASS }}
           SIGN_PUBLISHER: ${{ secrets.SIGN_PUBLISHER }}
           SKIP_SIDECAR_STASH: "1" # CI has no OneDrive locks, stash not needed
