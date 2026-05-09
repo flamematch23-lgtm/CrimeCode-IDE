@@ -315,6 +315,12 @@ export const SortableWorkspace = (props: {
   const params = useParams()
   const globalSync = useGlobalSync()
   const language = useLanguage()
+  // Builder modal trigger — must be acquired here at component scope, not
+  // inside the click callback (calling useDialog() inside a callback throws
+  // a hooks-lifecycle error and silently falls back to the legacy navigate).
+  const dialog = (() => {
+    try { return useDialog() } catch { return null }
+  })()
   const sortable = createSortable(props.directory)
   const [workspaceStore, setWorkspaceStore] = globalSync.child(props.directory, { bootstrap: false })
   const [menu, setMenu] = createStore({
@@ -436,15 +442,10 @@ export const SortableWorkspace = (props: {
                 clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
                 navigateToNewSession={() => {
                   // Open the Builder modal instead of jumping straight to a
-                  // blank session. The dialog gathers tab/prompt/model and
-                  // creates the session itself; if the user cancels we don't
-                  // even create one (avoids the previous "empty session
-                  // litter" pattern). Fallback: if the dialog provider isn't
-                  // available for some reason (legacy harness), we still
-                  // navigate as before.
-                  const dialog = (() => {
-                    try { return useDialog() } catch { return null }
-                  })()
+                  // blank session. Dialog ref captured at component-scope
+                  // (not here — useDialog() inside a callback would throw
+                  // a hooks-lifecycle error). Fallback to legacy navigate
+                  // only if the DialogProvider really isn't mounted above.
                   if (dialog) {
                     dialog.show(() => <DialogBuilder workspaceDirectory={props.project.worktree} />)
                     return
