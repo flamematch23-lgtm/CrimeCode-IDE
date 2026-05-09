@@ -13,13 +13,19 @@ import {
   getMyProfile,
   getPublicProfile,
   getRecentMessages,
+  getRepBudget,
+  getUserBadges,
+  giveRep,
   hasAccountSession,
   openChatStream,
   postMessage,
+  refreshMyBadges,
   setUsername,
+  type Badge,
   type ChatMessage,
   type LeaderboardEntry,
 } from "@/utils/community-client"
+import { DmPanel } from "./community-dm"
 
 const PERIOD_LABELS: Record<"30d" | "all", string> = {
   "30d": "Ultimi 30 giorni",
@@ -40,6 +46,55 @@ function rankBadge(rank: number): { color: string; label: string } {
   if (rank === 2) return { color: "text-text-secondary", label: "🥈" }
   if (rank === 3) return { color: "text-icon-warning-base", label: "🥉" }
   return { color: "text-text-weak", label: `#${rank}` }
+}
+
+// ─── Mention parser ─────────────────────────────────────────────────
+// Splits chat body into tokens where mentions @username diventano span
+// stilizzati. Se la mention sei tu, highlight giallo (notifica visiva).
+const MENTION_RE = /@([a-zA-Z0-9_-]{3,20})/g
+
+function MessageBody(props: { body: string; myUsername: string | null }) {
+  const segments = createMemo(() => {
+    const out: Array<{ type: "text" | "mention"; value: string; isMe?: boolean }> = []
+    let lastIdx = 0
+    const text = props.body
+    for (const match of text.matchAll(MENTION_RE)) {
+      const idx = match.index ?? 0
+      if (idx > lastIdx) out.push({ type: "text", value: text.slice(lastIdx, idx) })
+      const username = match[1]
+      out.push({
+        type: "mention",
+        value: `@${username}`,
+        isMe: !!props.myUsername && username.toLowerCase() === props.myUsername.toLowerCase(),
+      })
+      lastIdx = idx + match[0].length
+    }
+    if (lastIdx < text.length) out.push({ type: "text", value: text.slice(lastIdx) })
+    return out
+  })
+
+  return (
+    <span class="text-12-regular text-text-base whitespace-pre-wrap break-words">
+      <For each={segments()}>
+        {(seg) =>
+          seg.type === "text" ? (
+            <span>{seg.value}</span>
+          ) : (
+            <span
+              class="font-semibold rounded px-1"
+              classList={{
+                "bg-icon-warning-base/30 text-text-strong": seg.isMe,
+                "text-icon-warning-base": !seg.isMe,
+              }}
+              title={seg.isMe ? "Sei stato menzionato" : `Mention @${seg.value.slice(1)}`}
+            >
+              {seg.value}
+            </span>
+          )
+        }
+      </For>
+    </span>
+  )
 }
 
 // ─── Phase 2: Chat panel ─────────────────────────────────────────────
@@ -230,7 +285,7 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
                         </button>
                       </Show>
                     </div>
-                    <div class="text-12-regular text-text-base whitespace-pre-wrap break-words">{msg.body}</div>
+                    <MessageBody body={msg.body} myUsername={props.myUsername} />
                   </div>
                 </div>
               )
@@ -292,7 +347,7 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
 
 const CommunityPage: Component = () => {
   const navigate = useNavigate()
-  const [tab, setTab] = createSignal<"leaderboard" | "chat">("leaderboard")
+  const [tab, setTab] = createSignal<"leaderboard" | "chat" | "dm">("leaderboard")
   const [period, setPeriod] = createSignal<"30d" | "all">("30d")
   const [signedIn, setSignedIn] = createSignal(hasAccountSession())
   const [usernameDraft, setUsernameDraft] = createSignal("")
@@ -320,6 +375,40 @@ const CommunityPage: Component = () => {
     if (!u) return null
     return await getPublicProfile(u).catch(() => null)
   })
+
+  // Phase 3: badges del profilo selezionato (per chip nel public profile preview)
+  const [selectedBadges] = createResource(selectedUser, async (u) => {
+    if (!u) return [] as Badge[]
+    return await getUserBadges(u).catch(() => [] as Badge[])
+  })
+
+  // Phase 3: budget rep dell'utente loggato (refresh quando dai un rep)
+  const [repBudget, { refetch: refetchBudget }] = createResource(signedIn, async (yes) => {
+    if (!yes) return null
+    return await getRepBudget()
+  })
+
+  const [givingRep, setGivingRep] = createSignal(false)
+  const handleGiveRep = async (target: string) => {
+    setGivingRep(true)
+    try {
+      const res = await giveRep(target)
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Rep non dato", description: res.error })
+        return
+      }
+      showToast({
+        variant: "success",
+        title: `+1 rep dato a @${target}`,
+        description: `Te ne restano ${res.remaining_today} per oggi.`,
+      })
+      await refetchBudget()
+      // Trigger badges refresh sul giver (potrebbe aver guadagnato achievement)
+      void refreshMyBadges()
+    } finally {
+      setGivingRep(false)
+    }
+  }
 
   const handleSetUsername = async () => {
     const value = usernameDraft().trim()
@@ -366,6 +455,7 @@ const CommunityPage: Component = () => {
           each={[
             { id: "leaderboard" as const, label: "Leaderboard", icon: "branch" },
             { id: "chat" as const, label: "Chat globale", icon: "code-lines" },
+            { id: "dm" as const, label: "DM privati", icon: "folder-add-left" },
           ]}
         >
           {(t) => (
@@ -392,6 +482,37 @@ const CommunityPage: Component = () => {
       {/* Body */}
       <div class="flex-1 overflow-y-auto p-4">
         <div class="max-w-4xl mx-auto space-y-4">
+
+          {/* DM TAB */}
+          <Show when={tab() === "dm"}>
+            <Show
+              when={signedIn()}
+              fallback={
+                <div class="bg-surface-warning/10 border border-surface-warning/30 rounded-lg p-4 text-12-regular">
+                  <div class="font-semibold text-text-strong mb-1">Non sei loggato</div>
+                  <div class="text-text-weak mb-3">Per i DM 1:1 devi avere un CrimeCode account loggato + username pubblico.</div>
+                  <Button variant="primary" size="small" onClick={() => navigate("/account")}>
+                    Vai a Account
+                  </Button>
+                </div>
+              }
+            >
+              <Show
+                when={me()?.username}
+                fallback={
+                  <div class="bg-surface-warning/10 border border-surface-warning/30 rounded-lg p-4 text-12-regular">
+                    <div class="font-semibold text-text-strong mb-1">Username mancante</div>
+                    <div class="text-text-weak mb-3">Imposta prima un username nella tab Leaderboard.</div>
+                    <Button variant="primary" size="small" onClick={() => setTab("leaderboard")}>
+                      Imposta username
+                    </Button>
+                  </div>
+                }
+              >
+                <DmPanel myUsername={me()!.username} />
+              </Show>
+            </Show>
+          </Show>
 
           {/* CHAT TAB */}
           <Show when={tab() === "chat"}>
@@ -622,6 +743,54 @@ const CommunityPage: Component = () => {
                     <div class="mt-3 text-11-regular text-text-weak">
                       Membro da {new Date(p().created_at).toLocaleDateString()} · attivo {formatRelative(p().last_active)}
                     </div>
+
+                    {/* Phase 3: Badges chip row */}
+                    <Show when={(selectedBadges() ?? []).length > 0}>
+                      <div class="mt-3 flex flex-wrap gap-1.5">
+                        <For each={selectedBadges() ?? []}>
+                          {(badge) => (
+                            <div
+                              title={badge.description}
+                              class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-weak text-11-regular cursor-help"
+                            >
+                              <span>{badge.emoji}</span>
+                              <span class="text-text-base">{badge.label}</span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+
+                    {/* Phase 3: Action buttons (DM + Rep) — solo se signed-in
+                        e NON sto guardando il mio stesso profilo */}
+                    <Show when={signedIn() && me()?.username && p().username !== me()!.username}>
+                      <div class="mt-4 flex flex-wrap gap-2 items-center">
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          onClick={() => {
+                            setTab("dm")
+                            // Pre-seleziona il peer al cambio tab
+                            setTimeout(() => setSelectedUser(null), 50)
+                          }}
+                        >
+                          💬 Manda DM
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="small"
+                          onClick={() => void handleGiveRep(p().username)}
+                          disabled={givingRep() || (repBudget()?.remaining ?? 0) <= 0}
+                        >
+                          +1 Rep
+                        </Button>
+                        <Show when={repBudget()}>
+                          <span class="text-10-regular text-text-weak">
+                            ({repBudget()!.remaining}/{repBudget()!.budget_total} oggi)
+                          </span>
+                        </Show>
+                      </div>
+                    </Show>
                   </div>
                 </div>
               </div>
@@ -630,16 +799,16 @@ const CommunityPage: Component = () => {
 
           </Show>
 
-          {/* Coming soon footer (visible su entrambi i tab) */}
+          {/* Phase 4 footer (visible su tutti i tab) */}
           <div class="bg-surface-base/50 border border-surface-weak rounded-lg p-4 text-12-regular text-text-weak">
             <div class="font-semibold text-text-strong mb-1 flex items-center gap-2">
-              <Icon name="code-lines" size="small" /> Phase 3 in arrivo
+              <Icon name="code-lines" size="small" /> Phase 4 future
             </div>
             <ul class="ml-4 list-disc space-y-0.5">
-              <li>DM 1:1 privati tra utenti</li>
-              <li>Sistema +rep tra utenti (anti-gaming + ponderato per rank)</li>
-              <li>Badges & achievements (First Bounty, Veteran, Helper, ...)</li>
-              <li>Notifiche desktop su menzioni @username</li>
+              <li>Notifiche desktop native su menzioni @username e nuovi DM</li>
+              <li>Voice/video DM e screen sharing</li>
+              <li>Badges custom uploadabili</li>
+              <li>Community moderation tools (report queue + admin actions)</li>
             </ul>
           </div>
         </div>

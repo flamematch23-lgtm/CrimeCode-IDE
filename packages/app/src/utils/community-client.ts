@@ -234,3 +234,164 @@ export function openChatStream(): EventSource {
   // L'auth è richiesta solo al POST.
   return new EventSource(url)
 }
+
+// ─── Phase 3: DM 1:1 ─────────────────────────────────────────────────
+
+export interface DmConversation {
+  conversation_id: number
+  peer_id: string
+  peer_username: string
+  peer_avatar_seed: string
+  last_message_at: number
+  last_body: string | null
+  last_sender: string | null
+  unread_count: number
+}
+
+export interface DmMessage {
+  id: number
+  is_mine: boolean
+  body: string
+  ts: number
+  read_at: number | null
+}
+
+export interface DmConversationDetail {
+  conversation_id: number
+  peer: { customer_id: string; username: string }
+  messages: DmMessage[]
+}
+
+export async function getInbox(): Promise<DmConversation[]> {
+  if (!hasAccountSession()) return []
+  const res = await authedFetch("/community/dm/inbox")
+  if (!res.ok) return []
+  const body = (await res.json()) as { conversations: DmConversation[] }
+  return body.conversations
+}
+
+export async function openConversationWith(username: string): Promise<DmConversationDetail | null> {
+  if (!hasAccountSession()) return null
+  const res = await authedFetch(`/community/dm/with/${encodeURIComponent(username)}`)
+  if (!res.ok) return null
+  return (await res.json()) as DmConversationDetail
+}
+
+export async function sendDm(
+  to_username: string,
+  body: string,
+): Promise<{ ok: true; message: { id: number; sender_username: string; body: string; ts: number }; conversation_id: number } | { ok: false; error: string }> {
+  if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const res = await authedFetch("/community/dm/send", {
+    method: "POST",
+    body: JSON.stringify({ to_username, body }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean
+    message?: { id: number; sender_username: string; body: string; ts: number }
+    conversation_id?: number
+    error?: string
+  }
+  if (!res.ok || !data.ok || !data.message) return { ok: false, error: data.error ?? `error ${res.status}` }
+  return { ok: true, message: data.message, conversation_id: data.conversation_id! }
+}
+
+/** Apre lo stream personale DM. Token in query param (EventSource non supporta header). */
+export function openDmStream(): EventSource | null {
+  const session = readWebSession()
+  if (!session) return null
+  const url = `${CLOUD_BASE}/community/dm/stream?token=${encodeURIComponent(session.token)}`
+  return new EventSource(url)
+}
+
+export async function blockUser(username: string): Promise<boolean> {
+  if (!hasAccountSession()) return false
+  const res = await authedFetch(`/community/dm/block/${encodeURIComponent(username)}`, { method: "POST" })
+  return res.ok
+}
+
+export async function unblockUser(username: string): Promise<boolean> {
+  if (!hasAccountSession()) return false
+  const res = await authedFetch(`/community/dm/block/${encodeURIComponent(username)}`, { method: "DELETE" })
+  return res.ok
+}
+
+// ─── Phase 3: Rep system ─────────────────────────────────────────────
+
+export interface RepBudget {
+  budget_total: number
+  given_today: number
+  remaining: number
+  reset_in_ms: number
+}
+
+export interface RepEntry {
+  giver_username?: string
+  receiver_username?: string
+  note: string | null
+  ts: number
+}
+
+export async function getRepBudget(): Promise<RepBudget | null> {
+  if (!hasAccountSession()) return null
+  const res = await authedFetch("/community/me/rep/budget")
+  if (!res.ok) return null
+  return (await res.json()) as RepBudget
+}
+
+export async function giveRep(
+  username: string,
+  note?: string,
+): Promise<{ ok: true; remaining_today: number } | { ok: false; error: string }> {
+  if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const res = await authedFetch(`/community/u/${encodeURIComponent(username)}/rep`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? "" }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean
+    remaining_today?: number
+    error?: string
+  }
+  if (!res.ok || !data.ok) return { ok: false, error: data.error ?? `error ${res.status}` }
+  return { ok: true, remaining_today: data.remaining_today ?? 0 }
+}
+
+export async function getRepReceived(username: string): Promise<RepEntry[]> {
+  const res = await publicFetch(`/community/u/${encodeURIComponent(username)}/rep`)
+  if (!res.ok) return []
+  const body = (await res.json()) as { entries: RepEntry[] }
+  return body.entries
+}
+
+// ─── Phase 3: Badges ─────────────────────────────────────────────────
+
+export interface Badge {
+  id: string
+  label: string
+  description: string
+  emoji: string
+  awarded_at?: number
+}
+
+export async function getUserBadges(username: string): Promise<Badge[]> {
+  const res = await publicFetch(`/community/u/${encodeURIComponent(username)}/badges`)
+  if (!res.ok) return []
+  const body = (await res.json()) as { badges: Badge[] }
+  return body.badges
+}
+
+export async function getBadgesCatalog(): Promise<Badge[]> {
+  const res = await publicFetch("/community/badges/catalog")
+  if (!res.ok) return []
+  const body = (await res.json()) as { badges: Badge[] }
+  return body.badges
+}
+
+export async function refreshMyBadges(): Promise<Badge[]> {
+  if (!hasAccountSession()) return []
+  const res = await authedFetch("/community/me/badges/refresh", { method: "POST" })
+  if (!res.ok) return []
+  const body = (await res.json()) as { newly_awarded: Badge[] }
+  return body.newly_awarded
+}

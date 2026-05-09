@@ -39,6 +39,9 @@ import { getLicenseDb } from "./license-auth.ts"
 import { mountUserRoutes } from "./routes/user.ts"
 import { mountCommunityRoutes } from "./routes/community.ts"
 import { mountCommunityChatRoutes } from "./routes/community-chat.ts"
+import { mountCommunityDmRoutes } from "./routes/community-dm.ts"
+import { mountCommunityRepRoutes } from "./routes/community-rep.ts"
+import { mountCommunityBadgesRoutes } from "./routes/community-badges.ts"
 import { join } from "node:path"
 import {
   acquireSlot,
@@ -158,8 +161,11 @@ mountUserRoutes(app, { licenseDb: getLicenseDb(), usageDb: getDb() })
 // Community Phase 1: profilo + leaderboard read-only.
 mountCommunityRoutes(app, { licenseDb: getLicenseDb() })
 // Community Phase 2: chat globale live tra utenti via SSE broadcast.
-// Phase 3 (DM 1:1 + rep) atterra in community-dm.ts in turno dedicato.
 mountCommunityChatRoutes(app, { licenseDb: getLicenseDb() })
+// Community Phase 3: DM 1:1 + sistema +rep + badges automatici.
+mountCommunityDmRoutes(app, { licenseDb: getLicenseDb() })
+mountCommunityRepRoutes(app, { licenseDb: getLicenseDb() })
+mountCommunityBadgesRoutes(app, { licenseDb: getLicenseDb() })
 
 // Public health
 app.get("/healthz", (c) => {
