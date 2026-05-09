@@ -16,6 +16,8 @@ import { type Session } from "@opencode-ai/sdk/v2/client"
 import { type LocalProject } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { DialogBuilder } from "@/components/dialog-builder"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { childMapByParent, sortedRootSessions, workspaceKey } from "./helpers"
 
@@ -432,7 +434,23 @@ export const SortableWorkspace = (props: {
                 root={props.project.worktree}
                 setHoverSession={props.ctx.setHoverSession}
                 clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
-                navigateToNewSession={() => navigate(`/${slug()}/session`)}
+                navigateToNewSession={() => {
+                  // Open the Builder modal instead of jumping straight to a
+                  // blank session. The dialog gathers tab/prompt/model and
+                  // creates the session itself; if the user cancels we don't
+                  // even create one (avoids the previous "empty session
+                  // litter" pattern). Fallback: if the dialog provider isn't
+                  // available for some reason (legacy harness), we still
+                  // navigate as before.
+                  const dialog = (() => {
+                    try { return useDialog() } catch { return null }
+                  })()
+                  if (dialog) {
+                    dialog.show(() => <DialogBuilder workspaceDirectory={props.project.worktree} />)
+                    return
+                  }
+                  navigate(`/${slug()}/session`)
+                }}
               />
             </div>
           </div>

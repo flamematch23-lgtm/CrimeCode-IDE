@@ -102,7 +102,7 @@ async function authedFetch(path: string, init?: RequestInit): Promise<Response> 
   return fetch(CLOUD_BASE + path, { ...init, headers })
 }
 
-async function publicFetch(path: string): Promise<Response> {
+export async function publicFetch(path: string): Promise<Response> {
   return fetch(CLOUD_BASE + path)
 }
 

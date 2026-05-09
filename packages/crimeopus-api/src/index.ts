@@ -43,6 +43,7 @@ import { mountCommunityDmRoutes } from "./routes/community-dm.ts"
 import { mountCommunityRepRoutes } from "./routes/community-rep.ts"
 import { mountCommunityBadgesRoutes } from "./routes/community-badges.ts"
 import { mountCommunityUploadsRoutes } from "./routes/community-uploads.ts"
+import { mountBuilderTemplatesRoutes } from "./routes/builder-templates.ts"
 import { join } from "node:path"
 import {
   acquireSlot,
@@ -184,6 +185,8 @@ mountCommunityRepRoutes(app, { licenseDb: getLicenseDb() })
 mountCommunityBadgesRoutes(app, { licenseDb: getLicenseDb() })
 // Community Phase 4 (partial): avatar custom + badge custom uploadabili.
 mountCommunityUploadsRoutes(app, { licenseDb: getLicenseDb() })
+// Builder templates: chip suggestions per la modal "Nuovo progetto".
+mountBuilderTemplatesRoutes(app, { licenseDb: getLicenseDb() })
 
 // Public health
 app.get("/healthz", (c) => {
