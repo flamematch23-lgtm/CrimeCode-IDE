@@ -57,11 +57,20 @@ export type CommunityEventType =
   | "exploit_chain_built"
   | "report_generated"
 
+// IMPORTANTE: gli endpoint /community/* sono deployati su `ai.crimecode.cc`
+// (gateway crimeopus-api su VPS Hetzner), NON su `api.crimecode.cc`
+// (OpenCode serve su Fly.io). account-client.ts usa api.crimecode.cc perché lì
+// stanno gli endpoint /account/* (auth/me/devices). Le due basi sono SERVIZI
+// DIVERSI e non condividono routing.
+//
+// Bug identificato in v2.34.0: community-client.ts ereditava la stessa base
+// di account-client.ts → tutti i fetch /community/* andavano su api.crimecode.cc
+// che non ha quelle route → 401 dal middleware auth del backend.
 const CLOUD_BASE = (() => {
   const meta = import.meta as unknown as { env?: Record<string, string | undefined> }
-  const explicit = meta?.env?.VITE_LICENSE_API_URL ?? meta?.env?.VITE_API_URL
+  const explicit = meta?.env?.VITE_COMMUNITY_API_URL ?? meta?.env?.VITE_GATEWAY_URL
   if (explicit) return String(explicit).replace(/\/+$/, "")
-  return "https://api.crimecode.cc"
+  return "https://ai.crimecode.cc"
 })()
 
 class NotSignedInError extends Error {
