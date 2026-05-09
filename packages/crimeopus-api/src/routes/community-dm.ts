@@ -364,6 +364,11 @@ export function mountCommunityDmRoutes(app: Hono, deps: CommunityDmDeps) {
     if (!session || session.revoked_at) return c.json({ error: "session invalid" }, 401)
     const userId = session.customer_id
 
+    // Stesso fix CORS/buffering della /chat/stream — Hono cors middleware
+    // non inietta headers su response SSE già committed.
+    c.header("Access-Control-Allow-Origin", "*")
+    c.header("Cache-Control", "no-cache, no-transform")
+    c.header("X-Accel-Buffering", "no")
     return streamSSE(c, async (stream) => {
       const sub: Subscriber = {
         userId,

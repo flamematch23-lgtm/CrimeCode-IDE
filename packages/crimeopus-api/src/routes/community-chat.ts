@@ -218,6 +218,13 @@ export function mountCommunityChatRoutes(app: Hono, deps: CommunityChatDeps) {
   // Fa anche heartbeat ogni 25s per tenere la connessione viva attraverso
   // proxy/load balancer che killano connessioni idle a 30s.
   app.get("/community/chat/stream", (c: Context) => {
+    // BUG-FIX (EventSource error readyState=0 da Electron renderer):
+    // Hono cors middleware non riesce ad iniettare ACAO sulle response SSE
+    // perché lo stream è già committed quando il middleware prova ad
+    // aggiungere gli headers. Settiamoli manualmente prima di streamSSE.
+    c.header("Access-Control-Allow-Origin", "*")
+    c.header("Cache-Control", "no-cache, no-transform")
+    c.header("X-Accel-Buffering", "no") // disabilita buffering proxy nginx/caddy
     return streamSSE(c, async (stream) => {
       const sub: Subscriber = {
         send: (msg) => {
