@@ -97,8 +97,19 @@ export function WorkspaceSwitcher() {
     () => account() ?? null,
     async (acc) => {
       if (!acc) return []
-      const r = await client.list()
-      return r.teams
+      try {
+        const r = await client.list()
+        return r.teams
+      } catch (err) {
+        // Network failure (control-plane unreachable) shouldn't crash the app
+        // boot — return an empty list and log so the workspace switcher is
+        // still usable. The user can refetch manually once connectivity is
+        // back. Without this catch, the rejection bubbles up to the global
+        // ErrorBoundary in app.tsx and shows the "Qualcosa è andato storto"
+        // crash screen on every startup when ai.crimecode.cc is down.
+        console.warn("[teams] list failed, returning empty:", err)
+        return []
+      }
     },
   )
   const [showCreate, setShowCreate] = createSignal(false)

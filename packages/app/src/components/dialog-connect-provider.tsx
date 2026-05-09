@@ -9,7 +9,7 @@ import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
-import { createEffect, createMemo, createResource, Match, onCleanup, onMount, Switch } from "solid-js"
+import { createEffect, createMemo, createResource, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useGlobalSDK } from "@/context/global-sdk"
@@ -325,6 +325,10 @@ export function DialogConnectProvider(props: { provider: string }) {
   createEffect(() => {
     if (auto) return
     if (loading()) return
+    // claude-code has no auth method UX — it shows install instructions
+    // directly. Skip the auto-select so we don't dispatch a phantom
+    // "method.select" for the fallback API form that we never render.
+    if (props.provider === "claude-code") return
     if (methods().length === 1) {
       auto = true
       selectMethod(0)
@@ -387,6 +391,127 @@ export function DialogConnectProvider(props: { provider: string }) {
           </List>
         </div>
       </>
+    )
+  }
+
+  // Special view for the `claude-code` provider — there is no API key or
+  // OAuth flow here; auth happens by running `claude auth login` in a real
+  // terminal. We just surface the detection state from provider.options.
+  function ClaudeCodeStatusView() {
+    const cli = createMemo(() => {
+      // The /provider endpoint returns provider.options at runtime but the
+      // generated OpenAPI types don't include it on the list response, so we
+      // cast through unknown to fish out the claudeCli detection block.
+      const raw = provider() as unknown as {
+        options?: {
+          claudeCli?: {
+            installed?: boolean
+            loggedIn?: boolean
+            version?: string
+            authMethod?: string
+            email?: string
+            subscriptionType?: string
+            errorMessage?: string
+          }
+        }
+      }
+      return (
+        raw?.options?.claudeCli ?? {
+          installed: false,
+          loggedIn: false,
+          version: undefined as string | undefined,
+          authMethod: undefined as string | undefined,
+          email: undefined as string | undefined,
+          subscriptionType: undefined as string | undefined,
+          errorMessage: undefined as string | undefined,
+        }
+      )
+    })
+
+    return (
+      <div class="flex flex-col gap-6">
+        <div class="text-14-regular text-text-base">
+          CrimeCode usa il binario <code class="font-mono text-text-strong">claude</code> installato localmente
+          come bridge verso il tuo abbonamento Pro/Max. Le richieste passano dal subscription quota e non
+          consumano token API a pagamento.
+        </div>
+
+        <Switch>
+          <Match when={!cli().installed}>
+            <div class="flex flex-col gap-3 rounded border border-border-base p-3">
+              <div class="text-14-medium text-text-strong flex items-center gap-2">
+                <Icon name="circle-ban-sign" class="text-icon-critical-base" />
+                Claude Code CLI non rilevata
+              </div>
+              <div class="text-14-regular text-text-base">
+                Installa la CLI da{" "}
+                <Link href="https://docs.claude.com/claude-code" tabIndex={-1}>
+                  docs.claude.com/claude-code
+                </Link>{" "}
+                e poi esegui in un terminale:
+              </div>
+              <pre class="bg-input-base rounded p-2 text-13-regular font-mono text-text-strong overflow-x-auto">
+                claude auth login
+              </pre>
+              <div class="text-13-regular text-text-weak">
+                Dopo il login, riapri questa finestra: il provider apparirà collegato automaticamente.
+              </div>
+              <Show when={cli().errorMessage}>
+                {(msg) => <div class="text-12-regular text-text-weak font-mono">{msg()}</div>}
+              </Show>
+            </div>
+          </Match>
+          <Match when={!cli().loggedIn}>
+            <div class="flex flex-col gap-3 rounded border border-border-base p-3">
+              <div class="text-14-medium text-text-strong flex items-center gap-2">
+                <Icon name="circle-ban-sign" class="text-icon-critical-base" />
+                Claude CLI installata ({cli().version}) ma non loggata
+              </div>
+              <div class="text-14-regular text-text-base">Esegui questo comando in un terminale:</div>
+              <pre class="bg-input-base rounded p-2 text-13-regular font-mono text-text-strong overflow-x-auto">
+                claude auth login
+              </pre>
+              <div class="text-13-regular text-text-weak">
+                Scegli il tuo account Pro/Max. Quando compare "Logged in", torna qui e ricarica.
+              </div>
+            </div>
+          </Match>
+          <Match when={true}>
+            <div class="flex flex-col gap-3 rounded border border-border-base p-3">
+              <div class="text-14-medium text-text-strong flex items-center gap-2">
+                <Icon name="circle-check" class="text-icon-success-base" />
+                Pronto
+              </div>
+              <div class="text-13-regular text-text-base flex flex-col gap-1">
+                <div>
+                  Versione CLI: <span class="font-mono">{cli().version}</span>
+                </div>
+                <Show when={cli().email}>
+                  <div>
+                    Account: <span class="font-mono">{cli().email}</span>
+                  </div>
+                </Show>
+                <Show when={cli().subscriptionType}>
+                  <div>
+                    Sottoscrizione: <span class="font-mono">{cli().subscriptionType}</span>
+                  </div>
+                </Show>
+                <Show when={cli().authMethod}>
+                  <div>
+                    Auth: <span class="font-mono">{cli().authMethod}</span>
+                  </div>
+                </Show>
+              </div>
+              <div class="text-13-regular text-text-weak">
+                Costo per richiesta: $0 (le chiamate consumano la tua quota subscription, non token API).
+              </div>
+            </div>
+            <Button class="w-auto" size="large" variant="primary" onClick={() => dialog.close()}>
+              Fatto
+            </Button>
+          </Match>
+        </Switch>
+      </div>
     )
   }
 
@@ -602,6 +727,9 @@ export function DialogConnectProvider(props: { provider: string }) {
         <div class="px-2.5 pb-10 flex flex-col gap-6">
           <div onKeyDown={handleKey} tabIndex={0} autofocus={store.methodIndex === undefined ? true : undefined}>
             <Switch>
+              <Match when={props.provider === "claude-code"}>
+                <ClaudeCodeStatusView />
+              </Match>
               <Match when={loading()}>
                 <div class="text-14-regular text-text-base">
                   <div class="flex items-center gap-x-2">

@@ -71,9 +71,16 @@ PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 log "Syncing code from $PACKAGE_DIR → $APP_HOME"
 rsync -a --delete \
   --exclude node_modules --exclude dist --exclude .env --exclude usage.db \
+  --exclude uploads \
   --exclude '.git*' \
   "$PACKAGE_DIR/" "$APP_HOME/"
 chown -R "$APP_USER:$APP_USER" "$APP_HOME"
+# Ensure uploads dir exists with correct ownership BEFORE first start, so
+# the API user can write avatars/badges. (Without this, the dir is created
+# by mkdirSync at first request and inherits root ownership when the API
+# was launched once as root before the systemd unit took over.)
+mkdir -p "$APP_HOME/uploads/avatars" "$APP_HOME/uploads/badges"
+chown -R "$APP_USER:$APP_USER" "$APP_HOME/uploads"
 ok "Code synced"
 
 # ── 4. Install deps ────────────────────────────────────────────

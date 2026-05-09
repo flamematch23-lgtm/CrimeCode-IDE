@@ -658,7 +658,26 @@ export function registerIpcHandlers(deps: Deps) {
     return body
   }
 
-  ipcMain.handle("teams-list", () => teamJson(`/license/teams`))
+  // Read-only team queries swallow network errors and return empty state so a
+  // dead/blocked control-plane API doesn't crash the renderer at boot.
+  // Mutations (create/delete/rename/etc.) still surface errors to the UI as
+  // before — the user explicitly asked for them, so showing a failure is the
+  // right outcome.
+  const teamJsonOrEmpty = async <T>(path: string, fallback: T): Promise<T> => {
+    try {
+      return (await teamJson(path)) as T
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Network errors (fetch failed, ETIMEDOUT, ECONNREFUSED) are exactly
+      // what would otherwise crash the boot. HTTP errors (401, 500) we still
+      // log and return empty so the app is usable; the user can sign back in
+      // from the workspace switcher if needed.
+      console.warn(`[teams] ${path} failed, returning fallback:`, msg)
+      return fallback
+    }
+  }
+
+  ipcMain.handle("teams-list", () => teamJsonOrEmpty(`/license/teams`, { teams: [] }))
   ipcMain.handle("teams-create", (_e, name: string) =>
     teamJson(`/license/teams`, {
       method: "POST",
@@ -702,7 +721,7 @@ export function registerIpcHandlers(deps: Deps) {
     }),
   )
   ipcMain.handle("teams-list-sessions", (_e, teamId: string) =>
-    teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`),
+    teamJsonOrEmpty(`/license/teams/${encodeURIComponent(teamId)}/sessions`, { sessions: [] }),
   )
   ipcMain.handle("teams-publish-session", (_e, teamId: string, title: string, state: unknown) =>
     teamJson(`/license/teams/${encodeURIComponent(teamId)}/sessions`, {
@@ -1268,8 +1287,9 @@ export function registerIpcHandlers(deps: Deps) {
 
   // ── Team chat ──
   ipcMain.handle("teams-list-chat", (_e, teamId: string, limit?: number) =>
-    teamJson(
+    teamJsonOrEmpty(
       `/license/teams/${encodeURIComponent(teamId)}/chat${limit ? "?limit=" + Number(limit) : ""}`,
+      { messages: [] },
     ),
   )
   ipcMain.handle("teams-post-chat", (_e, teamId: string, text: string) =>

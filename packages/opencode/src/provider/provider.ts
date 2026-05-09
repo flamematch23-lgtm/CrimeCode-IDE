@@ -779,6 +779,53 @@ export namespace Provider {
         autoload: hasKey,
       }
     },
+    "claude-code": async (input) => {
+      // Bridge to the locally-installed Claude Code CLI (`claude` binary).
+      // Always autoload so the provider is visible in the UI even when
+      // the CLI is missing or not logged in — that way the user sees
+      // a clear "install claude" / "claude auth login" hint instead of
+      // wondering why the entry is missing. The detection is cached for
+      // 30 s in the claude-code module so repeated state() rebuilds
+      // don't fork-bomb the CLI.
+      const { detectClaudeCli, ClaudeCodeLanguageModel } = await import("./sdk/claude-code")
+      const status = detectClaudeCli()
+
+      return {
+        autoload: true,
+        options: {
+          // Surface detection result through provider options so the desktop
+          // UI can read it via the GET /provider endpoint and render the
+          // right onboarding hint.
+          claudeCli: {
+            installed: status.installed,
+            loggedIn: status.loggedIn ?? false,
+            version: status.version,
+            authMethod: status.authMethod,
+            email: status.email,
+            subscriptionType: status.subscriptionType,
+            errorMessage: status.errorMessage,
+          },
+        },
+        async getModel(_sdk: any, modelID: string, _options?: Record<string, any>) {
+          // Ignore the SDK passed in by getSDK() — we don't use any HTTP
+          // bundled provider, we wrap the local CLI directly. Detection
+          // is re-checked here in case the user installed the CLI after
+          // the cache was warmed.
+          const fresh = detectClaudeCli()
+          if (!fresh.installed) {
+            throw new Error(
+              "Claude Code CLI not installed. Install it from https://docs.claude.com/claude-code then run `claude auth login` to use your Pro/Max subscription.",
+            )
+          }
+          if (!fresh.loggedIn) {
+            throw new Error(
+              "Claude Code CLI is installed but not logged in. Run `claude auth login` in a terminal and pick your Pro/Max account.",
+            )
+          }
+          return new ClaudeCodeLanguageModel(modelID, {})
+        },
+      }
+    },
   }
 
   export const Model = z
@@ -1016,6 +1063,65 @@ export namespace Provider {
     },
   }
 
+  // Claude Code CLI bridge — uses the locally-installed `claude` binary as a
+  // proxy to the user's Pro/Max subscription. Costs are zero because every
+  // request goes through the subscription quota, not pay-per-token API
+  // billing. The `cost` fields below are intentionally 0 to reflect that.
+  // The `npm` field is set to a placeholder `@ai-sdk/openai-compatible` so
+  // the bundled-provider lookup in getSDK() doesn't try to install anything;
+  // the CUSTOM_LOADER's getModel() returns our own LanguageModelV2 directly.
+  const CLAUDE_CODE_PROVIDER: ModelsDev.Provider = {
+    id: "claude-code",
+    name: "Claude Code (Pro/Max subscription)",
+    api: "local://claude-cli",
+    npm: "@ai-sdk/openai-compatible",
+    env: [],
+    models: {
+      sonnet: {
+        id: "sonnet",
+        name: "Claude Sonnet (latest, via CLI)",
+        family: "claude",
+        release_date: "2025-01-01",
+        reasoning: true,
+        temperature: false,
+        tool_call: false,
+        attachment: false,
+        cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+        limit: { context: 200000, output: 32000 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      opus: {
+        id: "opus",
+        name: "Claude Opus (latest, via CLI)",
+        family: "claude",
+        release_date: "2025-01-01",
+        reasoning: true,
+        temperature: false,
+        tool_call: false,
+        attachment: false,
+        cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+        limit: { context: 200000, output: 32000 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+      haiku: {
+        id: "haiku",
+        name: "Claude Haiku (latest, via CLI)",
+        family: "claude",
+        release_date: "2025-01-01",
+        reasoning: false,
+        temperature: false,
+        tool_call: false,
+        attachment: false,
+        cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+        limit: { context: 200000, output: 8192 },
+        modalities: { input: ["text"], output: ["text"] },
+        options: {},
+      },
+    },
+  }
+
   const state = Instance.state(async () => {
     using _ = log.time("state")
     const config = await Config.get()
@@ -1026,6 +1132,7 @@ export namespace Provider {
     // above WORMGPT_PROVIDER. Operators define it in their config so the
     // gateway URL and model list stay in one place.
     modelsDev["wormgpt"] = WORMGPT_PROVIDER
+    modelsDev["claude-code"] = CLAUDE_CODE_PROVIDER
 
     const database = mapValues(modelsDev, fromModelsDevProvider)
 
