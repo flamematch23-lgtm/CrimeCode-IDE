@@ -111,6 +111,80 @@ export function adminRouter() {
     return c.json(result)
   })
 
+  // ── Announce: pubblica news/announcement al canale Telegram ──────
+  // body: { text: string, image_url?: string, parse_mode?: "HTML" | "Markdown" }
+  // Riusa il TELEGRAM_BOT_TOKEN già configurato per il license bot;
+  // serve TELEGRAM_CHANNEL_ID env var puntante al canale broadcast.
+  r.post("/api/community/announce", async (c) => {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN ?? ""
+    const channelId = process.env.TELEGRAM_CHANNEL_ID ?? ""
+    if (!botToken || !channelId) {
+      return c.json(
+        {
+          error:
+            "TELEGRAM_BOT_TOKEN o TELEGRAM_CHANNEL_ID non configurati su /etc/crimeopus-api.env. Vedi README per setup.",
+        },
+        503,
+      )
+    }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      text?: string
+      image_url?: string
+      parse_mode?: string
+    }
+    const text = typeof body.text === "string" ? body.text.trim() : ""
+    if (!text) return c.json({ error: "campo 'text' obbligatorio" }, 400)
+    if (text.length > 4000) {
+      return c.json({ error: `text max 4000 char (hai ${text.length})` }, 400)
+    }
+    const parseMode =
+      body.parse_mode === "HTML" || body.parse_mode === "Markdown" || body.parse_mode === "MarkdownV2"
+        ? body.parse_mode
+        : "HTML"
+
+    try {
+      // Se c'è image_url usa sendPhoto, altrimenti sendMessage
+      const url = body.image_url
+        ? `https://api.telegram.org/bot${botToken}/sendPhoto`
+        : `https://api.telegram.org/bot${botToken}/sendMessage`
+      const payload: Record<string, unknown> = {
+        chat_id: channelId,
+        parse_mode: parseMode,
+      }
+      if (body.image_url) {
+        payload.photo = body.image_url
+        payload.caption = text
+      } else {
+        payload.text = text
+        payload.disable_web_page_preview = false
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        result?: { message_id?: number }
+        description?: string
+      }
+      if (!data.ok) {
+        return c.json({ error: data.description ?? `telegram error (${res.status})` }, 502)
+      }
+      return c.json({
+        ok: true,
+        message_id: data.result?.message_id,
+        channel_url:
+          channelId.startsWith("@")
+            ? `https://t.me/${channelId.slice(1)}/${data.result?.message_id ?? ""}`
+            : null,
+      })
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 502)
+    }
+  })
+
   // Keys CRUD
   r.get("/api/keys", (c) => {
     const db = getDb()

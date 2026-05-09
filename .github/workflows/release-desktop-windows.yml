@@ -174,3 +174,44 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Latest always:" >> $GITHUB_STEP_SUMMARY
           echo "- https://github.com/${{ github.repository }}/releases/latest/download/opencode-electron-win-x64.exe" >> $GITHUB_STEP_SUMMARY
+
+      # ────────────────────────────────────────────────────────────────────
+      # 5. Auto-post release announcement al canale Telegram CrimeCode IDE
+      # ────────────────────────────────────────────────────────────────────
+      # Skip se TELEGRAM_BOT_TOKEN o TELEGRAM_CHANNEL_ID non sono settati
+      # (es. PR/fork/dev). In quei casi continua silently.
+      - name: Post release to Telegram channel
+        if: ${{ env.TELEGRAM_CHANNEL_ID != '' && env.TELEGRAM_BOT_TOKEN != '' }}
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Estrai il body release notes da GitHub (max 800 char per Telegram limit)
+          NOTES=$(gh release view "$TAG" --json body --jq '.body' 2>/dev/null | head -c 800 || echo "")
+          DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/opencode-electron-win-x64.exe"
+
+          # Markdown V2 per Telegram (escaping necessario per `_*[]()~\`>#+-=|{}.!`)
+          # Per simplicità usiamo HTML mode che è meno fragile.
+          MSG=$(cat <<EOF
+🚀 <b>CrimeCode IDE $TAG</b>
+
+$(echo "$NOTES" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+📥 <a href="$DOWNLOAD_URL">Download Windows installer</a>
+📋 <a href="https://github.com/$REPO/releases/tag/$TAG">Release notes complete</a>
+
+#crimecode #release
+EOF
+)
+          # Invia con disable_web_page_preview=false per mostrare preview download
+          curl -sS --max-time 15 -X POST \
+            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg chat_id "$TELEGRAM_CHANNEL_ID" \
+              --arg text "$MSG" \
+              '{chat_id: $chat_id, text: $text, parse_mode: "HTML", disable_web_page_preview: false}')" \
+            | jq '. | {ok, message_id: .result.message_id, error: .description}' || true

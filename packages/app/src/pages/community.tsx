@@ -490,6 +490,17 @@ const CommunityPage: Component = () => {
   const [selectedUser, setSelectedUser] = createSignal<string | null>(null)
   const [chatStats] = createResource(tab, async (t) => (t === "chat" ? await getChatStats() : null))
 
+  // Telegram channel banner state (sessionStorage-persistent per sessione)
+  const [telegramBannerDismissed, setTelegramBannerDismissed] = createSignal(
+    (() => {
+      try {
+        return sessionStorage.getItem("community.telegramBanner.dismissed") === "1"
+      } catch {
+        return false
+      }
+    })(),
+  )
+
   // Re-check signed-in state on a 1.5s timer (cheap localStorage read).
   // Same pattern di settings-account.tsx.
   setInterval(() => {
@@ -682,6 +693,42 @@ const CommunityPage: Component = () => {
       {/* Body */}
       <div class="flex-1 overflow-y-auto p-4">
         <div class="max-w-4xl mx-auto space-y-4">
+
+          {/* Telegram channel banner: news + release feed. Dismissable per
+              sessione. URL configurabile via VITE_TELEGRAM_CHANNEL_URL. */}
+          <Show when={!telegramBannerDismissed()}>
+            <div class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-icon-warning-base/10 border border-icon-warning-base/30 text-12-regular">
+              <span class="shrink-0">📢</span>
+              <span class="flex-1 min-w-0">
+                Unisciti al canale Telegram per release, news e changelog in diretta.
+              </span>
+              <Button
+                size="small"
+                variant="primary"
+                onClick={() => {
+                  const url =
+                    (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_TELEGRAM_CHANNEL_URL ??
+                    "https://t.me/CrimeCodeIDE"
+                  window.open(url, "_blank")
+                }}
+              >
+                Apri canale
+              </Button>
+              <button
+                onClick={() => {
+                  setTelegramBannerDismissed(true)
+                  try {
+                    sessionStorage.setItem("community.telegramBanner.dismissed", "1")
+                  } catch {}
+                }}
+                class="shrink-0 text-text-weak hover:text-text-strong"
+                title="Nascondi"
+                aria-label="Nascondi banner"
+              >
+                ✕
+              </button>
+            </div>
+          </Show>
 
           {/* DM TAB */}
           <Show when={tab() === "dm"}>
