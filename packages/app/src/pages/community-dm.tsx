@@ -66,11 +66,67 @@ export const DmPanel: Component<DmPanelProps> = (props) => {
     }
   })
 
-  // SSE personale: aggiorna conversazione live + inbox unread badge
+  // SSE personale + polling fallback (v2.37.0). Stesso pattern di chat panel:
+  // se SSE EventSource non si connette entro 5s o fallisce, attiva polling
+  // REST ogni 6s su /community/dm/inbox per scoprire nuovi DM/conversazioni.
+  // Polling più lento del chat (6s vs 4s) perché DM è meno volume di chat.
   createEffect(() => {
     if (!props.myUsername) return
+    let alive = true
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null
+    let sseAlive = false
+    let lastSeenMessageIds: Set<number> = new Set()
+
+    const startPolling = () => {
+      if (pollTimer || !alive) return
+      const tick = async () => {
+        if (!alive) return
+        try {
+          // Refetch inbox per aggiornare unread + last_message preview
+          await refetchInbox()
+          // Se c'è una conversazione attiva, refetch anche quella
+          if (activePeer()) await refetchConv()
+        } catch {
+          /* network — retry next tick */
+        }
+      }
+      pollTimer = setInterval(tick, 6_000)
+    }
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
+    }
+
     const es = openDmStream()
-    if (!es) return
+    if (!es) {
+      // No session token → niente SSE → polling pure
+      startPolling()
+      onCleanup(() => {
+        alive = false
+        stopPolling()
+      })
+      return
+    }
+
+    const onSseOk = () => {
+      if (!alive) return
+      sseAlive = true
+      stopPolling()
+      if (connectTimeout) {
+        clearTimeout(connectTimeout)
+        connectTimeout = null
+      }
+    }
+    es.addEventListener("open", onSseOk)
+    es.addEventListener("ready" as any, onSseOk)
+    es.addEventListener("error", () => {
+      if (!alive) return
+      sseAlive = false
+      startPolling()
+    })
 
     es.addEventListener("message", (ev: MessageEvent) => {
       try {
@@ -79,22 +135,25 @@ export const DmPanel: Component<DmPanelProps> = (props) => {
           conversation_id: number
           message: { id: number; sender_username: string; body: string; ts: number }
         }
-        // Refetch inbox per aggiornare last_message + unread count
+        if (lastSeenMessageIds.has(data.message.id)) return
+        lastSeenMessageIds.add(data.message.id)
         void refetchInbox()
-        // Se è la conversazione attiva, prependi il messaggio direttamente
         const cur = conversation()
         const peerUsername = activePeer()
         if (cur && peerUsername && data.conversation_id === cur.conversation_id) {
-          // Re-fetch è semplice e robusto; appende e marca read
           void refetchConv()
           scrollBottom(true)
         } else if (data.message.sender_username !== props.myUsername) {
-          // Notifica visiva veloce
+          // Toast in-app + notifica desktop nativa (Electron Notification API)
           showToast({
             variant: "success",
             title: `Nuovo DM da @${data.message.sender_username}`,
             description: data.message.body.slice(0, 80),
           })
+          // Lazy-import notifyDm per evitare circular dep
+          void import("./community").then((m) => {
+            m.notifyDm?.(data.message.sender_username, data.message.body, props.myUsername)
+          }).catch(() => {})
         }
       } catch {
         /* ignore */
@@ -102,7 +161,21 @@ export const DmPanel: Component<DmPanelProps> = (props) => {
     })
     es.addEventListener("read", () => void refetchConv())
 
-    onCleanup(() => es.close())
+    // Connection timeout: se entro 5s non siamo "ready", attiva polling
+    connectTimeout = setTimeout(() => {
+      if (!alive) return
+      if (!sseAlive) startPolling()
+      connectTimeout = null
+    }, 5_000)
+
+    onCleanup(() => {
+      alive = false
+      try {
+        es.close()
+      } catch {}
+      stopPolling()
+      if (connectTimeout) clearTimeout(connectTimeout)
+    })
   })
 
   const send = async () => {

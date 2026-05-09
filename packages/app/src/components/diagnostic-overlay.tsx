@@ -113,6 +113,29 @@ export function DiagnosticOverlay() {
       if (/\/pty\/pty_[A-Za-z0-9]+(\?|$)/.test(url)) return true
       return false
     }
+
+    /**
+     * Endpoints che fanno polling continuo locale e sappiamo possono fallire
+     * "naturalmente" quando il servizio remoto è offline (es. Burp Workspace
+     * proxy non avviato — è OPT-IN, non sempre running). Non sono actionable
+     * per l'utente ed inquinerebbero il diagnostic feed con decine di errori
+     * identici. Loggiamo solo il PRIMO fail di ogni endpoint per minuto.
+     */
+    const expectedOfflinePatterns = [
+      /^http:\/\/127\.0\.0\.1:8182\/(settings|flows|pending|rules)/, // Burp Workspace polling
+    ]
+    const lastLoggedAt = new Map<string, number>()
+    const isExpectedPollingFailure = (url: string): boolean => {
+      return expectedOfflinePatterns.some((re) => re.test(url))
+    }
+    const shouldLogPollingFailure = (url: string): boolean => {
+      const now = Date.now()
+      const last = lastLoggedAt.get(url) ?? 0
+      if (now - last < 60_000) return false // throttle 1/min per URL
+      lastLoggedAt.set(url, now)
+      return true
+    }
+
     const wrappedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
       const method = init?.method ?? (input instanceof Request ? input.method : "GET")
@@ -128,6 +151,12 @@ export function DiagnosticOverlay() {
         }
         return res
       } catch (err) {
+        // Suppress repeating polling failures from known opt-in services.
+        // Throw still propagates so caller can handle it; we just don't
+        // pollute the diagnostic UI with N copies of the same error.
+        if (isExpectedPollingFailure(url) && !shouldLogPollingFailure(url)) {
+          throw err
+        }
         const fmt = format(err)
         push({
           kind: "fetch",

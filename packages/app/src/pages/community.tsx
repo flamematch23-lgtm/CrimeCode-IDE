@@ -10,6 +10,7 @@ import {
   deleteMessage,
   getChatStats,
   getLeaderboard,
+  getMessagesSince,
   getMyProfile,
   getPublicProfile,
   getRecentMessages,
@@ -52,6 +53,49 @@ function rankBadge(rank: number): { color: string; label: string } {
 // Splits chat body into tokens where mentions @username diventano span
 // stilizzati. Se la mention sei tu, highlight giallo (notifica visiva).
 const MENTION_RE = /@([a-zA-Z0-9_-]{3,20})/g
+
+/**
+ * Notifica desktop nativa quando l'utente viene menzionato in chat globale.
+ * Usa Electron Notification API via preload IPC. No-op nel browser/dev mode
+ * (window.api?.showNotification undefined). Throttle: max 1 notifica/30s
+ * per evitare spam se qualcuno ti menziona ripetutamente. Non notifica per
+ * messaggi propri.
+ */
+let lastMentionNotifyAt = 0
+function notifyIfMentioned(msg: ChatMessage, myUsername: string | null) {
+  if (!myUsername) return
+  if (msg.username === myUsername) return // niente notifica per i tuoi
+  if (msg.username === "_deleted_") return
+  const myLower = myUsername.toLowerCase()
+  const mentions = Array.from(msg.body.matchAll(MENTION_RE)).map((m) => m[1].toLowerCase())
+  if (!mentions.includes(myLower)) return
+  const now = Date.now()
+  if (now - lastMentionNotifyAt < 30_000) return
+  lastMentionNotifyAt = now
+  const api = (window as { api?: { showNotification?: (t: string, b?: string) => void } }).api
+  api?.showNotification?.(
+    `@${msg.username} ti ha menzionato`,
+    msg.body.length > 140 ? msg.body.slice(0, 140) + "…" : msg.body,
+  )
+}
+
+/**
+ * Notifica desktop nativa quando ricevi un nuovo DM. Throttle separato
+ * (10s) perché DM sono inherently più direct di mention chat.
+ */
+let lastDmNotifyAt = 0
+export function notifyDm(senderUsername: string, body: string, myUsername: string | null) {
+  if (!myUsername) return
+  if (senderUsername === myUsername) return
+  const now = Date.now()
+  if (now - lastDmNotifyAt < 10_000) return
+  lastDmNotifyAt = now
+  const api = (window as { api?: { showNotification?: (t: string, b?: string) => void } }).api
+  api?.showNotification?.(
+    `Nuovo DM da @${senderUsername}`,
+    body.length > 140 ? body.slice(0, 140) + "…" : body,
+  )
+}
 
 function MessageBody(props: { body: string; myUsername: string | null }) {
   const segments = createMemo(() => {
@@ -122,9 +166,54 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
     })
   }
 
-  // Initial load + SSE subscribe
+  // Initial load + SSE subscribe (con polling REST fallback)
+  //
+  // BUG-FIX (v2.37.0): SSE EventSource fallisce con readyState=0 da Electron
+  // renderer file:// origin (root cause: CORS preflight quirk con null
+  // origin / Caddy buffering — non risolto dal manuale ACAO setting). Per
+  // garantire che la chat funzioni SEMPRE, fallisce gracefully a polling
+  // REST ogni 4 secondi se SSE non riesce a connettersi entro 5s.
+  //
+  // Strategia:
+  //   1. Avvia SSE
+  //   2. Avvia un timer 5s — se non abbiamo ricevuto "open"/"ready" entro
+  //      quel tempo, killa SSE e attiva polling REST
+  //   3. Polling REST chiama getMessagesSince(maxId) ogni 4s e fa diff
+  //   4. Se SSE successivamente si connette, polling viene disattivato
   createEffect(() => {
     let alive = true
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null
+
+    const startPolling = () => {
+      if (pollTimer || !alive) return
+      const tick = async () => {
+        if (!alive) return
+        try {
+          const maxId = messages().reduce((m, x) => (x.id > m ? x.id : m), 0)
+          const fresh = await getMessagesSince(maxId, 50)
+          if (!alive || fresh.length === 0) return
+          const stick = isAtBottom()
+          setMessages((prev) => {
+            const existing = new Set(prev.map((m) => m.id))
+            const additions = fresh.filter((m) => !existing.has(m.id))
+            if (additions.length === 0) return prev
+            return [...prev, ...additions].sort((a, b) => a.id - b.id)
+          })
+          if (stick) scrollToBottom(true)
+        } catch {
+          /* network error — riprova next tick */
+        }
+      }
+      pollTimer = setInterval(tick, 4_000)
+    }
+
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
+    }
 
     void getRecentMessages(100)
       .then((msgs) => {
@@ -135,12 +224,30 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
       .catch(() => undefined)
 
     const es = openChatStream()
-    es.addEventListener("open", () => alive && setLive(true))
-    es.addEventListener("error", () => alive && setLive(false))
+    let sseAlive = false
+
+    const onSseOk = () => {
+      if (!alive) return
+      sseAlive = true
+      setLive(true)
+      stopPolling() // SSE è up, niente polling
+      if (connectTimeout) {
+        clearTimeout(connectTimeout)
+        connectTimeout = null
+      }
+    }
+    es.addEventListener("open", onSseOk)
+    es.addEventListener("ready" as any, onSseOk)
+    es.addEventListener("error", () => {
+      if (!alive) return
+      sseAlive = false
+      setLive(false)
+      // SSE rotto — switcha a polling
+      startPolling()
+    })
     es.addEventListener("message", (ev: MessageEvent) => {
       try {
         const msg = JSON.parse(ev.data) as ChatMessage
-        // Cancellazione: la backend manda un msg con username "_deleted_"
         if (msg.username === "_deleted_") {
           setMessages((prev) =>
             prev.map((m) => (m.id === msg.id ? { ...m, body: "[messaggio cancellato]", username: "_deleted_" } : m)),
@@ -149,19 +256,35 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
         }
         const stick = isAtBottom()
         setMessages((prev) => {
-          // Dedup contro l'echo del POST locale che potrebbe arrivare anche via SSE
           if (prev.some((m) => m.id === msg.id)) return prev
           return [...prev, msg]
         })
         if (stick) scrollToBottom(true)
+        // Notifica desktop nativa se l'utente è stato menzionato (@username)
+        // E il messaggio non è suo. window.api?.showNotification è exposed
+        // dal preload Electron — no-op nel browser/dev mode.
+        notifyIfMentioned(msg, props.myUsername)
       } catch {
         /* ignora payload malformati */
       }
     })
 
+    // Connection timeout: se entro 5s non siamo "ready", attiva polling.
+    connectTimeout = setTimeout(() => {
+      if (!alive) return
+      if (!sseAlive) {
+        startPolling()
+      }
+      connectTimeout = null
+    }, 5_000)
+
     onCleanup(() => {
       alive = false
-      es.close()
+      try {
+        es.close()
+      } catch {}
+      stopPolling()
+      if (connectTimeout) clearTimeout(connectTimeout)
     })
   })
 

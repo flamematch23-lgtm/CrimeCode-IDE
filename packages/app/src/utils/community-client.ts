@@ -244,6 +244,24 @@ export function openChatStream(): EventSource {
   return new EventSource(url)
 }
 
+/**
+ * Polling fallback per chat live. Bug v2.36.x: SSE EventSource fallisce con
+ * readyState=0 da Electron renderer (file:// origin) — root cause non chiara
+ * (CORS preflight, Caddy buffering, o EventSource quirk con null origin).
+ * Workaround: chiamante implementa polling REST ogni N secondi e dedupliica
+ * per id. Funziona OVUNQUE, latency 3s. SSE rimane come optimization quando
+ * disponibile: il chiamante prova prima SSE, se entro 5s non riceve "ready"
+ * cade su polling.
+ *
+ * Ritorna SOLO i messaggi con id > sinceId. Se sinceId=0, ritorna gli ultimi
+ * `limit`.
+ */
+export async function getMessagesSince(sinceId: number, limit: number = 50): Promise<ChatMessage[]> {
+  const recent = await getRecentMessages(limit)
+  if (sinceId <= 0) return recent
+  return recent.filter((m) => m.id > sinceId)
+}
+
 // ─── Phase 3: DM 1:1 ─────────────────────────────────────────────────
 
 export interface DmConversation {
@@ -279,9 +297,18 @@ export async function getInbox(): Promise<DmConversation[]> {
   return body.conversations
 }
 
+// Strip leading @ se presente. Bug v2.36.x: il client passava "@jollyfraud"
+// letterale alla URL → /community/dm/with/%40jollyfraud → 404. Backend si
+// aspetta lo username puro senza @ leading (l'@ è solo un display char).
+function stripAt(username: string): string {
+  return username.replace(/^@+/, "").trim()
+}
+
 export async function openConversationWith(username: string): Promise<DmConversationDetail | null> {
   if (!hasAccountSession()) return null
-  const res = await authedFetch(`/community/dm/with/${encodeURIComponent(username)}`)
+  const clean = stripAt(username)
+  if (!clean) return null
+  const res = await authedFetch(`/community/dm/with/${encodeURIComponent(clean)}`)
   if (!res.ok) return null
   return (await res.json()) as DmConversationDetail
 }
@@ -291,9 +318,11 @@ export async function sendDm(
   body: string,
 ): Promise<{ ok: true; message: { id: number; sender_username: string; body: string; ts: number }; conversation_id: number } | { ok: false; error: string }> {
   if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const clean = stripAt(to_username)
+  if (!clean) return { ok: false, error: "destinatario invalido" }
   const res = await authedFetch("/community/dm/send", {
     method: "POST",
-    body: JSON.stringify({ to_username, body }),
+    body: JSON.stringify({ to_username: clean, body }),
   })
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean
