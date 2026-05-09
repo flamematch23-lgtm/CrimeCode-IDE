@@ -45,40 +45,131 @@ export interface ClaudeCliStatus {
   email?: string
   subscriptionType?: string
   errorMessage?: string
+  /** Absolute path to the binary that worked. Use this everywhere instead
+   *  of `claude`, because the sidecar's PATH is often missing the user's
+   *  install dir (e.g. ~/.local/bin) even though the user can run `claude`
+   *  from their shell. */
+  cliPath?: string
 }
 
+import { existsSync } from "node:fs"
+import { join } from "node:path"
+
+// Cache is now PERMANENT for the session once a working CLI is found.
+// We only re-probe if the cached entry was a failure (so newly-installed
+// CLIs are picked up without restart) or if the caller forces it.
 let _cachedStatus: ClaudeCliStatus | null = null
 let _cachedAt = 0
-const CACHE_MS = 30_000
+const CACHE_FAILURE_MS = 10_000 // re-probe failed detection after 10s
 
-export function detectClaudeCli(force = false): ClaudeCliStatus {
-  if (!force && _cachedStatus && Date.now() - _cachedAt < CACHE_MS) return _cachedStatus
+/** Build a list of candidate paths to try for the `claude` binary, in
+ *  order of preference. Includes:
+ *   1. CLAUDE_CODE_CLI env var override (full path)
+ *   2. Bare `claude` (relies on PATH — fast path when it works)
+ *   3. Common per-user install locations on each platform */
+function candidatePaths(): string[] {
+  const candidates: string[] = []
+  const envOverride = process.env["CLAUDE_CODE_CLI"]
+  if (envOverride) candidates.push(envOverride)
+  candidates.push("claude")
 
-  const status: ClaudeCliStatus = { installed: false }
-  const cmd = process.env["CLAUDE_CODE_CLI"] || "claude"
+  if (process.platform === "win32") {
+    const home = process.env["USERPROFILE"] || process.env["HOME"]
+    const localAppData = process.env["LOCALAPPDATA"]
+    const appData = process.env["APPDATA"]
+    if (home) {
+      candidates.push(join(home, ".local", "bin", "claude.exe"))
+      candidates.push(join(home, ".local", "bin", "claude.cmd"))
+      candidates.push(join(home, ".local", "bin", "claude"))
+    }
+    if (localAppData) {
+      candidates.push(join(localAppData, "Programs", "claude", "claude.exe"))
+      candidates.push(join(localAppData, "claude", "claude.exe"))
+    }
+    if (appData) {
+      candidates.push(join(appData, "npm", "claude.cmd"))
+      candidates.push(join(appData, "npm", "claude.ps1"))
+    }
+  } else {
+    const home = process.env["HOME"]
+    if (home) candidates.push(join(home, ".local", "bin", "claude"))
+    candidates.push("/usr/local/bin/claude")
+    candidates.push("/opt/homebrew/bin/claude")
+    candidates.push("/usr/bin/claude")
+  }
+  return candidates
+}
 
+/** Try one candidate by spawning `<path> --version`. Returns the version
+ *  string on success, or null on failure. */
+function probeVersion(path: string): string | null {
   try {
-    const versionResult = spawnSync(cmd, ["--version"], {
+    // Bare names (no separator) need shell on Windows so .cmd/.ps1 wrappers
+    // resolve via PATHEXT. Absolute paths can run without a shell.
+    const isBareName = !path.includes("/") && !path.includes("\\")
+    const useShell = process.platform === "win32" && isBareName
+    // For absolute paths to .cmd / .ps1 / .bat, we still need shell on win32.
+    const useShellForExt =
+      process.platform === "win32" &&
+      (path.endsWith(".cmd") || path.endsWith(".ps1") || path.endsWith(".bat"))
+    const result = spawnSync(path, ["--version"], {
       encoding: "utf-8",
       timeout: 5_000,
-      shell: process.platform === "win32",
+      shell: useShell || useShellForExt,
     })
-    if (versionResult.status === 0) {
-      status.installed = true
-      status.version = (versionResult.stdout || "").trim()
-    } else {
-      status.errorMessage = `claude --version exited ${versionResult.status}`
-    }
-  } catch (e: any) {
-    status.errorMessage = `claude CLI not found in PATH (${e?.code || e?.message || "unknown"})`
+    if (result.status === 0) return (result.stdout || "").trim()
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function detectClaudeCli(force = false): ClaudeCliStatus {
+  // If we already have a successful detection, REUSE it forever (the user
+  // doesn't uninstall the CLI mid-session). Failure cache has short TTL so
+  // newly-installed CLIs are picked up on the next call.
+  if (!force && _cachedStatus) {
+    if (_cachedStatus.installed) return _cachedStatus
+    if (Date.now() - _cachedAt < CACHE_FAILURE_MS) return _cachedStatus
   }
 
-  if (status.installed) {
+  const status: ClaudeCliStatus = { installed: false }
+  const tried: string[] = []
+
+  // 1. Find a working binary.
+  for (const candidate of candidatePaths()) {
+    // Skip non-existent absolute paths fast (avoids slow ENOENT spawns).
+    if ((candidate.includes("/") || candidate.includes("\\")) && !existsSync(candidate)) {
+      continue
+    }
+    tried.push(candidate)
+    const version = probeVersion(candidate)
+    if (version !== null) {
+      status.installed = true
+      status.version = version
+      status.cliPath = candidate
+      log.info("found CLI", { path: candidate, version })
+      break
+    }
+  }
+  if (!status.installed) {
+    status.errorMessage = `claude CLI not found. Tried: ${tried.join(", ")}`
+  }
+
+  // 2. Auth status (only if installed).
+  if (status.installed && status.cliPath) {
     try {
-      const authResult = spawnSync(cmd, ["auth", "status"], {
+      const isAbsoluteExt =
+        status.cliPath.endsWith(".cmd") ||
+        status.cliPath.endsWith(".ps1") ||
+        status.cliPath.endsWith(".bat")
+      const useShell =
+        process.platform === "win32" &&
+        ((!status.cliPath.includes("/") && !status.cliPath.includes("\\")) || isAbsoluteExt)
+      const authResult = spawnSync(status.cliPath, ["auth", "status"], {
         encoding: "utf-8",
         timeout: 5_000,
-        shell: process.platform === "win32",
+        shell: useShell,
       })
       if (authResult.status === 0) {
         try {
@@ -108,6 +199,7 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
     loggedIn: status.loggedIn,
     subscriptionType: status.subscriptionType,
     version: status.version,
+    cliPath: status.cliPath,
   })
   return status
 }
@@ -119,6 +211,11 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
 export interface ClaudeCodeModelOptions {
   /** Working directory for the spawned ACP adapter. Defaults to cwd. */
   cwd?: string
+  /** Absolute path to the `claude` CLI binary. When provided, its parent
+   *  directory is prepended to the ACP adapter's PATH so the adapter can
+   *  shell out to `claude` even when our process PATH lacks the install
+   *  dir (the common case in Electron sidecar). */
+  claudeCliPath?: string
 }
 
 export class ClaudeCodeLanguageModel implements LanguageModelV2 {
@@ -136,7 +233,10 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
 
   async doGenerate(options: LanguageModelV2CallOptions) {
     const blocks = mapPromptToBlocks(options.prompt)
-    const session = await acquireSession({ cwd: this.opts.cwd })
+    const session = await acquireSession({
+      cwd: this.opts.cwd,
+      claudeCliPath: this.opts.claudeCliPath,
+    })
 
     let assembledText = ""
     let finishReason: LanguageModelV2FinishReason = "unknown"
@@ -172,7 +272,10 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
 
   async doStream(options: LanguageModelV2CallOptions) {
     const blocks = mapPromptToBlocks(options.prompt)
-    const session = await acquireSession({ cwd: this.opts.cwd })
+    const session = await acquireSession({
+      cwd: this.opts.cwd,
+      claudeCliPath: this.opts.claudeCliPath,
+    })
 
     // Build the AI SDK stream that mirrors ACP session/update events.
     let textBlockId: string | null = null

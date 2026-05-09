@@ -65,7 +65,9 @@ export interface AcpClientOptions {
   cwd?: string
   /** Override path to claude-code-acp/dist/index.js (else resolved via Bun). */
   adapterEntry?: string
-  /** Override path to the `claude` CLI binary (forwarded as PATH). */
+  /** Absolute path to the `claude` CLI. Its parent dir is prepended to the
+   *  child PATH so the ACP adapter (which shells out to `claude`) finds
+   *  the right binary even when our PATH is missing the user's install dir. */
   claudeCliPath?: string
 }
 
@@ -95,13 +97,28 @@ function resolveAdapterEntry(): string {
   return Bun.resolveSync("@zed-industries/claude-code-acp/dist/index.js", dir)
 }
 
-function makeChildEnv(): Record<string, string> {
+function makeChildEnv(claudeCliPath?: string): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     // Strip CLAUDECODE / CLAUDE_CODE_* — the adapter refuses to start
     // when those are set (it thinks it'd be a nested session).
     if (k.startsWith("CLAUDECODE") || k.startsWith("CLAUDE_CODE_")) continue
     if (typeof v === "string") env[k] = v
+  }
+  // If we know the absolute path of the `claude` binary (from
+  // detectClaudeCli), prepend its directory to PATH so the ACP adapter
+  // child process — which internally spawns `claude` — finds it. Without
+  // this the adapter inherits our (possibly PATH-less) env and bails with
+  // "claude: not found" even though the user has it in ~/.local/bin.
+  if (claudeCliPath) {
+    const sep = process.platform === "win32" ? ";" : ":"
+    const lastSlash = Math.max(claudeCliPath.lastIndexOf("/"), claudeCliPath.lastIndexOf("\\"))
+    if (lastSlash > 0) {
+      const dir = claudeCliPath.slice(0, lastSlash)
+      env.PATH = dir + sep + (env.PATH || env.Path || "")
+      // Windows env can be Path or PATH; normalize.
+      if ("Path" in env) env.Path = env.PATH
+    }
   }
   return env
 }
@@ -112,7 +129,7 @@ function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
 
   const child = spawn(process.execPath, [adapterEntry], {
     cwd: opts.cwd || process.cwd(),
-    env: makeChildEnv(),
+    env: makeChildEnv(opts.claudeCliPath),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   }) as ChildProcessWithoutNullStreams

@@ -246,7 +246,16 @@ export default function BurpWorkspace() {
   let givenUp = false
   let documentVisible = typeof document !== "undefined" ? !document.hidden : true
   let settingsTimer: ReturnType<typeof setInterval> | null = null
-  const MAX_FAIL_BEFORE_GIVE_UP = 8 // ~ dopo ≈ 12 minuti totali smette
+  // Cold start vs warm reconnect: when the user navigates to the Burp page
+  // and the proxy was never online (cold start), give up after ONE failure
+  // — they almost always need to click "Avvia proxy" anyway, and 8 retries
+  // of 4 fetches each spammed 32+ errors in the diagnostic overlay before
+  // we'd stop. Once we've been connected at least once (warm), keep the
+  // generous 8-retry budget so a brief network blip doesn't kick the user
+  // back to the start screen.
+  let everConnected = false
+  const MAX_FAIL_COLD = 1
+  const MAX_FAIL_WARM = 8
   const MAX_BACKOFF_MS = 5 * 60_000 // 5 minuti
 
   const stopPollingAndSse = () => {
@@ -302,6 +311,7 @@ export default function BurpWorkspace() {
       setRules(r)
       const wasConnected = connected()
       setConnected(true)
+      everConnected = true
       retryDelayMs = 2000 // reset backoff
       consecutiveFailures = 0
       givenUp = false
@@ -317,7 +327,8 @@ export default function BurpWorkspace() {
         // schedule a fresh retry (backoff resets on next success).
         stopPollingAndSse()
       }
-      if (consecutiveFailures >= MAX_FAIL_BEFORE_GIVE_UP) {
+      const limit = everConnected ? MAX_FAIL_WARM : MAX_FAIL_COLD
+      if (consecutiveFailures >= limit) {
         givenUp = true
         cancelRetry()
         return false
@@ -422,6 +433,9 @@ export default function BurpWorkspace() {
     retryDelayMs = 2000
     consecutiveFailures = 0
     givenUp = false
+    // User clicked "Riprova" — they're explicitly trying to connect, so
+    // grant the warm budget (8 retries) instead of cold (1).
+    everConnected = true
     cancelRetry()
     void refreshAll()
   }
@@ -444,6 +458,11 @@ export default function BurpWorkspace() {
       // Give the proxy ~1 s to bind, then trigger a refresh
       setTimeout(() => {
         retryDelayMs = 2000
+        consecutiveFailures = 0
+        givenUp = false
+        // User explicitly started the proxy: grant warm retry budget so a
+        // brief delay during proxy bootstrap doesn't trigger immediate giveup.
+        everConnected = true
         cancelRetry()
         void refreshAll()
       }, 1000)

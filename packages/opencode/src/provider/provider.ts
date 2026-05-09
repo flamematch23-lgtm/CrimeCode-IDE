@@ -813,8 +813,12 @@ export namespace Provider {
           // the cache was warmed.
           const fresh = detectClaudeCli()
           if (!fresh.installed) {
+            // Show what we tried so the user can see if the binary is in
+            // a non-standard location and set CLAUDE_CODE_CLI=<path>.
             throw new Error(
-              "Claude Code CLI not installed. Install it from https://docs.claude.com/claude-code then run `claude auth login` to use your Pro/Max subscription.",
+              `Claude Code CLI not detected. Install from https://docs.claude.com/claude-code, run \`claude auth login\`, then restart CrimeCode. ` +
+                `If the CLI is installed elsewhere, set CLAUDE_CODE_CLI=<absolute path> in your environment. ` +
+                `(Detection: ${fresh.errorMessage ?? "no error reported"})`,
             )
           }
           if (!fresh.loggedIn) {
@@ -822,7 +826,13 @@ export namespace Provider {
               "Claude Code CLI is installed but not logged in. Run `claude auth login` in a terminal and pick your Pro/Max account.",
             )
           }
-          return new ClaudeCodeLanguageModel(modelID, {})
+          // Pass the absolute CLI path through so acp-client can prepend
+          // its directory to the adapter's PATH (the adapter itself shells
+          // out to `claude` and would otherwise inherit our potentially
+          // PATH-less Electron sidecar env).
+          return new ClaudeCodeLanguageModel(modelID, {
+            claudeCliPath: fresh.cliPath,
+          })
         },
       }
     },
