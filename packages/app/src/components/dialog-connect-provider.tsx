@@ -430,31 +430,27 @@ export function DialogConnectProvider(props: { provider: string }) {
 
     return (
       <div class="flex flex-col gap-6">
-        <div class="text-14-regular text-text-base">
-          CrimeCode usa il binario <code class="font-mono text-text-strong">claude</code> installato localmente
-          come bridge verso il tuo abbonamento Pro/Max. Le richieste passano dal subscription quota e non
-          consumano token API a pagamento.
-        </div>
+        <div class="text-14-regular text-text-base">{language.t("claudeCode.intro")}</div>
 
         <Switch>
           <Match when={!cli().installed}>
             <div class="flex flex-col gap-3 rounded border border-border-base p-3">
               <div class="text-14-medium text-text-strong flex items-center gap-2">
                 <Icon name="circle-ban-sign" class="text-icon-critical-base" />
-                Claude Code CLI non rilevata
+                {language.t("claudeCode.notInstalled.title")}
               </div>
               <div class="text-14-regular text-text-base">
-                Installa la CLI da{" "}
+                {language.t("claudeCode.notInstalled.installFromPrefix")}{" "}
                 <Link href="https://docs.claude.com/claude-code" tabIndex={-1}>
                   docs.claude.com/claude-code
                 </Link>{" "}
-                e poi esegui in un terminale:
+                {language.t("claudeCode.notInstalled.installFromSuffix")}
               </div>
               <pre class="bg-input-base rounded p-2 text-13-regular font-mono text-text-strong overflow-x-auto">
                 claude auth login
               </pre>
               <div class="text-13-regular text-text-weak">
-                Dopo il login, riapri questa finestra: il provider apparirà collegato automaticamente.
+                {language.t("claudeCode.notInstalled.afterInstall")}
               </div>
               <Show when={cli().errorMessage}>
                 {(msg) => <div class="text-12-regular text-text-weak font-mono">{msg()}</div>}
@@ -465,25 +461,21 @@ export function DialogConnectProvider(props: { provider: string }) {
             <div class="flex flex-col gap-3 rounded border border-border-base p-3">
               <div class="text-14-medium text-text-strong flex items-center gap-2">
                 <Icon name="circle-ban-sign" class="text-icon-critical-base" />
-                Claude CLI installata ({cli().version}) ma non loggata
+                {language.t("claudeCode.notLoggedIn.title", { version: cli().version ?? "" })}
               </div>
-              <div class="text-14-regular text-text-base">Esegui questo comando in un terminale:</div>
+              <div class="text-14-regular text-text-base">
+                {language.t("claudeCode.notLoggedIn.runInTerminal")}
+              </div>
               <pre class="bg-input-base rounded p-2 text-13-regular font-mono text-text-strong overflow-x-auto">
                 claude auth login
               </pre>
-              <div class="text-13-regular text-text-weak">
-                Scegli il tuo account Pro/Max. Quando compare "Logged in", torna qui e ricarica.
-              </div>
-              {/* Diagnostic detail: spesso `claude auth status` ritorna
-                  loggedIn=false dal sidecar Electron anche se da terminale
-                  sei loggato — succede quando HOME/USERPROFILE non sono
-                  ereditati correttamente o quando le credenziali sono nel
-                  Windows Credential Manager. Mostriamo il raw stderr/stdout
-                  così l'utente capisce se è un problema di env o di auth. */}
+              <div class="text-13-regular text-text-weak">{language.t("claudeCode.notLoggedIn.choose")}</div>
               <Show when={cli().errorMessage}>
                 {(msg) => (
                   <details class="text-11-regular text-text-weak font-mono">
-                    <summary class="cursor-pointer hover:text-text-base">Dettagli diagnostici</summary>
+                    <summary class="cursor-pointer hover:text-text-base">
+                      {language.t("claudeCode.notLoggedIn.diagnostics")}
+                    </summary>
                     <div class="mt-1 break-all">{msg()}</div>
                   </details>
                 )}
@@ -494,34 +486,33 @@ export function DialogConnectProvider(props: { provider: string }) {
             <div class="flex flex-col gap-3 rounded border border-border-base p-3">
               <div class="text-14-medium text-text-strong flex items-center gap-2">
                 <Icon name="circle-check" class="text-icon-success-base" />
-                Pronto
+                {language.t("claudeCode.ready.title")}
               </div>
               <div class="text-13-regular text-text-base flex flex-col gap-1">
                 <div>
-                  Versione CLI: <span class="font-mono">{cli().version}</span>
+                  {language.t("claudeCode.ready.cliVersion")} <span class="font-mono">{cli().version}</span>
                 </div>
                 <Show when={cli().email}>
                   <div>
-                    Account: <span class="font-mono">{cli().email}</span>
+                    {language.t("claudeCode.ready.account")} <span class="font-mono">{cli().email}</span>
                   </div>
                 </Show>
                 <Show when={cli().subscriptionType}>
                   <div>
-                    Sottoscrizione: <span class="font-mono">{cli().subscriptionType}</span>
+                    {language.t("claudeCode.ready.subscription")}{" "}
+                    <span class="font-mono">{cli().subscriptionType}</span>
                   </div>
                 </Show>
                 <Show when={cli().authMethod}>
                   <div>
-                    Auth: <span class="font-mono">{cli().authMethod}</span>
+                    {language.t("claudeCode.ready.auth")} <span class="font-mono">{cli().authMethod}</span>
                   </div>
                 </Show>
               </div>
-              <div class="text-13-regular text-text-weak">
-                Costo per richiesta: $0 (le chiamate consumano la tua quota subscription, non token API).
-              </div>
+              <div class="text-13-regular text-text-weak">{language.t("claudeCode.ready.cost")}</div>
             </div>
             <Button class="w-auto" size="large" variant="primary" onClick={() => dialog.close()}>
-              Fatto
+              {language.t("claudeCode.ready.done")}
             </Button>
           </Match>
         </Switch>

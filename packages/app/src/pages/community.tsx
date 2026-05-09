@@ -5,6 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
+import { useLanguage } from "@/context/language"
 import {
   avatarUrl,
   deleteAvatar,
@@ -482,6 +483,7 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null; my
 
 const CommunityPage: Component = () => {
   const navigate = useNavigate()
+  const language = useLanguage()
   const [tab, setTab] = createSignal<"leaderboard" | "chat" | "dm">("leaderboard")
   const [period, setPeriod] = createSignal<"30d" | "all">("30d")
   const [signedIn, setSignedIn] = createSignal(hasAccountSession())
@@ -582,7 +584,11 @@ const CommunityPage: Component = () => {
     const file = files?.[0]
     if (!file) return
     if (file.size > 200 * 1024) {
-      showToast({ variant: "error", title: "Badge troppo grande", description: `Max 200 KB` })
+      showToast({
+        variant: "error",
+        title: language.t("community.badge.tooLarge.title"),
+        description: language.t("community.badge.tooLarge.description", { kb: "200" }),
+      })
       if (myBadgeFileInputRef) myBadgeFileInputRef.value = ""
       return
     }
@@ -599,10 +605,17 @@ const CommunityPage: Component = () => {
     try {
       const res = await uploadCustomBadge(file, label, badgeDesc().trim() || undefined)
       if (!res.ok) {
-        showToast({ variant: "error", title: "Upload badge fallito", description: res.error })
+        showToast({
+          variant: "error",
+          title: language.t("community.badge.uploadFailed"),
+          description: res.error,
+        })
         return
       }
-      showToast({ variant: "success", title: `Badge "${res.badge.label}" creato` })
+      showToast({
+        variant: "success",
+        title: language.t("community.badge.created", { label: res.badge.label }),
+      })
       void refetchMyBadges_()
       setPendingBadge(null)
     } finally {
@@ -726,9 +739,7 @@ const CommunityPage: Component = () => {
           <Show when={!telegramBannerDismissed()}>
             <div class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-icon-warning-base/10 border border-icon-warning-base/30 text-12-regular">
               <span class="shrink-0">📢</span>
-              <span class="flex-1 min-w-0">
-                Unisciti al canale Telegram per release, news e changelog in diretta.
-              </span>
+              <span class="flex-1 min-w-0">{language.t("community.telegram.banner")}</span>
               <Button
                 size="small"
                 variant="primary"
@@ -739,7 +750,7 @@ const CommunityPage: Component = () => {
                   window.open(url, "_blank")
                 }}
               >
-                Apri canale
+                {language.t("community.telegram.openChannel")}
               </Button>
               <button
                 onClick={() => {
@@ -1017,14 +1028,8 @@ const CommunityPage: Component = () => {
           <div class="bg-surface-base rounded-lg border border-surface-weak p-3 text-11-regular text-text-weak flex items-start gap-2">
             <Icon name="help" class="size-3.5 shrink-0 mt-0.5 text-icon-warning-base" />
             <div>
-              <span class="text-text-base font-medium">Come funziona il ranking:</span>{" "}
-              ordinamento per <span class="font-mono text-text-strong">score</span> nel periodo, poi per{" "}
-              <span class="font-mono text-text-strong">rep ricevuti</span> totali, poi per attività più recente.{" "}
-              Score = somma dei pesi degli eventi:
-              <span class="font-mono text-text-base">
-                {" "}msg chat = 1, tool call = 1, sessione = 2, burp flow = 4, exploit chain = 5, report = 5, +rep ricevuto = 3
-              </span>.
-              Dai +rep (★) agli utenti che ti aiutano per spingerli in alto — vale 3 pt nel loro score + 1 nel counter rep totale.
+              <span class="text-text-base font-medium">{language.t("community.leaderboard.explainer.title")}</span>{" "}
+              {language.t("community.leaderboard.explainer.body")}
             </div>
           </div>
 
@@ -1215,29 +1220,29 @@ const CommunityPage: Component = () => {
           >
             <div class="bg-bg-base border border-border-base rounded-lg p-6 w-[420px] max-w-[90vw] flex flex-col gap-4 shadow-2xl">
               <div class="flex items-center justify-between">
-                <div class="text-16-medium text-text-strong">Nuovo badge custom</div>
+                <div class="text-16-medium text-text-strong">{language.t("community.badge.modal.title")}</div>
                 <IconButton
                   icon="close-small"
                   variant="ghost"
                   onClick={cancelBadgeUpload}
                   disabled={badgeUploading()}
-                  aria-label="Annulla"
+                  aria-label={language.t("community.badge.modal.cancel")}
                 />
               </div>
               <div class="text-13-regular text-text-weak">
-                File selezionato:{" "}
+                {language.t("community.badge.modal.fileSelected")}{" "}
                 <span class="font-mono text-text-base">{file().name}</span> ({Math.round(file().size / 1024)} KB)
               </div>
               <TextField
                 autofocus
-                label="Nome del badge"
-                placeholder="es. Lucky Hunter"
+                label={language.t("community.badge.modal.nameLabel")}
+                placeholder={language.t("community.badge.modal.namePlaceholder")}
                 value={badgeLabel()}
                 onChange={(v) => setBadgeLabel(v.slice(0, 40))}
               />
               <TextField
-                label="Descrizione (opzionale)"
-                placeholder="es. Trovato un 0day in <30 minuti"
+                label={language.t("community.badge.modal.descLabel")}
+                placeholder={language.t("community.badge.modal.descPlaceholder")}
                 value={badgeDesc()}
                 onChange={(v) => setBadgeDesc(v.slice(0, 200))}
               />
@@ -1248,7 +1253,7 @@ const CommunityPage: Component = () => {
                   onClick={cancelBadgeUpload}
                   disabled={badgeUploading()}
                 >
-                  Annulla
+                  {language.t("community.badge.modal.cancel")}
                 </Button>
                 <Button
                   variant="primary"
@@ -1256,7 +1261,9 @@ const CommunityPage: Component = () => {
                   onClick={() => void confirmBadgeUpload()}
                   disabled={!badgeLabel().trim() || badgeUploading()}
                 >
-                  {badgeUploading() ? "Caricamento…" : "Crea badge"}
+                  {badgeUploading()
+                    ? language.t("community.badge.modal.uploading")
+                    : language.t("community.badge.modal.create")}
                 </Button>
               </div>
             </div>

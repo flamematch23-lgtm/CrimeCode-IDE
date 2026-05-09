@@ -8,6 +8,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { base64Encode } from "@opencode-ai/util/encode"
 import type { Prompt } from "@/context/prompt"
 import { useGlobalSync } from "@/context/global-sync"
+import { useLanguage } from "@/context/language"
 import { setSessionHandoff } from "@/pages/session/handoff"
 
 /**
@@ -171,6 +172,7 @@ interface QuickAction {
 export default function BurpWorkspace() {
   const navigate = useNavigate()
   const sync = useGlobalSync()
+  const language = useLanguage()
   const [apiBase, setApiBase] = createSignal(localStorage.getItem("burp.apiBase") ?? "http://127.0.0.1:8182")
   const api = createMemo(() => makeApi(apiBase()))
 
@@ -648,7 +650,7 @@ export default function BurpWorkspace() {
       <div class="flex items-center gap-3 px-4 py-3 border-b border-surface-weak bg-surface-base">
         <IconButton icon="arrow-left" variant="ghost" onClick={() => navigate("/security")} aria-label="Indietro" />
         <div class="flex-1">
-          <h1 class="text-14-semibold">Burp Workspace</h1>
+          <h1 class="text-14-semibold">{language.t("burp.title")}</h1>
           <p class="text-11-regular text-text-weak">
             MITM proxy live · interagisci con i flow e collabora con l'agente AI
           </p>
@@ -668,7 +670,7 @@ export default function BurpWorkspace() {
                 "bg-icon-warning-base animate-pulse": !connected(),
               }}
             />
-            {connected() ? "Connesso" : "Offline"}
+            {connected() ? language.t("burp.status.connected") : language.t("burp.status.disconnected")}
           </span>
           <Show when={settings()}>
             {(s) => (
@@ -722,7 +724,7 @@ export default function BurpWorkspace() {
           </Button>
           <span class="text-text-weak">·</span>
           <Button variant="secondary" size="small" onClick={testCapture} disabled={testing()}>
-            {testing() ? "Test in corso…" : "Test cattura"}
+            {testing() ? language.t("burp.action.starting") : language.t("burp.action.testCapture")}
           </Button>
           <Show when={lastTestResult()}>
             {(r) => (
@@ -764,17 +766,17 @@ export default function BurpWorkspace() {
           </Show>
           <div class="flex gap-2 items-center flex-wrap justify-center">
             <Button variant="primary" size="small" onClick={startProxy} disabled={startingProxy()}>
-              {startingProxy() ? "Avvio…" : "Avvia proxy ora"}
+              {startingProxy() ? language.t("burp.action.starting") : language.t("burp.action.startProxy")}
             </Button>
             <TextField
               type="text"
-              label="API URL"
+              label={language.t("burp.proxy.apiBase")}
               value={apiBase()}
               onChange={persistApiBase}
               placeholder="http://127.0.0.1:8182"
             />
             <Button variant="secondary" size="small" onClick={manualRetry}>
-              Riprova
+              {language.t("burp.action.retry")}
             </Button>
             <Button variant="secondary" size="small" onClick={() => navigate("/security")}>
               Indietro a Sicurezza
