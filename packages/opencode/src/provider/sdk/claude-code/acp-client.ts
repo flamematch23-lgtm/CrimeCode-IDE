@@ -169,24 +169,38 @@ function findNodeRuntime(): string {
 
 /** Sync check — does `<nodeBin> --version` actually succeed? Throws with
  *  a user-friendly message if not, so the chat surfaces an actionable
- *  error instead of hanging forever in "Thinking…". */
+ *  error instead of hanging forever in "Thinking…".
+ *
+ *  IMPORTANT: on Windows we ALWAYS use shell:true. Without it, an
+ *  absolute path containing a space ("C:\Program Files\nodejs\node.exe")
+ *  fails with exit=null because spawnSync passes the path unquoted to
+ *  CreateProcess and Windows treats "C:\Program" as the executable. With
+ *  shell:true, cmd.exe handles the quoting via PATHEXT resolution. */
 function verifyNodeAvailable(nodeBin: string): void {
   const sync = require("node:child_process").spawnSync as typeof import("node:child_process").spawnSync
+  const useShell = process.platform === "win32"
+  // When using shell on win32, cmd /c needs the path quoted if it has spaces.
+  const cmd = useShell && nodeBin.includes(" ") ? `"${nodeBin}"` : nodeBin
   try {
-    const r = sync(nodeBin, ["--version"], {
-      timeout: 3000,
-      shell: process.platform === "win32" && nodeBin === "node",
+    const r = sync(cmd, ["--version"], {
+      timeout: 5000,
+      shell: useShell,
       windowsHide: true,
     })
+    if (r.error) {
+      throw new Error(`spawn error: ${(r.error as any).code || r.error.message}`)
+    }
     if (r.status !== 0) {
-      throw new Error(`exit ${r.status}: ${(r.stderr ?? "").toString().slice(0, 100)}`)
+      throw new Error(
+        `exit ${r.status} signal=${r.signal}: stderr="${(r.stderr ?? "").toString().slice(0, 200)}" stdout="${(r.stdout ?? "").toString().slice(0, 200)}"`,
+      )
     }
     log.info("node verified", { bin: nodeBin, version: (r.stdout ?? "").toString().trim() })
   } catch (e: any) {
     throw new Error(
       `Node.js runtime not found (tried: ${nodeBin}). Install Node 18+ from https://nodejs.org ` +
         `or set OPENCODE_NODE_BINARY=<absolute path to node.exe>. ` +
-        `Underlying: ${e?.code || e?.message || String(e).slice(0, 100)}`,
+        `Underlying: ${e?.code || e?.message || String(e).slice(0, 200)}`,
     )
   }
 }
@@ -202,13 +216,23 @@ function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
   verifyNodeAvailable(nodeBin)
   log.info("spawning adapter", { entry: adapterEntry, node: nodeBin })
 
-  const child = spawn(nodeBin, [adapterEntry], {
+  // Always use shell on win32 — both for bare `node` (PATHEXT resolves
+  // node.exe) AND for absolute paths with spaces (e.g. "C:\Program
+  // Files\nodejs\node.exe", which fails with exit=null when shell:false
+  // because CreateProcess sees "C:\Program" as the executable). cmd.exe
+  // handles quoting correctly when we wrap the path in double quotes.
+  const useShell = process.platform === "win32"
+  const cmd = useShell && nodeBin.includes(" ") ? `"${nodeBin}"` : nodeBin
+  // When shell:true on win32, args also need quoting if they have spaces
+  // — but adapterEntry from process.resourcesPath might be in
+  // "C:\Program Files\OpenCode\..." so quote it too.
+  const args = useShell && adapterEntry.includes(" ") ? [`"${adapterEntry}"`] : [adapterEntry]
+  const child = spawn(cmd, args, {
     cwd: opts.cwd || process.cwd(),
     env: makeChildEnv(opts.claudeCliPath),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
-    // Need shell on win32 for bare `node` so PATHEXT resolves node.exe.
-    shell: process.platform === "win32" && nodeBin === "node",
+    shell: useShell,
   }) as ChildProcessWithoutNullStreams
 
   // Forward adapter stderr to our log at debug level (it's chatty).
