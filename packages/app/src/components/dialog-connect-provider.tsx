@@ -474,6 +474,20 @@ export function DialogConnectProvider(props: { provider: string }) {
               <div class="text-13-regular text-text-weak">
                 Scegli il tuo account Pro/Max. Quando compare "Logged in", torna qui e ricarica.
               </div>
+              {/* Diagnostic detail: spesso `claude auth status` ritorna
+                  loggedIn=false dal sidecar Electron anche se da terminale
+                  sei loggato — succede quando HOME/USERPROFILE non sono
+                  ereditati correttamente o quando le credenziali sono nel
+                  Windows Credential Manager. Mostriamo il raw stderr/stdout
+                  così l'utente capisce se è un problema di env o di auth. */}
+              <Show when={cli().errorMessage}>
+                {(msg) => (
+                  <details class="text-11-regular text-text-weak font-mono">
+                    <summary class="cursor-pointer hover:text-text-base">Dettagli diagnostici</summary>
+                    <div class="mt-1 break-all">{msg()}</div>
+                  </details>
+                )}
+              </Show>
             </div>
           </Match>
           <Match when={true}>

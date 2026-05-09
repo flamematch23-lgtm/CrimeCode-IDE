@@ -170,6 +170,15 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
         encoding: "utf-8",
         timeout: 5_000,
         shell: useShell,
+        // Pass HOME/USERPROFILE explicitly because some Electron sidecar
+        // environments lose them, and `claude` reads its credentials from
+        // ~/.claude (which it builds from HOME). Without this the binary
+        // sees "no auth" even though the user is logged in via shell.
+        env: {
+          ...process.env,
+          HOME: process.env.HOME ?? process.env.USERPROFILE ?? "",
+          USERPROFILE: process.env.USERPROFILE ?? process.env.HOME ?? "",
+        },
       })
       if (authResult.status === 0) {
         try {
@@ -178,17 +187,31 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
           status.authMethod = parsed.authMethod
           status.email = parsed.email
           status.subscriptionType = parsed.subscriptionType
-        } catch {
+          if (!status.loggedIn) {
+            // Surface raw stdout for diagnostic — sometimes the binary returns
+            // {"loggedIn": false} with no other detail and the user can't tell
+            // whether it's a real logout or a credential-store access failure.
+            const snippet = (authResult.stdout || "").slice(0, 200).replace(/\s+/g, " ")
+            status.errorMessage = `claude auth status: not logged in (raw: ${snippet})`
+          }
+        } catch (parseErr) {
           status.loggedIn = false
-          status.errorMessage = "claude auth status returned non-JSON output"
+          const snippet = (authResult.stdout || "").slice(0, 200).replace(/\s+/g, " ")
+          status.errorMessage = `claude auth status returned non-JSON output: "${snippet}" (parse: ${String(parseErr).slice(0, 60)})`
         }
       } else {
         status.loggedIn = false
-        status.errorMessage = `claude auth status exited ${authResult.status}`
+        const stderr = (authResult.stderr || "").slice(0, 200).replace(/\s+/g, " ")
+        const stdout = (authResult.stdout || "").slice(0, 100).replace(/\s+/g, " ")
+        status.errorMessage =
+          `claude auth status exited ${authResult.status}` +
+          (stderr ? ` — stderr: ${stderr}` : "") +
+          (stdout ? ` — stdout: ${stdout}` : "") +
+          ` (HOME=${process.env.HOME ?? "(unset)"}, USERPROFILE=${process.env.USERPROFILE ?? "(unset)"})`
       }
     } catch (e: any) {
       status.loggedIn = false
-      status.errorMessage = `claude auth status failed (${e?.code || e?.message || "unknown"})`
+      status.errorMessage = `claude auth status failed: ${e?.code || e?.message || "unknown"}`
     }
   }
 
