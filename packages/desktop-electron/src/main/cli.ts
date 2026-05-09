@@ -138,12 +138,22 @@ export function spawnCommand(args: string, extraEnv: Record<string, string>) {
   const base = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   )
+  // The sidecar is a single-binary bun-compile artifact and cannot
+  // resolve npm modules at runtime. We pre-stage @zed-industries/claude-code-acp
+  // (+ its transitive deps) into resources/claude-code-acp/ at electron-builder
+  // pack time (see scripts/stage-claude-acp.ts), and tell the sidecar where
+  // to find the entry script. In dev (`npm run dev`), Bun.resolveSync in
+  // acp-client.ts handles the lookup directly.
+  const acpEntry = app.isPackaged
+    ? join(process.resourcesPath, "claude-code-acp", "dist", "index.js")
+    : ""
   const envs = {
     ...base,
     OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
     OPENCODE_CLIENT: "desktop",
     XDG_STATE_HOME: app.getPath("userData"),
+    ...(acpEntry ? { OPENCODE_CLAUDE_CODE_ACP_ENTRY: acpEntry } : {}),
     ...extraEnv,
   }
 

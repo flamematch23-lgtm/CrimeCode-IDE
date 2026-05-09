@@ -89,12 +89,28 @@ interface SharedAdapter {
 let _shared: SharedAdapter | null = null
 
 function resolveAdapterEntry(): string {
-  // Bun.resolveSync walks the workspace symlinks; works in dev (workspace),
-  // electron-builder bundle (extracted to resources/app), and CI builds.
-  const dir = typeof import.meta !== "undefined" && import.meta.dir
-    ? import.meta.dir
-    : process.cwd()
-  return Bun.resolveSync("@zed-industries/claude-code-acp/dist/index.js", dir)
+  // Production (Electron packaged build): main process pre-stages the
+  // adapter to process.resourcesPath/claude-code-acp/ via
+  // scripts/stage-claude-acp.ts and exposes the absolute path through
+  // OPENCODE_CLAUDE_CODE_ACP_ENTRY. The sidecar (single-binary
+  // bun-compile artifact) cannot resolve npm modules itself.
+  const fromEnv = process.env.OPENCODE_CLAUDE_CODE_ACP_ENTRY
+  if (fromEnv) {
+    log.info("adapter entry from env", { path: fromEnv })
+    return fromEnv
+  }
+  // Dev / CLI direct invocation: walk workspace symlinks via Bun's resolver.
+  const dir = typeof import.meta !== "undefined" && import.meta.dir ? import.meta.dir : process.cwd()
+  try {
+    return Bun.resolveSync("@zed-industries/claude-code-acp/dist/index.js", dir)
+  } catch (e) {
+    throw new Error(
+      `Cannot find @zed-industries/claude-code-acp adapter. ` +
+        `In production this is shipped via electron-builder extraResources and the path passed via ` +
+        `OPENCODE_CLAUDE_CODE_ACP_ENTRY (currently unset). In dev, run \`bun install\` first. ` +
+        `Underlying: ${(e as Error).message}`,
+    )
+  }
 }
 
 function makeChildEnv(claudeCliPath?: string): Record<string, string> {
@@ -123,15 +139,45 @@ function makeChildEnv(claudeCliPath?: string): Record<string, string> {
   return env
 }
 
+function findNodeRuntime(): string {
+  // The sidecar (opencode-cli) is a bun --compile single-binary artifact,
+  // so process.execPath can NOT execute arbitrary .js files. We need a
+  // real Node interpreter. Probe common locations:
+  //   - $OPENCODE_NODE_BINARY override
+  //   - bare `node` (PATH)
+  //   - Common Windows install dirs
+  // Returns absolute path or "node" (rely on PATH) — caller wraps in try/catch.
+  const override = process.env["OPENCODE_NODE_BINARY"]
+  if (override) return override
+  if (process.platform === "win32") {
+    const candidates = [
+      "node",
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Program Files (x86)\\nodejs\\node.exe",
+      `${process.env.LOCALAPPDATA}\\Programs\\nodejs\\node.exe`,
+    ]
+    const fs = require("node:fs") as typeof import("node:fs")
+    for (const c of candidates) {
+      if (c === "node") return c // PATH probe handled by spawn
+      if (fs.existsSync(c)) return c
+    }
+    return "node"
+  }
+  return "node"
+}
+
 function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
   const adapterEntry = opts.adapterEntry || resolveAdapterEntry()
-  log.info("spawning adapter", { entry: adapterEntry })
+  const nodeBin = findNodeRuntime()
+  log.info("spawning adapter", { entry: adapterEntry, node: nodeBin })
 
-  const child = spawn(process.execPath, [adapterEntry], {
+  const child = spawn(nodeBin, [adapterEntry], {
     cwd: opts.cwd || process.cwd(),
     env: makeChildEnv(opts.claudeCliPath),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    // Need shell on win32 for bare `node` so PATHEXT resolves node.exe.
+    shell: process.platform === "win32" && nodeBin === "node",
   }) as ChildProcessWithoutNullStreams
 
   // Forward adapter stderr to our log at debug level (it's chatty).
@@ -232,8 +278,18 @@ function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
       _shared = null
       resolve()
     })
-    child.on("error", (err) => {
+    child.on("error", (err: any) => {
       log.warn("adapter error", { err: String(err) })
+      // Surface ENOENT as a clear "install Node" message — this is the
+      // path users hit if they don't have Node.js installed and we
+      // failed to spawn the runtime. Without this they see a cryptic
+      // "Cannot find module" or "spawn ENOENT" error.
+      if (err?.code === "ENOENT") {
+        log.warn(
+          "Node.js runtime not found. Install Node 18+ from https://nodejs.org " +
+            "or set OPENCODE_NODE_BINARY=<absolute path to node.exe>",
+        )
+      }
     })
   })
 

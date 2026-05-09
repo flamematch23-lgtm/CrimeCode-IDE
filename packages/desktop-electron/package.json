@@ -1,7 +1,7 @@
 {
   "name": "@opencode-ai/desktop-electron",
   "private": true,
-  "version": "2.41.3",
+  "version": "2.41.4",
   "type": "module",
   "license": "MIT",
   "homepage": "https://opencode.ai",
@@ -13,7 +13,7 @@
     "typecheck": "tsgo -b",
     "predev": "bun ./scripts/predev.ts",
     "dev": "electron-vite dev",
-    "prebuild": "bun ./scripts/copy-icons.ts",
+    "prebuild": "bun ./scripts/copy-icons.ts && bun ./scripts/stage-claude-acp.ts",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",

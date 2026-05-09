@@ -67,6 +67,19 @@ const getBase = (): Configuration => ({
       to: "proxy/",
       filter: ["index.cjs"],
     },
+    // Ship the @zed-industries/claude-code-acp adapter as a self-contained
+    // node-runnable bundle (built by scripts/stage-claude-acp.ts at
+    // prebuild). The sidecar (bun --compile single-binary) cannot resolve
+    // npm modules at runtime, so the main electron process spawns
+    // `node <resourcesPath>/claude-code-acp/dist/index.js` and exposes
+    // OPENCODE_CLAUDE_CODE_ACP_ENTRY to the sidecar so acp-client.ts knows
+    // where to look. The bundle includes every transitive runtime dep
+    // (@agentclientprotocol/sdk, @anthropic-ai/{claude-agent-sdk,sdk},
+    // @modelcontextprotocol/sdk, diff, minimatch).
+    {
+      from: "resources/claude-code-acp/",
+      to: "claude-code-acp/",
+    },
   ],
   mac: {
     category: "public.app-category.developer-tools",
