@@ -167,42 +167,28 @@ function findNodeRuntime(): string {
   return "node"
 }
 
-/** Sync check — does `<nodeBin> --version` actually succeed? Throws with
- *  a user-friendly message if not, so the chat surfaces an actionable
- *  error instead of hanging forever in "Thinking…".
+/** Filesystem-only check — does the resolved Node binary EXIST? Avoids
+ *  actually spawning `<node> --version` because on Windows that costs
+ *  3-15s (cmd.exe startup + antivirus scan of node.exe + cold-start
+ *  Node init), and any value > our 5s sync timeout used to manifest
+ *  as a misleading "ETIMEDOUT — Node not found" error to the user
+ *  who actually had Node correctly installed.
  *
- *  IMPORTANT: on Windows we ALWAYS use shell:true. Without it, an
- *  absolute path containing a space ("C:\Program Files\nodejs\node.exe")
- *  fails with exit=null because spawnSync passes the path unquoted to
- *  CreateProcess and Windows treats "C:\Program" as the executable. With
- *  shell:true, cmd.exe handles the quoting via PATHEXT resolution. */
+ *  We just sanity-check that the file is on disk. The real spawn that
+ *  happens next has its own async error path (child.on("error") +
+ *  initialize() timeout) that surfaces actual problems. */
 function verifyNodeAvailable(nodeBin: string): void {
-  const sync = require("node:child_process").spawnSync as typeof import("node:child_process").spawnSync
-  const useShell = process.platform === "win32"
-  // When using shell on win32, cmd /c needs the path quoted if it has spaces.
-  const cmd = useShell && nodeBin.includes(" ") ? `"${nodeBin}"` : nodeBin
-  try {
-    const r = sync(cmd, ["--version"], {
-      timeout: 5000,
-      shell: useShell,
-      windowsHide: true,
-    })
-    if (r.error) {
-      throw new Error(`spawn error: ${(r.error as any).code || r.error.message}`)
-    }
-    if (r.status !== 0) {
-      throw new Error(
-        `exit ${r.status} signal=${r.signal}: stderr="${(r.stderr ?? "").toString().slice(0, 200)}" stdout="${(r.stdout ?? "").toString().slice(0, 200)}"`,
-      )
-    }
-    log.info("node verified", { bin: nodeBin, version: (r.stdout ?? "").toString().trim() })
-  } catch (e: any) {
+  // Bare `node` relies on PATH — we can't existsSync that. Skip the check
+  // and let spawn handle it; the 60s `ready` timeout is the safety net.
+  if (!nodeBin.includes("/") && !nodeBin.includes("\\")) return
+  const fs = require("node:fs") as typeof import("node:fs")
+  if (!fs.existsSync(nodeBin)) {
     throw new Error(
-      `Node.js runtime not found (tried: ${nodeBin}). Install Node 18+ from https://nodejs.org ` +
-        `or set OPENCODE_NODE_BINARY=<absolute path to node.exe>. ` +
-        `Underlying: ${e?.code || e?.message || String(e).slice(0, 200)}`,
+      `Node.js runtime not found at ${nodeBin}. Install Node 18+ from https://nodejs.org ` +
+        `or set OPENCODE_NODE_BINARY=<absolute path to node.exe>.`,
     )
   }
+  log.info("node binary present", { bin: nodeBin })
 }
 
 function spawnAdapter(opts: AcpClientOptions): SharedAdapter {
