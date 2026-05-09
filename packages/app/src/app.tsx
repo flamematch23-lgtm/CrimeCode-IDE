@@ -54,6 +54,7 @@ const HomeRoute = lazy(() => import("@/pages/home"))
 const SecurityRoute = lazy(() => import("@/pages/security"))
 const BurpWorkspaceRoute = lazy(() => import("@/pages/burp-workspace"))
 const AccountRoute = lazy(() => import("@/pages/account"))
+const CommunityRoute = lazy(() => import("@/pages/community"))
 const ReferralLandingRoute = lazy(() => import("@/pages/referral-landing"))
 const Session = lazy(() => import("@/pages/session"))
 const Loading = () => <div class="size-full" />
@@ -319,6 +320,7 @@ export function AppInterface(props: {
                   <Route path="/security" component={SecurityRoute} />
                   <Route path="/security/burp" component={BurpWorkspaceRoute} />
                   <Route path="/account" component={AccountRoute} />
+                  <Route path="/community" component={CommunityRoute} />
                   <Route path="/r/:code" component={ReferralLandingRoute} />
                   <Route path="/:dir" component={DirectoryLayout}>
                     <Route path="/" component={SessionIndexRoute} />

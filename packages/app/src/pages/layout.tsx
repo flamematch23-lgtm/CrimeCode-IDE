@@ -2451,6 +2451,8 @@ export default function Layout(props: ParentProps) {
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
       securityLabel={() => "Security Toolkit"}
       onOpenSecurity={() => navigate("/security")}
+      communityLabel={() => "Community"}
+      onOpenCommunity={() => navigate("/community")}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }

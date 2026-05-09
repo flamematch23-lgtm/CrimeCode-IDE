@@ -32,6 +32,8 @@ export const SidebarContent = (props: {
   onOpenHelp: () => void
   securityLabel?: Accessor<string>
   onOpenSecurity?: () => void
+  communityLabel?: Accessor<string>
+  onOpenCommunity?: () => void
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
@@ -100,6 +102,17 @@ export const SidebarContent = (props: {
                 size="large"
                 onClick={props.onOpenSecurity}
                 aria-label={props.securityLabel?.() ?? "Security Toolkit"}
+              />
+            </Tooltip>
+          </Show>
+          <Show when={props.onOpenCommunity}>
+            <Tooltip placement={placement()} value={props.communityLabel?.() ?? "Community"}>
+              <IconButton
+                icon="branch"
+                variant="ghost"
+                size="large"
+                onClick={props.onOpenCommunity}
+                aria-label={props.communityLabel?.() ?? "Community"}
               />
             </Tooltip>
           </Show>

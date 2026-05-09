@@ -35,10 +35,22 @@ function readCookie(c: Context, name: string): string | null {
   return null
 }
 
+function readBearer(c: Context): string | null {
+  const auth = c.req.header("Authorization") ?? c.req.header("authorization")
+  if (!auth) return null
+  const m = /^Bearer\s+(\S+)$/i.exec(auth)
+  return m ? m[1] : null
+}
+
 export function userAuth(opts: UserAuthOpts): MiddlewareHandler {
   const cookieName = opts.cookieName ?? COOKIE_DEFAULT
   return async (c, next) => {
-    const token = readCookie(c, cookieName)
+    // Accetta sia cookie (browser dashboard) che Authorization: Bearer
+    // (Electron app + CLI). Stesso token HMAC, due transport diversi.
+    // L'app desktop non può settare cookie cross-origin facilmente, quindi
+    // senza Bearer support i nuovi endpoint /community/* erano inaccessibili
+    // dall'app pur essendo l'utente loggato.
+    const token = readCookie(c, cookieName) ?? readBearer(c)
     if (!token) return c.json({ error: "unauthorized" }, 401)
 
     // Crypto-only verification (HMAC + expiry), no DB lookup.
