@@ -34,6 +34,8 @@ export const SidebarContent = (props: {
   onOpenSecurity?: () => void
   communityLabel?: Accessor<string>
   onOpenCommunity?: () => void
+  /** Unread DM count to show as red badge on the Community icon. 0 = no badge. */
+  communityBadgeCount?: Accessor<number>
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
@@ -107,13 +109,27 @@ export const SidebarContent = (props: {
           </Show>
           <Show when={props.onOpenCommunity}>
             <Tooltip placement={placement()} value={props.communityLabel?.() ?? "Community"}>
-              <IconButton
-                icon="branch"
-                variant="ghost"
-                size="large"
-                onClick={props.onOpenCommunity}
-                aria-label={props.communityLabel?.() ?? "Community"}
-              />
+              {/* Wrapper relativo per posizionare il badge unread DM in
+                  alto a destra dell'icona. Il badge è render solo se
+                  communityBadgeCount() > 0. Stile compatto: pallino rosso
+                  con count, oppure solo pallino se count > 99. */}
+              <div class="relative">
+                <IconButton
+                  icon="branch"
+                  variant="ghost"
+                  size="large"
+                  onClick={props.onOpenCommunity}
+                  aria-label={props.communityLabel?.() ?? "Community"}
+                />
+                <Show when={(props.communityBadgeCount?.() ?? 0) > 0}>
+                  <span
+                    class="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-icon-warning-base text-text-contrast text-10-semibold flex items-center justify-center pointer-events-none"
+                    aria-label={`${props.communityBadgeCount!()} DM non letti`}
+                  >
+                    {(props.communityBadgeCount?.() ?? 0) > 99 ? "99+" : props.communityBadgeCount?.()}
+                  </span>
+                </Show>
+              </div>
             </Tooltip>
           </Show>
           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>

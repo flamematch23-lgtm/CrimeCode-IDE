@@ -117,6 +117,40 @@ export default function Layout(props: ParentProps) {
   const globalSDK = useGlobalSDK()
   const globalSync = useGlobalSync()
   const layout = useLayout()
+
+  // ─── Community unread DM count badge ───────────────────────────────
+  // Poll inbox ogni 30s quando l'utente è loggato. Ogni 30s è plenty per
+  // un badge di sidebar (non serve real-time perché è un hint, non una
+  // notifica). Quando l'utente apre la pagina /community, l'inbox viene
+  // ri-fetchata e marca i messaggi come letti, quindi il badge si azzera
+  // entro 30s. Real-time delivery via SSE è reso disponibile dentro la
+  // pagina DM stessa per UX live, ma per il badge sidebar bastano 30s.
+  const [communityUnreadDms, setCommunityUnreadDms] = createSignal(0)
+  ;(() => {
+    let cancelled = false
+    const poll = async () => {
+      if (cancelled) return
+      try {
+        const { hasAccountSession, getInbox } = await import("@/utils/community-client")
+        if (!hasAccountSession()) {
+          setCommunityUnreadDms(0)
+          return
+        }
+        const inbox = await getInbox()
+        if (cancelled) return
+        const total = inbox.reduce((sum, c) => sum + (c.unread_count ?? 0), 0)
+        setCommunityUnreadDms(total)
+      } catch {
+        /* network error - retry next tick */
+      }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 30_000)
+    onCleanup(() => {
+      cancelled = true
+      clearInterval(id)
+    })
+  })()
   const layoutReady = createMemo(() => layout.ready())
   const platform = usePlatform()
   const settings = useSettings()
@@ -2453,6 +2487,7 @@ export default function Layout(props: ParentProps) {
       onOpenSecurity={() => navigate("/security")}
       communityLabel={() => "Community"}
       onOpenCommunity={() => navigate("/community")}
+      communityBadgeCount={communityUnreadDms}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }
