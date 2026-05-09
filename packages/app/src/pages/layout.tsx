@@ -2333,9 +2333,32 @@ export default function Layout(props: ParentProps) {
                 when={workspacesEnabled()}
                 fallback={
                   <>
-                    <div class="shrink-0 py-4">
+                    <div class="shrink-0 py-4 flex flex-col gap-1.5">
+                      {/* Primary CTA: open the Builder modal — the
+                          composer that gathers tab + prompt + model and
+                          launches an autonomous agent. This is the
+                          "Cosa vuoi costruire?" entry point the user
+                          asked for, always visible at the top of the
+                          sidebar. */}
                       <Button
                         size="large"
+                        icon="brain"
+                        class="w-full"
+                        onClick={() => {
+                          const dir = worktree()
+                          if (!dir) return
+                          void import("@/components/dialog-builder").then((m) => {
+                            dialog.show(() => <m.DialogBuilder workspaceDirectory={dir} />)
+                          })
+                        }}
+                      >
+                        {language.t("builder.title")}
+                      </Button>
+                      {/* Escape hatch: open a blank session for users who
+                          don't want the Builder flow. Smaller, ghost. */}
+                      <Button
+                        size="small"
+                        variant="ghost"
                         icon="new-session"
                         class="w-full"
                         onClick={() => {

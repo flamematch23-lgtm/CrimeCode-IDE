@@ -30,6 +30,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { useLocal } from "@/context/local"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import type { Prompt } from "@/context/prompt"
 import {
@@ -83,6 +84,15 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
   const language = useLanguage()
   const providers = useProviders()
   const globalSDK = useGlobalSDK()
+  // useLocal() lets us pre-set the model + agent for the session BEFORE
+  // navigating, then promote() the draft state to the new session id so
+  // the composer picks it up automatically. Try-guarded because the
+  // builder dialog may be opened from a context tree that doesn't have
+  // the LocalProvider mounted (rare but possible — sidebar workspace
+  // root). Fallback: skip the model-force, composer uses last-selected.
+  const local = (() => {
+    try { return useLocal() } catch { return null }
+  })()
 
   const [activeTab, setActiveTab] = createSignal<BuilderTab>("webapp")
   const [prompt, setPrompt] = createSignal("")
@@ -184,13 +194,22 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
       // and (if autoSubmit:true) immediately fires a real form submit.
       setSessionHandoff(sessionKey, { pendingPrompt: parts, autoSubmit: true })
 
-      // Note about model selection: setting `selectedModel` mid-flight
-      // requires plumbing into the composer's currentModel signal which
-      // varies per harness. For now we let the composer use the user's
-      // last-selected model. A proper "force model X for this session"
-      // path is TODO — track in providerId/modelId from this builder.
-      void model.providerId
-      void model.modelId
+      // Force the user's selected model + agent on the new session.
+      // local.model.set/agent.set write into the `draft` scope (no session
+      // id yet); local.session.promote(dir, sessionId) then moves the
+      // draft into the persisted session-saved state. When the user lands
+      // on /session/<id>, useLocal() reads back exactly these values.
+      if (local) {
+        try {
+          local.model.set({ providerID: model.providerId, modelID: model.modelId })
+          if (agentName) local.agent.set(agentName)
+          local.session.promote(props.workspaceDirectory, created.id)
+        } catch (e) {
+          // Non-fatal: model-force is a UX nicety, not a correctness req.
+          // Composer will fall back to user's last-selected model.
+          console.warn("[builder] model promote failed", e)
+        }
+      }
 
       dialog.close()
       navigate(`/${dirSlug}/session/${created.id}`)
@@ -239,13 +258,14 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
 
         <div class="text-13-regular text-text-weak px-2.5">{language.t("builder.subtitle")}</div>
 
-        {/* Tab pills — modern card-style with active glow */}
-        <div class="flex gap-1.5 px-2.5 overflow-x-auto pb-1">
+        {/* Tab pills — flex-wrap (no horizontal scrollbar), compact, with
+            active glow. 6 tabs fit on 2 rows max even on narrow viewports. */}
+        <div class="flex flex-wrap gap-1.5 px-2.5">
           <For each={TABS}>
             {(t) => (
               <button
                 onClick={() => setActiveTab(t.id)}
-                class="px-3 py-1.5 rounded-md text-12-regular flex items-center gap-1.5 border whitespace-nowrap transition-all"
+                class="px-3 py-1.5 rounded-md text-12-regular flex items-center gap-1.5 border whitespace-nowrap transition-all shrink-0"
                 classList={{
                   "bg-surface-base border-border-base text-text-strong shadow-sm": activeTab() === t.id,
                   "bg-transparent border-transparent text-text-weak hover:text-text-base hover:bg-surface-weak/30":
