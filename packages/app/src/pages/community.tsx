@@ -249,7 +249,12 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
       if (!alive) return
       sseAlive = false
       setLive(false)
-      // SSE rotto — switcha a polling
+      // SSE rotto — switcha a polling E chiudi explicit per fermare l'auto-reconnect
+      // del browser (altrimenti spamma 1 errore ogni N secondi nel diagnostic
+      // mentre polling lavora già). Una volta chiuso, polling è la sola via.
+      try {
+        es.close()
+      } catch {}
       startPolling()
     })
     es.addEventListener("message", (ev: MessageEvent) => {

@@ -125,6 +125,11 @@ export const DmPanel: Component<DmPanelProps> = (props) => {
     es.addEventListener("error", () => {
       if (!alive) return
       sseAlive = false
+      // Chiudi explicit per fermare auto-reconnect del browser (altrimenti
+      // spamma 1 errore al diagnostic per ogni retry mentre polling lavora).
+      try {
+        es.close()
+      } catch {}
       startPolling()
     })
 
