@@ -708,7 +708,7 @@ const CommunityPage: Component = () => {
                 onClick={() => {
                   const url =
                     (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_TELEGRAM_CHANNEL_URL ??
-                    "https://t.me/CrimeCodeIDE"
+                    "https://t.me/OpCrimeGPT"
                   window.open(url, "_blank")
                 }}
               >

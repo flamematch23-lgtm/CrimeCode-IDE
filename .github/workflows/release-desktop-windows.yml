@@ -127,6 +127,11 @@ jobs:
           OPENCODE_CHANNEL: prod
           OPENCODE_ADMIN_PASSPHRASE_SHA256: ${{ secrets.OPENCODE_ADMIN_PASSPHRASE_SHA256 }}
           OPENCODE_CHECKOUT_BASE_URL: "https://t.me/OpCrime1312"
+          # Vite-baked URL del canale community Telegram. Cambia qui se sposti
+          # a un canale diverso. È baked nel bundle (import.meta.env), quindi
+          # serve un nuovo build per propagare il cambio. Default fallback in
+          # codice è lo stesso URL (community.tsx).
+          VITE_TELEGRAM_CHANNEL_URL: "https://t.me/OpCrimeGPT"
           SIGN_PASS: ${{ secrets.SIGN_PASS }}
           SIGN_PUBLISHER: ${{ secrets.SIGN_PUBLISHER }}
           SKIP_SIDECAR_STASH: "1" # CI has no OneDrive locks, stash not needed
