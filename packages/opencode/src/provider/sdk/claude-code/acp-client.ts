@@ -96,9 +96,14 @@ function resolveAdapterEntry(): string {
   // bun-compile artifact) cannot resolve npm modules itself.
   const fromEnv = process.env.OPENCODE_CLAUDE_CODE_ACP_ENTRY
   if (fromEnv) {
-    log.info("adapter entry from env", { path: fromEnv })
-    ensureVendorLink(fromEnv)
-    return fromEnv
+    // The bundle ships under a write-protected dir on Windows
+    // (`C:\Program Files\OpenCode\resources\claude-code-acp\`). The
+    // sidecar runs as the normal user and CANNOT create the junction
+    // `node_modules → vendor` there. So we mirror the bundle to a
+    // writable per-user dir on first launch and run from there.
+    const userBundle = ensureUserWritableBundle(fromEnv)
+    log.info("adapter entry resolved", { from: fromEnv, runFrom: userBundle })
+    return userBundle
   }
   // Dev / CLI direct invocation: walk workspace symlinks via Bun's resolver.
   const dir = typeof import.meta !== "undefined" && import.meta.dir ? import.meta.dir : process.cwd()
@@ -114,34 +119,121 @@ function resolveAdapterEntry(): string {
   }
 }
 
-/** electron-builder strips dirs named `node_modules` from extraResources
- *  targets, so stage-claude-acp.ts ships them as `vendor/`. Here at first
- *  spawn we ensure `node_modules/` exists (as a Windows junction or unix
- *  symlink → `vendor/`) so Node's ESM resolver finds the deps. Idempotent:
- *  if `node_modules/` already exists we leave it alone. */
-function ensureVendorLink(entryPath: string) {
+/** Pick a writable per-user dir to host the runnable bundle. */
+function userWritableBundleRoot(): string {
+  const path = require("node:path") as typeof import("node:path")
+  const base =
+    process.env.OPENCODE_USER_DATA_DIR ||
+    process.env.XDG_STATE_HOME ||
+    (process.platform === "win32"
+      ? process.env.LOCALAPPDATA || process.env.APPDATA || ""
+      : process.env.HOME
+        ? path.join(process.env.HOME, ".local", "state")
+        : "")
+  if (!base) {
+    throw new Error("Cannot resolve a writable user data dir (no XDG_STATE_HOME/LOCALAPPDATA/HOME)")
+  }
+  return path.join(base, "OpenCode", "claude-code-acp")
+}
+
+/** Mirror the read-only `process.resourcesPath/claude-code-acp/` bundle
+ *  to a per-user writable dir, then ensure `node_modules → vendor` link
+ *  inside the writable copy. Returns the absolute path to the entry
+ *  script in the writable copy.
+ *
+ *  Idempotent: if the writable copy is already current (manifest hash
+ *  matches) we skip the copy. The hash is just the resource bundle's
+ *  package.json content — bumps automatically on every CrimeCode release
+ *  because we re-stage at every build. */
+function ensureUserWritableBundle(srcEntryAbs: string): string {
+  const fs = require("node:fs") as typeof import("node:fs")
+  const path = require("node:path") as typeof import("node:path")
+  const srcBundle = path.resolve(path.dirname(srcEntryAbs), "..")
+  const dstBundle = userWritableBundleRoot()
+
+  let srcManifest = ""
   try {
-    const fs = require("node:fs") as typeof import("node:fs")
-    const path = require("node:path") as typeof import("node:path")
-    // entryPath is `<bundle>/dist/index.js` → bundle root is two levels up.
-    const bundleRoot = path.resolve(path.dirname(entryPath), "..")
-    const nm = path.join(bundleRoot, "node_modules")
-    const vendor = path.join(bundleRoot, "vendor")
-    if (fs.existsSync(nm)) return // already linked or present
-    if (!fs.existsSync(vendor)) {
-      log.warn("vendor dir missing, adapter will fail to resolve deps", { vendor })
-      return
+    srcManifest = fs.readFileSync(path.join(srcBundle, "package.json"), "utf-8")
+  } catch {
+    // No manifest in source — bundle layout is broken upstream. Fall back
+    // to running from the source dir; will fail loudly with a clearer
+    // error at spawn time.
+    log.warn("source bundle has no package.json", { srcBundle })
+    return srcEntryAbs
+  }
+
+  const stampPath = path.join(dstBundle, ".manifest.json")
+  let needsCopy = true
+  try {
+    const stamped = fs.readFileSync(stampPath, "utf-8")
+    if (stamped === srcManifest && fs.existsSync(path.join(dstBundle, "dist", "index.js"))) {
+      needsCopy = false
     }
-    // Junction on Windows (no admin needed, same volume). Symlink elsewhere.
-    if (process.platform === "win32") {
-      fs.symlinkSync(vendor, nm, "junction")
+  } catch {
+    needsCopy = true
+  }
+
+  if (needsCopy) {
+    log.info("mirroring claude-code-acp bundle to user dir", { src: srcBundle, dst: dstBundle })
+    try {
+      fs.rmSync(dstBundle, { recursive: true, force: true })
+    } catch {}
+    fs.mkdirSync(dstBundle, { recursive: true })
+    copyDirRecursiveSync(srcBundle, dstBundle, fs, path)
+    fs.writeFileSync(stampPath, srcManifest)
+  }
+
+  // Junction node_modules → vendor inside the WRITABLE dst (so we can
+  // actually create it). Fallback: if junction creation fails for any
+  // reason, copy vendor → node_modules wholesale.
+  const nm = path.join(dstBundle, "node_modules")
+  const vendor = path.join(dstBundle, "vendor")
+  if (!fs.existsSync(nm)) {
+    if (fs.existsSync(vendor)) {
+      let linked = false
+      try {
+        fs.symlinkSync(vendor, nm, process.platform === "win32" ? "junction" : "dir")
+        linked = true
+        log.info("created node_modules → vendor link", { nm, vendor })
+      } catch (e) {
+        log.warn("symlink failed, falling back to copy", { err: String(e).slice(0, 150) })
+      }
+      if (!linked) {
+        copyDirRecursiveSync(vendor, nm, fs, path)
+      }
     } else {
-      fs.symlinkSync(vendor, nm, "dir")
+      log.warn("vendor missing in mirrored bundle — adapter will fail", { vendor })
     }
-    log.info("created node_modules → vendor link", { nm, vendor })
-  } catch (e) {
-    log.warn("ensureVendorLink failed", { err: String(e).slice(0, 200) })
-    // Non-fatal: the spawn that follows will reveal the real issue.
+  }
+
+  return path.join(dstBundle, "dist", "index.js")
+}
+
+function copyDirRecursiveSync(
+  src: string,
+  dst: string,
+  fs: typeof import("node:fs"),
+  path: typeof import("node:path"),
+) {
+  fs.mkdirSync(dst, { recursive: true })
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const sp = path.join(src, entry.name)
+    const dp = path.join(dst, entry.name)
+    let st
+    try {
+      st = fs.statSync(sp)
+    } catch {
+      continue
+    }
+    if (st.isDirectory()) {
+      copyDirRecursiveSync(sp, dp, fs, path)
+    } else if (st.isFile()) {
+      try {
+        fs.copyFileSync(sp, dp)
+      } catch (e) {
+        log.warn("copy file failed", { sp, err: String(e).slice(0, 100) })
+      }
+    }
   }
 }
 
