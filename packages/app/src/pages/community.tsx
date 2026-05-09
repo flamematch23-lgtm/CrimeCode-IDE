@@ -150,7 +150,7 @@ function MessageBody(props: { body: string; myUsername: string | null }) {
 
 // ─── Phase 2: Chat panel ─────────────────────────────────────────────
 
-function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) {
+function ChatPanel(props: { myUsername: string | null; mySeed: string | null; myAvatarUrl?: string | null }) {
   const navigate = useNavigate()
   const [messages, setMessages] = createSignal<ChatMessage[]>([])
   const [draft, setDraft] = createSignal("")
@@ -393,9 +393,9 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
                       title={`Profilo @${msg.username}`}
                     >
                       <img
-                        src={avatarUrl(msg.username, 28)}
+                        src={msg.avatar_url || avatarUrl(msg.avatar_seed || msg.username, 28)}
                         alt={msg.username}
-                        class="size-7 rounded-full bg-surface-weak"
+                        class="size-7 rounded-full bg-surface-weak object-cover"
                       />
                     </button>
                   </Show>
@@ -440,11 +440,11 @@ function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) 
           }
         >
           <div class="flex gap-2 items-end">
-            <Show when={props.mySeed}>
+            <Show when={props.mySeed || props.myAvatarUrl}>
               <img
-                src={avatarUrl(props.mySeed!, 28)}
+                src={props.myAvatarUrl || avatarUrl(props.mySeed!, 28)}
                 alt="me"
-                class="size-7 rounded-full bg-surface-weak shrink-0"
+                class="size-7 rounded-full bg-surface-weak object-cover shrink-0"
               />
             </Show>
             <textarea
@@ -569,23 +569,50 @@ const CommunityPage: Component = () => {
     }
   }
 
-  const handleBadgeUpload = async (files: FileList | null) => {
+  // Badge upload uses a modal form because window.prompt() throws
+  // "prompt() is not supported" inside Electron. We capture the picked
+  // file here and let the modal collect label + description before the
+  // actual upload.
+  const [pendingBadge, setPendingBadge] = createSignal<File | null>(null)
+  const [badgeLabel, setBadgeLabel] = createSignal("")
+  const [badgeDesc, setBadgeDesc] = createSignal("")
+  const [badgeUploading, setBadgeUploading] = createSignal(false)
+
+  const handleBadgeUpload = (files: FileList | null) => {
     const file = files?.[0]
     if (!file) return
     if (file.size > 200 * 1024) {
       showToast({ variant: "error", title: "Badge troppo grande", description: `Max 200 KB` })
+      if (myBadgeFileInputRef) myBadgeFileInputRef.value = ""
       return
     }
-    const label = window.prompt("Nome del badge (max 40 char):")?.trim() ?? ""
-    if (!label) return
-    const description = window.prompt("Descrizione opzionale (max 200 char):")?.trim() || undefined
-    const res = await uploadCustomBadge(file, label, description)
-    if (!res.ok) {
-      showToast({ variant: "error", title: "Upload badge fallito", description: res.error })
-      return
+    setBadgeLabel("")
+    setBadgeDesc("")
+    setPendingBadge(file)
+  }
+
+  const confirmBadgeUpload = async () => {
+    const file = pendingBadge()
+    const label = badgeLabel().trim()
+    if (!file || !label) return
+    setBadgeUploading(true)
+    try {
+      const res = await uploadCustomBadge(file, label, badgeDesc().trim() || undefined)
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Upload badge fallito", description: res.error })
+        return
+      }
+      showToast({ variant: "success", title: `Badge "${res.badge.label}" creato` })
+      void refetchMyBadges_()
+      setPendingBadge(null)
+    } finally {
+      setBadgeUploading(false)
+      if (myBadgeFileInputRef) myBadgeFileInputRef.value = ""
     }
-    showToast({ variant: "success", title: `Badge "${res.badge.label}" creato` })
-    void refetchMyBadges_()
+  }
+
+  const cancelBadgeUpload = () => {
+    setPendingBadge(null)
     if (myBadgeFileInputRef) myBadgeFileInputRef.value = ""
   }
 
@@ -773,7 +800,11 @@ const CommunityPage: Component = () => {
                 </div>
               }
             >
-              <ChatPanel myUsername={me()?.username ?? null} mySeed={me()?.avatar_seed ?? null} />
+              <ChatPanel
+                myUsername={me()?.username ?? null}
+                mySeed={me()?.avatar_seed ?? null}
+                myAvatarUrl={me()?.avatar_url ?? null}
+              />
             </Show>
             <Show when={chatStats()}>
               {(s) => (
@@ -815,7 +846,7 @@ const CommunityPage: Component = () => {
               <div class="bg-surface-base border border-surface-weak rounded-lg p-4">
                 <div class="flex items-center gap-3 mb-3">
                   <img
-                    src={avatarUrl(me()!.avatar_seed, 48)}
+                    src={me()!.avatar_url || avatarUrl(me()!.avatar_seed, 48)}
                     alt="avatar"
                     class="size-12 rounded-full bg-surface-weak"
                   />
@@ -978,6 +1009,25 @@ const CommunityPage: Component = () => {
             </div>
           </div>
 
+          {/* Leaderboard ranking explainer — fixes "non a logica su cosa
+              rende l'utente in RANK 1" UX bug. Without this banner, users
+              stare at the leaderboard and have no idea what "score" means
+              or how it's computed. Spell out the formula and the per-event
+              weights so the ranking feels deterministic and actionable. */}
+          <div class="bg-surface-base rounded-lg border border-surface-weak p-3 text-11-regular text-text-weak flex items-start gap-2">
+            <Icon name="help" class="size-3.5 shrink-0 mt-0.5 text-icon-warning-base" />
+            <div>
+              <span class="text-text-base font-medium">Come funziona il ranking:</span>{" "}
+              ordinamento per <span class="font-mono text-text-strong">score</span> nel periodo, poi per{" "}
+              <span class="font-mono text-text-strong">rep ricevuti</span> totali, poi per attività più recente.{" "}
+              Score = somma dei pesi degli eventi:
+              <span class="font-mono text-text-base">
+                {" "}msg chat = 1, tool call = 1, sessione = 2, burp flow = 4, exploit chain = 5, report = 5, +rep ricevuto = 3
+              </span>.
+              Dai +rep (★) agli utenti che ti aiutano per spingerli in alto — vale 3 pt nel loro score + 1 nel counter rep totale.
+            </div>
+          </div>
+
           {/* Leaderboard */}
           <div class="bg-surface-base rounded-lg border border-surface-weak overflow-hidden">
             <Show
@@ -1006,9 +1056,9 @@ const CommunityPage: Component = () => {
                       >
                         <span class={`w-10 text-14-semibold ${badge.color}`}>{badge.label}</span>
                         <img
-                          src={avatarUrl(entry.avatar_seed, 36)}
+                          src={entry.avatar_url || avatarUrl(entry.avatar_seed, 36)}
                           alt={entry.username}
-                          class="size-9 rounded-full bg-surface-weak shrink-0"
+                          class="size-9 rounded-full bg-surface-weak object-cover shrink-0"
                         />
                         <div class="flex-1 min-w-0">
                           <div class="text-12-semibold truncate">@{entry.username}</div>
@@ -1016,11 +1066,19 @@ const CommunityPage: Component = () => {
                             <div class="text-11-regular text-text-weak truncate">{entry.bio}</div>
                           </Show>
                         </div>
-                        <div class="text-right shrink-0">
+                        <div
+                          class="text-right shrink-0"
+                          title={`${entry.score} punti score · ${entry.events} eventi · ${entry.rep} rep ricevuti · ultimo evento ${formatRelative(entry.last_active)}`}
+                        >
                           <div class="text-12-semibold">{entry.score} pt</div>
-                          <div class="text-11-regular text-text-weak">
-                            {entry.rep > 0 ? `${entry.rep} rep · ` : ""}
-                            {formatRelative(entry.last_active)}
+                          <div class="text-11-regular text-text-weak flex items-center gap-1.5 justify-end">
+                            <Show when={entry.events > 0}>
+                              <span title="Eventi nel periodo">⚡{entry.events}</span>
+                            </Show>
+                            <Show when={entry.rep > 0}>
+                              <span class="text-icon-warning-base" title="Rep ricevuti totali">★{entry.rep}</span>
+                            </Show>
+                            <span>{formatRelative(entry.last_active)}</span>
                           </div>
                         </div>
                       </button>
@@ -1037,9 +1095,9 @@ const CommunityPage: Component = () => {
               <div class="bg-surface-base border border-surface-weak rounded-lg p-4">
                 <div class="flex items-start gap-4">
                   <img
-                    src={avatarUrl(p().avatar_seed, 64)}
+                    src={p().avatar_url || avatarUrl(p().avatar_seed, 64)}
                     alt={p().username}
-                    class="size-16 rounded-full bg-surface-weak shrink-0"
+                    class="size-16 rounded-full bg-surface-weak object-cover shrink-0"
                   />
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-1">
@@ -1145,6 +1203,66 @@ const CommunityPage: Component = () => {
           </div>
         </div>
       </div>
+
+      {/* Badge upload modal — replaces window.prompt() which throws in Electron. */}
+      <Show when={pendingBadge()}>
+        {(file) => (
+          <div
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !badgeUploading()) cancelBadgeUpload()
+            }}
+          >
+            <div class="bg-bg-base border border-border-base rounded-lg p-6 w-[420px] max-w-[90vw] flex flex-col gap-4 shadow-2xl">
+              <div class="flex items-center justify-between">
+                <div class="text-16-medium text-text-strong">Nuovo badge custom</div>
+                <IconButton
+                  icon="close-small"
+                  variant="ghost"
+                  onClick={cancelBadgeUpload}
+                  disabled={badgeUploading()}
+                  aria-label="Annulla"
+                />
+              </div>
+              <div class="text-13-regular text-text-weak">
+                File selezionato:{" "}
+                <span class="font-mono text-text-base">{file().name}</span> ({Math.round(file().size / 1024)} KB)
+              </div>
+              <TextField
+                autofocus
+                label="Nome del badge"
+                placeholder="es. Lucky Hunter"
+                value={badgeLabel()}
+                onChange={(v) => setBadgeLabel(v.slice(0, 40))}
+              />
+              <TextField
+                label="Descrizione (opzionale)"
+                placeholder="es. Trovato un 0day in <30 minuti"
+                value={badgeDesc()}
+                onChange={(v) => setBadgeDesc(v.slice(0, 200))}
+              />
+              <div class="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="ghost"
+                  size="normal"
+                  onClick={cancelBadgeUpload}
+                  disabled={badgeUploading()}
+                >
+                  Annulla
+                </Button>
+                <Button
+                  variant="primary"
+                  size="normal"
+                  onClick={() => void confirmBadgeUpload()}
+                  disabled={!badgeLabel().trim() || badgeUploading()}
+                >
+                  {badgeUploading() ? "Caricamento…" : "Crea badge"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Show>
     </div>
   )
 }

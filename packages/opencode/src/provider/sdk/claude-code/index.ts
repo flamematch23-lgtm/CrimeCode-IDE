@@ -1,24 +1,21 @@
-// Claude Code CLI provider — uses the locally-installed `claude` binary
-// (Claude Code CLI) as a bridge to the user's Pro/Max subscription.
+// Claude Code provider — bridges to the Pro/Max subscription via the ACP
+// adapter (`@zed-industries/claude-code-acp`).
 //
-// Why this exists:
-// Anthropic OAuth tokens (Pro/Max) issued by `claude auth login` cannot be
-// used directly against `api.anthropic.com/v1/messages` — Anthropic rejects
-// them with "needs API key console" because they are scoped to the
-// Claude Code CLI surface, not the public Messages API. Bridging via the
-// installed CLI uses the subscription quota transparently, so a Pro/Max
-// user pays $0 in API spend instead of being forced onto pay-per-token.
+// Why ACP instead of `claude --print`:
+// 1. Latency — one shared subprocess for the whole session, no 1.5–3s
+//    cold-start per prompt.
+// 2. Tool-use — Claude's native tools (Read/Edit/Bash/Grep/Glob/Write/
+//    Task/etc.) become first-class via JSON-RPC `tool_call` notifications
+//    that map directly to AI SDK `tool-input-*` stream parts. CrimeCode
+//    sees what Claude is doing and can show it in the chat UI.
+// 3. Permissions — file IO and tool execution route through callbacks
+//    (`requestPermission`, `readTextFile`, `writeTextFile`) so CrimeCode
+//    stays in control of the user's filesystem.
 //
-// Output format reverse-engineered from real CLI output (claude 2.1.x):
-//   {"type":"system","subtype":"init",...}
-//   {"type":"system","subtype":"hook_started",...}    // optional
-//   {"type":"system","subtype":"hook_response",...}   // optional
-//   {"type":"assistant","message":{"id":"msg_...","content":[{"type":"text","text":"..."}],"usage":{...}}}
-//   {"type":"rate_limit_event","rate_limit_info":{...}}
-//   {"type":"result","subtype":"success","result":"...","stop_reason":"end_turn","usage":{...},"total_cost_usd":...}
-//
-// Streaming uses --include-partial-messages which adds:
-//   {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}}
+// Why this still uses the Pro/Max subscription:
+// The ACP adapter is just an adapter — it shells out to the user's
+// installed `claude` CLI binary, which authenticates via the Pro/Max
+// OAuth tokens that `claude auth login` set up. Cost per request = $0.
 
 import type {
   LanguageModelV2,
@@ -29,8 +26,10 @@ import type {
   LanguageModelV2StreamPart,
   LanguageModelV2Usage,
 } from "@ai-sdk/provider"
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "child_process"
+import type { ContentBlock, SessionNotification } from "@agentclientprotocol/sdk"
+import { spawnSync } from "child_process"
 import { Log } from "../../../util/log"
+import { acquireSession, type AcpSessionHandle } from "./acp-client"
 
 const log = Log.create({ service: "claude-code" })
 
@@ -52,18 +51,14 @@ let _cachedStatus: ClaudeCliStatus | null = null
 let _cachedAt = 0
 const CACHE_MS = 30_000
 
-/**
- * Detect whether the Claude Code CLI is installed and the user is logged in.
- * Result is cached for 30 s to avoid spawning a subprocess on every list().
- */
 export function detectClaudeCli(force = false): ClaudeCliStatus {
   if (!force && _cachedStatus && Date.now() - _cachedAt < CACHE_MS) return _cachedStatus
 
   const status: ClaudeCliStatus = { installed: false }
+  const cmd = process.env["CLAUDE_CODE_CLI"] || "claude"
 
-  // 1. claude --version
   try {
-    const versionResult = spawnSync(getClaudeCommand(), ["--version"], {
+    const versionResult = spawnSync(cmd, ["--version"], {
       encoding: "utf-8",
       timeout: 5_000,
       shell: process.platform === "win32",
@@ -72,16 +67,15 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
       status.installed = true
       status.version = (versionResult.stdout || "").trim()
     } else {
-      status.errorMessage = `claude --version exited ${versionResult.status}: ${versionResult.stderr || versionResult.stdout || "no output"}`
+      status.errorMessage = `claude --version exited ${versionResult.status}`
     }
   } catch (e: any) {
-    status.errorMessage = `claude CLI not found in PATH (${e?.code || e?.message || "unknown error"})`
+    status.errorMessage = `claude CLI not found in PATH (${e?.code || e?.message || "unknown"})`
   }
 
-  // 2. claude auth status (only if installed)
   if (status.installed) {
     try {
-      const authResult = spawnSync(getClaudeCommand(), ["auth", "status"], {
+      const authResult = spawnSync(cmd, ["auth", "status"], {
         encoding: "utf-8",
         timeout: 5_000,
         shell: process.platform === "win32",
@@ -103,7 +97,7 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
       }
     } catch (e: any) {
       status.loggedIn = false
-      status.errorMessage = `claude auth status failed (${e?.code || e?.message || "unknown error"})`
+      status.errorMessage = `claude auth status failed (${e?.code || e?.message || "unknown"})`
     }
   }
 
@@ -118,60 +112,13 @@ export function detectClaudeCli(force = false): ClaudeCliStatus {
   return status
 }
 
-function getClaudeCommand(): string {
-  // Allow override for testing or non-PATH installs
-  return process.env["CLAUDE_CODE_CLI"] || "claude"
-}
-
 // ────────────────────────────────────────────────────────────────────
-// LanguageModelV2 implementation
+// LanguageModelV2 implementation (ACP-backed)
 // ────────────────────────────────────────────────────────────────────
 
 export interface ClaudeCodeModelOptions {
-  /** Optional working directory for the spawned CLI. Defaults to process.cwd(). */
+  /** Working directory for the spawned ACP adapter. Defaults to cwd. */
   cwd?: string
-  /** Optional extra CLI args (rare — for power-user overrides via opencode.json). */
-  extraArgs?: string[]
-  /** Override CLI binary path (else $CLAUDE_CODE_CLI then "claude"). */
-  cliPath?: string
-}
-
-interface ClaudeStreamEvent {
-  type: string
-  subtype?: string
-  message?: {
-    id?: string
-    model?: string
-    role?: string
-    content?: Array<{ type: string; text?: string }>
-    usage?: {
-      input_tokens?: number
-      output_tokens?: number
-      cache_read_input_tokens?: number
-      cache_creation_input_tokens?: number
-    }
-  }
-  result?: string
-  stop_reason?: string
-  total_cost_usd?: number
-  duration_ms?: number
-  is_error?: boolean
-  usage?: {
-    input_tokens?: number
-    output_tokens?: number
-    cache_read_input_tokens?: number
-    cache_creation_input_tokens?: number
-  }
-  // Partial-message streaming events
-  event?: {
-    type?: string
-    delta?: { type?: string; text?: string }
-  }
-  rate_limit_info?: {
-    status?: string
-    rateLimitType?: string
-    overageStatus?: string
-  }
 }
 
 export class ClaudeCodeLanguageModel implements LanguageModelV2 {
@@ -187,81 +134,232 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
     this.opts = opts
   }
 
-  // ──────────────────────────────────────────────────────────
-  // doGenerate (non-streaming)
-  // ──────────────────────────────────────────────────────────
   async doGenerate(options: LanguageModelV2CallOptions) {
-    const { systemPrompt, userInputs } = mapPromptToCliInputs(options.prompt)
-    const args = buildCliArgs(this.modelId, this.opts, systemPrompt, false)
+    const blocks = mapPromptToBlocks(options.prompt)
+    const session = await acquireSession({ cwd: this.opts.cwd })
 
-    log.info("doGenerate spawn", { model: this.modelId, args: args.length })
-    const result = await runClaudeCli(args, userInputs, this.opts, options.abortSignal)
+    let assembledText = ""
+    let finishReason: LanguageModelV2FinishReason = "unknown"
+    const warnings: any[] = []
 
-    const content: LanguageModelV2Content[] = []
-    if (result.text) content.push({ type: "text", text: result.text })
+    try {
+      const res = await session.prompt(blocks, (n) => {
+        const u: any = n.update
+        if (u.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
+          assembledText += u.content.text ?? ""
+        }
+      })
+      finishReason = mapStopReason(res.stopReason)
+      const usage = mapUsage(res.usage)
 
-    return {
-      content,
-      finishReason: result.finishReason,
-      usage: result.usage,
-      providerMetadata: {
-        "claude-code": {
-          sessionId: result.sessionId ?? null,
-          totalCostUsd: result.totalCostUsd ?? 0,
-          durationMs: result.durationMs ?? 0,
+      const content: LanguageModelV2Content[] = []
+      if (assembledText) content.push({ type: "text", text: assembledText })
+
+      return {
+        content,
+        finishReason,
+        usage,
+        providerMetadata: {
+          "claude-code": { sessionId: session.sessionId, transport: "acp" },
         },
-      },
-      warnings: result.warnings,
-      response: {
-        id: result.responseId ?? undefined,
-        modelId: result.responseModelId ?? undefined,
-        timestamp: new Date(),
-      },
+        warnings,
+        response: { timestamp: new Date() },
+      }
+    } finally {
+      await session.close().catch(() => {})
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // doStream (streaming)
-  // ──────────────────────────────────────────────────────────
   async doStream(options: LanguageModelV2CallOptions) {
-    const { systemPrompt, userInputs } = mapPromptToCliInputs(options.prompt)
-    const args = buildCliArgs(this.modelId, this.opts, systemPrompt, true)
+    const blocks = mapPromptToBlocks(options.prompt)
+    const session = await acquireSession({ cwd: this.opts.cwd })
 
-    log.info("doStream spawn", { model: this.modelId, args: args.length })
+    // Build the AI SDK stream that mirrors ACP session/update events.
+    let textBlockId: string | null = null
+    const toolBlocks = new Map<string, { id: string; name: string }>()
+    let finalUsage: LanguageModelV2Usage = {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      totalTokens: undefined,
+    }
+    let finishReason: LanguageModelV2FinishReason = "unknown"
+    let cancelled = false
 
-    const child = spawnClaude(args, this.opts, options.abortSignal)
-    feedStdin(child, userInputs)
+    const stream = new ReadableStream<LanguageModelV2StreamPart>({
+      start(controller) {
+        controller.enqueue({ type: "stream-start", warnings: [] })
 
-    const stream = makeStreamFromChild(child, options.abortSignal)
+        const startText = () => {
+          if (!textBlockId) {
+            textBlockId = `text-${Date.now()}`
+            controller.enqueue({ type: "text-start", id: textBlockId })
+          }
+        }
+
+        const handle = (n: SessionNotification) => {
+          if (cancelled) return
+          const u: any = n.update
+          try {
+            switch (u.sessionUpdate) {
+              case "agent_message_chunk": {
+                if (u.content?.type === "text" && typeof u.content.text === "string") {
+                  startText()
+                  controller.enqueue({
+                    type: "text-delta",
+                    id: textBlockId!,
+                    delta: u.content.text,
+                  })
+                } else if (u.content?.type === "image") {
+                  // Image deltas in assistant messages — translate to file part
+                  controller.enqueue({
+                    type: "file",
+                    mediaType: u.content.mimeType ?? "image/png",
+                    data: u.content.data ?? "",
+                  } as any)
+                }
+                break
+              }
+              case "agent_thought_chunk": {
+                if (u.content?.type === "text" && typeof u.content.text === "string") {
+                  // AI SDK reasoning channel
+                  if (!toolBlocks.has("__reasoning")) {
+                    const id = "reasoning-" + Date.now()
+                    toolBlocks.set("__reasoning", { id, name: "" })
+                    controller.enqueue({ type: "reasoning-start", id })
+                  }
+                  const id = toolBlocks.get("__reasoning")!.id
+                  controller.enqueue({ type: "reasoning-delta", id, delta: u.content.text })
+                }
+                break
+              }
+              case "tool_call": {
+                // Close any open text block before announcing a tool call.
+                if (textBlockId) {
+                  controller.enqueue({ type: "text-end", id: textBlockId })
+                  textBlockId = null
+                }
+                const toolCallId = String(u.toolCallId ?? `tc-${Date.now()}`)
+                const name = String(u.title ?? u.kind ?? "tool")
+                toolBlocks.set(toolCallId, { id: toolCallId, name })
+                controller.enqueue({
+                  type: "tool-input-start",
+                  id: toolCallId,
+                  toolName: name,
+                })
+                if (u.rawInput) {
+                  controller.enqueue({
+                    type: "tool-input-delta",
+                    id: toolCallId,
+                    delta: typeof u.rawInput === "string" ? u.rawInput : JSON.stringify(u.rawInput),
+                  })
+                }
+                controller.enqueue({ type: "tool-input-end", id: toolCallId })
+                controller.enqueue({
+                  type: "tool-call",
+                  toolCallId,
+                  toolName: name,
+                  input: u.rawInput ?? {},
+                  providerExecuted: true,
+                })
+                break
+              }
+              case "tool_call_update": {
+                // Update existing tool call (e.g. status: in_progress → completed).
+                // When the agent finishes a tool, surface the result so
+                // the AI SDK consumer can show it in the chat UI.
+                if (u.status === "completed" && u.toolCallId && u.content) {
+                  controller.enqueue({
+                    type: "tool-result",
+                    toolCallId: String(u.toolCallId),
+                    toolName: toolBlocks.get(String(u.toolCallId))?.name ?? "tool",
+                    result: u.content,
+                    providerExecuted: true,
+                  } as any)
+                }
+                break
+              }
+              case "plan":
+              case "available_commands_update":
+              case "current_mode_update":
+                // Informational; don't surface to AI SDK consumer.
+                break
+              default:
+                // Unknown update — swallow silently to avoid breaking on
+                // future ACP additions.
+                log.info("unhandled session update", { kind: u.sessionUpdate })
+            }
+          } catch (e) {
+            log.warn("stream handler error", { err: String(e) })
+          }
+        }
+
+        // Cancel via the AI SDK abort signal.
+        if (options.abortSignal) {
+          options.abortSignal.addEventListener("abort", () => {
+            cancelled = true
+            void session.cancel()
+          }, { once: true })
+        }
+
+        // Fire the prompt; on completion close the stream with a finish part.
+        session.prompt(blocks, handle).then(
+          (res) => {
+            finishReason = mapStopReason(res.stopReason)
+            finalUsage = mapUsage(res.usage)
+            try {
+              if (textBlockId) {
+                controller.enqueue({ type: "text-end", id: textBlockId })
+                textBlockId = null
+              }
+              const reasoningBlock = toolBlocks.get("__reasoning")
+              if (reasoningBlock) {
+                controller.enqueue({ type: "reasoning-end", id: reasoningBlock.id })
+              }
+              controller.enqueue({
+                type: "finish",
+                usage: finalUsage,
+                finishReason,
+                providerMetadata: {
+                  "claude-code": { sessionId: session.sessionId, transport: "acp" },
+                },
+              })
+              controller.close()
+            } catch {}
+            void session.close()
+          },
+          (err) => {
+            try {
+              controller.enqueue({ type: "error", error: err })
+              controller.close()
+            } catch {}
+            void session.close()
+          },
+        )
+      },
+      cancel() {
+        cancelled = true
+        void session.cancel()
+        void session.close()
+      },
+    })
+
     return { stream }
   }
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Prompt → CLI input mapping
+// Prompt mapping: AI SDK V2 prompt → ACP ContentBlock array
 // ────────────────────────────────────────────────────────────────────
 
-interface UserInputEvent {
-  type: "user"
-  message: { role: "user"; content: string }
-}
-
-function mapPromptToCliInputs(prompt: LanguageModelV2Prompt): {
-  systemPrompt: string | undefined
-  userInputs: UserInputEvent[]
-} {
-  // System messages are merged and passed via --system-prompt.
-  // User + assistant messages are concatenated into a single text turn — the
-  // CLI is invoked fresh per request so it has no prior history. We embed
-  // role markers so the model sees the conversation transcript.
-  //
-  // (We could push each turn as a separate `user` event, but the CLI starts
-  // a brand-new session each invocation, so multi-turn history is all the
-  // caller's responsibility anyway. Single concatenated turn = same result,
-  // simpler I/O.)
+function mapPromptToBlocks(prompt: LanguageModelV2Prompt): ContentBlock[] {
+  // ACP's prompt input is a flat array of content blocks (text / image /
+  // resource_link / resource), not a structured chat. We collapse the AI
+  // SDK message history into a transcript prefix + the latest user turn,
+  // because each ACP session here is fresh (we don't reuse session IDs
+  // across calls — see acquireSession docstring).
+  const transcript: string[] = []
   const systemParts: string[] = []
-  const transcriptParts: string[] = []
-  let lastUserText = ""
+  let lastUser: string = ""
 
   for (const msg of prompt) {
     if (msg.role === "system") {
@@ -272,13 +370,13 @@ function mapPromptToCliInputs(prompt: LanguageModelV2Prompt): {
       const text = msg.content
         .map((p) => {
           if (p.type === "text") return p.text
-          if (p.type === "file") return `[attached file: ${p.filename || "(unnamed)"} ${p.mediaType}]`
+          if (p.type === "file") return `[file: ${p.filename ?? "(unnamed)"} ${p.mediaType}]`
           return ""
         })
         .filter(Boolean)
         .join("\n")
-      transcriptParts.push(`<user>\n${text}\n</user>`)
-      lastUserText = text
+      transcript.push(`<user>\n${text}\n</user>`)
+      lastUser = text
       continue
     }
     if (msg.role === "assistant") {
@@ -292,11 +390,10 @@ function mapPromptToCliInputs(prompt: LanguageModelV2Prompt): {
         })
         .filter(Boolean)
         .join("\n")
-      if (text) transcriptParts.push(`<assistant>\n${text}\n</assistant>`)
+      if (text) transcript.push(`<assistant>\n${text}\n</assistant>`)
       continue
     }
     if (msg.role === "tool") {
-      // Tool results from previous turn — fold them into transcript context.
       const text = msg.content
         .map((p) => {
           const out = p.output
@@ -306,409 +403,59 @@ function mapPromptToCliInputs(prompt: LanguageModelV2Prompt): {
         })
         .filter(Boolean)
         .join("\n")
-      if (text) transcriptParts.push(`<tool-result>\n${text}\n</tool-result>`)
+      if (text) transcript.push(`<tool-result>\n${text}\n</tool-result>`)
       continue
     }
   }
 
-  const userInputText =
-    transcriptParts.length > 1
-      ? `Conversation so far:\n\n${transcriptParts.slice(0, -1).join("\n\n")}\n\nLatest message:\n${lastUserText}`
-      : lastUserText || transcriptParts.join("\n\n")
+  const blocks: ContentBlock[] = []
 
-  const userInputs: UserInputEvent[] = [
-    {
-      type: "user",
-      message: { role: "user", content: userInputText },
-    },
-  ]
-
-  return {
-    systemPrompt: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-    userInputs,
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Spawn helpers
-// ────────────────────────────────────────────────────────────────────
-
-function buildCliArgs(
-  modelId: string,
-  opts: ClaudeCodeModelOptions,
-  systemPrompt: string | undefined,
-  withPartials: boolean,
-): string[] {
-  const args = [
-    "--print",
-    "--output-format",
-    "stream-json",
-    "--input-format",
-    "stream-json",
-    "--verbose",
-    "--model",
-    modelId,
-    "--no-session-persistence",
-    // Disable user's local skills/tools so we don't get bash/edit answers
-    // for what should be a plain LLM call. (Skills also pull in the
-    // user's plugin/superpowers prompt soup that we don't want here.)
-    "--disable-slash-commands",
-    // commander treats `--tools ""` as missing the value; the equals form
-    // `--tools=` is parsed as the empty-string value the CLI documents.
-    "--tools=",
-  ]
-  if (withPartials) args.push("--include-partial-messages")
-  if (systemPrompt) args.push("--system-prompt", systemPrompt)
-  if (opts.extraArgs?.length) args.push(...opts.extraArgs)
-  return args
-}
-
-function spawnClaude(
-  args: string[],
-  opts: ClaudeCodeModelOptions,
-  abortSignal: AbortSignal | undefined,
-): ChildProcessWithoutNullStreams {
-  const cmd = opts.cliPath || getClaudeCommand()
-  const child = spawn(cmd, args, {
-    cwd: opts.cwd || process.cwd(),
-    env: { ...process.env },
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: process.platform === "win32",
-    windowsHide: true,
-  }) as ChildProcessWithoutNullStreams
-
-  if (abortSignal) {
-    const onAbort = () => {
-      try {
-        child.kill("SIGTERM")
-        setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL")
-        }, 1500)
-      } catch {}
-    }
-    abortSignal.addEventListener("abort", onAbort, { once: true })
+  // System prompt (if any) goes as the first text block. ACP doesn't
+  // distinguish system from user at the block level — the agent's
+  // session has its own internal system prompt; this is just extra
+  // context the user provides.
+  if (systemParts.length) {
+    blocks.push({
+      type: "text",
+      text: `[System instructions]\n${systemParts.join("\n\n")}`,
+    })
   }
 
-  return child
-}
-
-function feedStdin(child: ChildProcessWithoutNullStreams, userInputs: UserInputEvent[]) {
-  try {
-    for (const ev of userInputs) {
-      child.stdin.write(JSON.stringify(ev) + "\n")
-    }
-    child.stdin.end()
-  } catch (e) {
-    log.warn("stdin write failed", { err: String(e) })
+  // If we have prior turns, send transcript context first, then the
+  // last user message as a separate block (so the agent treats it as
+  // the active question rather than part of the history).
+  if (transcript.length > 1) {
+    blocks.push({
+      type: "text",
+      text: `Conversation history:\n\n${transcript.slice(0, -1).join("\n\n")}`,
+    })
+    blocks.push({ type: "text", text: lastUser || transcript[transcript.length - 1]! })
+  } else {
+    blocks.push({ type: "text", text: lastUser || transcript.join("\n\n") })
   }
-}
 
-// ────────────────────────────────────────────────────────────────────
-// Non-streaming runner: collects full output, returns assembled text + usage
-// ────────────────────────────────────────────────────────────────────
-
-interface RunResult {
-  text: string
-  finishReason: LanguageModelV2FinishReason
-  usage: LanguageModelV2Usage
-  warnings: any[]
-  sessionId?: string
-  totalCostUsd?: number
-  durationMs?: number
-  responseId?: string
-  responseModelId?: string
-}
-
-async function runClaudeCli(
-  args: string[],
-  userInputs: UserInputEvent[],
-  opts: ClaudeCodeModelOptions,
-  abortSignal: AbortSignal | undefined,
-): Promise<RunResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawnClaude(args, opts, abortSignal)
-    feedStdin(child, userInputs)
-
-    let buffer = ""
-    let stderrBuf = ""
-    const events: ClaudeStreamEvent[] = []
-    let assistantText = ""
-    let usage: LanguageModelV2Usage = { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined }
-    let finishReason: LanguageModelV2FinishReason = "unknown"
-    let sessionId: string | undefined
-    let totalCostUsd: number | undefined
-    let durationMs: number | undefined
-    let responseId: string | undefined
-    let responseModelId: string | undefined
-    const warnings: any[] = []
-
-    child.stdout.setEncoding("utf-8")
-    child.stdout.on("data", (chunk: string) => {
-      buffer += chunk
-      let idx
-      while ((idx = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, idx).trim()
-        buffer = buffer.slice(idx + 1)
-        if (!line) continue
-        try {
-          const ev = JSON.parse(line) as ClaudeStreamEvent
-          events.push(ev)
-          if (ev.type === "system" && ev.subtype === "init") {
-            sessionId = (ev as any).session_id
-          }
-          if (ev.type === "assistant" && ev.message) {
-            responseId = ev.message.id
-            responseModelId = ev.message.model
-            for (const block of ev.message.content || []) {
-              if (block.type === "text" && block.text) assistantText += block.text
-            }
-            if (ev.message.usage) {
-              usage = mapUsage(ev.message.usage, usage)
-            }
-          }
-          if (ev.type === "result") {
-            if (typeof ev.result === "string" && !assistantText) assistantText = ev.result
-            finishReason = mapStopReason(ev.stop_reason)
-            totalCostUsd = ev.total_cost_usd
-            durationMs = ev.duration_ms
-            if (ev.usage) usage = mapUsage(ev.usage, usage)
-            if (ev.is_error) {
-              warnings.push({ type: "other", message: "claude CLI returned is_error=true" })
-            }
-          }
-        } catch (e) {
-          // Non-JSON line — ignore (could be partial buffering during high throughput)
-          log.warn("non-json stdout line", { line: line.slice(0, 120) })
-        }
-      }
-    })
-
-    child.stderr.setEncoding("utf-8")
-    child.stderr.on("data", (chunk: string) => {
-      stderrBuf += chunk
-      if (stderrBuf.length > 8000) stderrBuf = stderrBuf.slice(-4000)
-    })
-
-    child.on("error", (err) => reject(err))
-    child.on("close", (code) => {
-      if (code !== 0 && !assistantText) {
-        const detail = stderrBuf.trim() || `claude CLI exited with code ${code}`
-        return reject(new Error(`Claude CLI failed: ${detail}`))
-      }
-      resolve({
-        text: assistantText,
-        finishReason,
-        usage,
-        warnings,
-        sessionId,
-        totalCostUsd,
-        durationMs,
-        responseId,
-        responseModelId,
-      })
-    })
-  })
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Streaming runner: yield AI SDK stream parts as the CLI emits events
-// ────────────────────────────────────────────────────────────────────
-
-function makeStreamFromChild(
-  child: ChildProcessWithoutNullStreams,
-  abortSignal: AbortSignal | undefined,
-): ReadableStream<LanguageModelV2StreamPart> {
-  let buffer = ""
-  let stderrBuf = ""
-  let textBlockId: string | null = null
-  let finalText = ""
-  let usage: LanguageModelV2Usage = { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined }
-  let finishReason: LanguageModelV2FinishReason = "unknown"
-  let modelId: string | undefined
-  let messageId: string | undefined
-  let sessionId: string | undefined
-  let totalCostUsd: number | undefined
-  let resolved = false
-
-  return new ReadableStream<LanguageModelV2StreamPart>({
-    start(controller) {
-      controller.enqueue({ type: "stream-start", warnings: [] })
-
-      const finishOnce = () => {
-        if (resolved) return
-        resolved = true
-        try {
-          if (textBlockId) {
-            controller.enqueue({ type: "text-end", id: textBlockId })
-            textBlockId = null
-          }
-          controller.enqueue({
-            type: "finish",
-            usage,
-            finishReason,
-            providerMetadata: {
-              "claude-code": {
-                sessionId: sessionId ?? null,
-                totalCostUsd: totalCostUsd ?? 0,
-              },
-            },
-          })
-          controller.close()
-        } catch {}
-      }
-
-      const startTextBlock = () => {
-        if (!textBlockId) {
-          textBlockId = `text-${Date.now()}`
-          controller.enqueue({ type: "text-start", id: textBlockId })
-        }
-      }
-
-      child.stdout.setEncoding("utf-8")
-      child.stdout.on("data", (chunk: string) => {
-        buffer += chunk
-        let idx
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim()
-          buffer = buffer.slice(idx + 1)
-          if (!line) continue
-          try {
-            const ev = JSON.parse(line) as ClaudeStreamEvent
-            handleStreamEvent(ev)
-          } catch {
-            // ignore non-JSON
-          }
-        }
-      })
-
-      child.stderr.setEncoding("utf-8")
-      child.stderr.on("data", (chunk: string) => {
-        stderrBuf += chunk
-        if (stderrBuf.length > 8000) stderrBuf = stderrBuf.slice(-4000)
-      })
-
-      child.on("error", (err) => {
-        if (resolved) return
-        resolved = true
-        try {
-          controller.enqueue({ type: "error", error: err })
-          controller.close()
-        } catch {}
-      })
-
-      child.on("close", (code) => {
-        if (code !== 0 && !finalText) {
-          if (!resolved) {
-            resolved = true
-            try {
-              controller.enqueue({
-                type: "error",
-                error: new Error(`Claude CLI failed (exit ${code}): ${stderrBuf.trim().slice(0, 500)}`),
-              })
-              controller.close()
-            } catch {}
-          }
-          return
-        }
-        finishOnce()
-      })
-
-      function handleStreamEvent(ev: ClaudeStreamEvent) {
-        if (ev.type === "system" && ev.subtype === "init") {
-          sessionId = (ev as any).session_id
-          if ((ev as any).model) modelId = (ev as any).model
-          controller.enqueue({
-            type: "response-metadata",
-            id: messageId,
-            modelId,
-            timestamp: new Date(),
-          })
-          return
-        }
-        if (ev.type === "stream_event" && ev.event) {
-          // Partial message: content_block_delta / text_delta
-          const inner = ev.event
-          if (inner.type === "content_block_delta" && inner.delta?.type === "text_delta" && inner.delta.text) {
-            startTextBlock()
-            controller.enqueue({ type: "text-delta", id: textBlockId!, delta: inner.delta.text })
-            finalText += inner.delta.text
-          }
-          return
-        }
-        if (ev.type === "assistant" && ev.message) {
-          if (ev.message.id) messageId = ev.message.id
-          if (ev.message.model) modelId = ev.message.model
-          // If --include-partial-messages is on, the deltas already arrived via
-          // stream_event events above. The assistant event still fires once
-          // per message with the full final content. We use it only to capture
-          // the FINAL text in case partials were never emitted (CLI fallback).
-          if (ev.message.content) {
-            const fullText = ev.message.content
-              .filter((b) => b.type === "text" && b.text)
-              .map((b) => b.text!)
-              .join("")
-            if (fullText && !finalText) {
-              startTextBlock()
-              controller.enqueue({ type: "text-delta", id: textBlockId!, delta: fullText })
-              finalText = fullText
-            }
-          }
-          if (ev.message.usage) usage = mapUsage(ev.message.usage, usage)
-          return
-        }
-        if (ev.type === "result") {
-          if (typeof ev.result === "string" && !finalText) {
-            startTextBlock()
-            controller.enqueue({ type: "text-delta", id: textBlockId!, delta: ev.result })
-            finalText = ev.result
-          }
-          finishReason = mapStopReason(ev.stop_reason)
-          totalCostUsd = ev.total_cost_usd
-          if (ev.usage) usage = mapUsage(ev.usage, usage)
-          return
-        }
-        // rate_limit_event, system/hook_*, etc. — ignored
-      }
-    },
-
-    cancel(reason) {
-      try {
-        child.kill("SIGTERM")
-        setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL")
-        }, 1500)
-      } catch {}
-      if (abortSignal && !abortSignal.aborted) {
-        // Caller-driven cancellation, propagate
-      }
-    },
-  })
+  return blocks
 }
 
 // ────────────────────────────────────────────────────────────────────
 // Mapping helpers
 // ────────────────────────────────────────────────────────────────────
 
-function mapUsage(
-  cliUsage: NonNullable<ClaudeStreamEvent["usage"]>,
-  prev: LanguageModelV2Usage,
-): LanguageModelV2Usage {
-  const inputTokens = cliUsage.input_tokens ?? prev.inputTokens
-  const outputTokens = cliUsage.output_tokens ?? prev.outputTokens
-  const cachedInputTokens = cliUsage.cache_read_input_tokens ?? prev.cachedInputTokens
-  const totalTokens =
-    inputTokens !== undefined && outputTokens !== undefined
-      ? inputTokens + outputTokens + (cachedInputTokens ?? 0) + (cliUsage.cache_creation_input_tokens ?? 0)
-      : prev.totalTokens
+function mapUsage(u?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }): LanguageModelV2Usage {
+  if (!u) return { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined }
+  const total =
+    u.inputTokens !== undefined && u.outputTokens !== undefined
+      ? u.inputTokens + u.outputTokens + (u.cachedInputTokens ?? 0)
+      : undefined
   return {
-    inputTokens,
-    outputTokens,
-    totalTokens,
-    cachedInputTokens,
+    inputTokens: u.inputTokens,
+    outputTokens: u.outputTokens,
+    totalTokens: total,
+    cachedInputTokens: u.cachedInputTokens,
   }
 }
 
-function mapStopReason(reason: string | undefined): LanguageModelV2FinishReason {
+function mapStopReason(reason: string): LanguageModelV2FinishReason {
   switch (reason) {
     case "end_turn":
       return "stop"
@@ -720,6 +467,8 @@ function mapStopReason(reason: string | undefined): LanguageModelV2FinishReason 
       return "stop"
     case "refusal":
       return "content-filter"
+    case "cancelled":
+      return "other"
     default:
       return "unknown"
   }

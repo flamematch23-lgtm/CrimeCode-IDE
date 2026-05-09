@@ -161,6 +161,18 @@ export function mountCommunityRepRoutes(app: Hono, deps: CommunityRepDeps) {
     ).run(me, targetId, note, now)
     db.prepare("UPDATE community_user SET rep_received = rep_received + 1 WHERE customer_id = ?").run(targetId)
 
+    // Anche logga un community_event "rep_received" per il target con
+    // peso 3, così la rep contribuisce allo score della leaderboard
+    // nel periodo selezionato (30g / all). Il frontend explainer
+    // dichiara esattamente questo valore.
+    try {
+      db.prepare(
+        "INSERT INTO community_event (customer_id, event_type, weight, ts) VALUES (?, ?, ?, ?)",
+      ).run(targetId, "rep_received", 3, now)
+    } catch {
+      // Best-effort: se il log evento fallisce, la rep è già salvata.
+    }
+
     return c.json({
       ok: true,
       remaining_today: Math.max(0, DAILY_BUDGET - givenToday - 1),

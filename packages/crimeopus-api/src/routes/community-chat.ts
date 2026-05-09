@@ -79,6 +79,10 @@ type ChatMessage = {
   username: string
   body: string
   ts: number
+  /** Avatar seed (dicebear) — joined from community_user at read time. */
+  avatar_seed?: string | null
+  /** Custom uploaded avatar URL — overrides avatar_seed if present. */
+  avatar_url?: string | null
 }
 
 type Subscriber = {
@@ -114,12 +118,31 @@ export function mountCommunityChatRoutes(app: Hono, deps: CommunityChatDeps) {
   // primo connect. Default 100, max 200.
   app.get("/community/chat/recent", (c) => {
     const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "100", 10) || 100, 1), 200)
+    // LEFT JOIN community_user su username per portare avatar_seed +
+    // avatar_url, così il frontend può mostrare l'avatar custom o quello
+    // dicebear senza un round-trip per ogni utente. Senza questo join,
+    // tutti i messaggi mostrano un avatar generato dall'username (sbagliato:
+    // l'avatar_seed è una stringa random salvata separatamente al signup).
     const rows = db
       .query<
-        { id: number; username: string; body: string; ts: number },
+        {
+          id: number
+          username: string
+          body: string
+          ts: number
+          avatar_seed: string | null
+          avatar_url: string | null
+        },
         [number]
       >(
-        "SELECT id, username, body, ts FROM community_message WHERE deleted_at IS NULL ORDER BY ts DESC LIMIT ?",
+        `SELECT m.id, m.username, m.body, m.ts,
+                u.avatar_seed AS avatar_seed,
+                u.avatar_url  AS avatar_url
+         FROM community_message m
+         LEFT JOIN community_user u ON u.username = m.username
+         WHERE m.deleted_at IS NULL
+         ORDER BY m.ts DESC
+         LIMIT ?`,
       )
       .all(limit)
     // Reverse: vogliamo ordine cronologico ascendente nel client (oldest first)
@@ -134,10 +157,12 @@ export function mountCommunityChatRoutes(app: Hono, deps: CommunityChatDeps) {
     const validation = validateMessage(body?.body)
     if (!validation.ok) return c.json({ error: validation.error }, 400)
 
-    // Lookup username dell'utente
+    // Lookup username + avatar dell'utente. Carichiamo anche avatar_seed/url
+    // così il broadcast include l'avatar e tutti gli altri client lo vedono
+    // senza dover fare un GET separato.
     const profile = db
-      .query<{ username: string | null }, [string]>(
-        "SELECT username FROM community_user WHERE customer_id = ?",
+      .query<{ username: string | null; avatar_seed: string | null; avatar_url: string | null }, [string]>(
+        "SELECT username, avatar_seed, avatar_url FROM community_user WHERE customer_id = ?",
       )
       .get(customer.id)
     if (!profile?.username) {
@@ -180,6 +205,8 @@ export function mountCommunityChatRoutes(app: Hono, deps: CommunityChatDeps) {
       username: profile.username,
       body: validation.body,
       ts: now,
+      avatar_seed: profile.avatar_seed,
+      avatar_url: profile.avatar_url,
     }
     broadcast(msg)
 

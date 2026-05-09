@@ -263,6 +263,10 @@ export interface ChatMessage {
   username: string
   body: string
   ts: number
+  /** Avatar seed (dicebear) joined dal backend. Optional per backwards-compat. */
+  avatar_seed?: string | null
+  /** Custom uploaded avatar URL — overrides seed se presente. */
+  avatar_url?: string | null
 }
 
 export interface ChatStats {

@@ -232,13 +232,30 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
     "burp_flow_captured",
     "exploit_chain_built",
     "report_generated",
+    "rep_received",
   ])
+  // Pesi server-side per event_type. Il client NON può più scegliere il
+  // proprio peso (era exploitabile: postavi 1 messaggio con weight=10 e
+  // saltavi sopra in classifica). Hardcoded qui = leaderboard explainer
+  // nel frontend è onesto: ogni event_type dà esattamente questi punti.
+  const EVENT_WEIGHTS: Record<string, number> = {
+    session_created: 2,
+    message_sent: 1,
+    tool_call: 1,
+    burp_flow_captured: 4,
+    exploit_chain_built: 5,
+    report_generated: 5,
+    rep_received: 3,
+  }
   app.post("/community/me/event", auth, async (c) => {
     const customer = c.var.customer
-    const body = await c.req.json<{ event_type?: unknown; weight?: unknown }>().catch(() => ({}))
+    const body = await c.req.json<{ event_type?: unknown }>().catch(() => ({}))
     const eventType = typeof body?.event_type === "string" ? body.event_type : ""
     if (!ALLOWED_EVENTS.has(eventType)) return c.json({ error: "event_type non valido" }, 400)
-    const weight = typeof body?.weight === "number" && body.weight > 0 && body.weight <= 10 ? Math.floor(body.weight) : 1
+    // Block clients from logging rep_received themselves — only the rep
+    // route may emit that event (otherwise users could self-promote).
+    if (eventType === "rep_received") return c.json({ error: "evento riservato al sistema" }, 403)
+    const weight = EVENT_WEIGHTS[eventType] ?? 1
 
     // Rate limit: 60 eventi/min/user
     const oneMinAgo = Date.now() - 60_000
