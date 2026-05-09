@@ -38,6 +38,7 @@ import { runMigrations } from "./migrations.ts"
 import { getLicenseDb } from "./license-auth.ts"
 import { mountUserRoutes } from "./routes/user.ts"
 import { mountCommunityRoutes } from "./routes/community.ts"
+import { mountCommunityChatRoutes } from "./routes/community-chat.ts"
 import { join } from "node:path"
 import {
   acquireSlot,
@@ -154,10 +155,11 @@ app.route("/license", licenseRouter())
 
 // Mount user dashboard API routes (session-cookie auth)
 mountUserRoutes(app, { licenseDb: getLicenseDb(), usageDb: getDb() })
-// Community Phase 1: profilo + leaderboard read-only. Phase 2 (chat globale)
-// e Phase 3 (DM/rep) atterrano in community-chat.ts e community-rep.ts in
-// turni dedicati successivi.
+// Community Phase 1: profilo + leaderboard read-only.
 mountCommunityRoutes(app, { licenseDb: getLicenseDb() })
+// Community Phase 2: chat globale live tra utenti via SSE broadcast.
+// Phase 3 (DM 1:1 + rep) atterra in community-dm.ts in turno dedicato.
+mountCommunityChatRoutes(app, { licenseDb: getLicenseDb() })
 
 // Public health
 app.get("/healthz", (c) => {

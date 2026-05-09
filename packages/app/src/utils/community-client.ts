@@ -160,3 +160,77 @@ export function avatarUrl(seed: string, size: number = 64): string {
   const safe = encodeURIComponent(seed)
   return `https://api.dicebear.com/7.x/identicon/svg?seed=${safe}&size=${size}&backgroundType=gradientLinear`
 }
+
+// ─── Phase 2: Chat globale live ──────────────────────────────────────
+
+export interface ChatMessage {
+  id: number
+  username: string
+  body: string
+  ts: number
+}
+
+export interface ChatStats {
+  total_messages: number
+  messages_24h: number
+  active_users_24h: number
+  live_subscribers: number
+}
+
+/** Recent messages (REST, ordine cronologico ascendente). */
+export async function getRecentMessages(limit: number = 100): Promise<ChatMessage[]> {
+  const res = await publicFetch(`/community/chat/recent?limit=${limit}`)
+  if (!res.ok) throw new Error(`recent ${res.status}`)
+  const body = (await res.json()) as { messages: ChatMessage[] }
+  return body.messages
+}
+
+/** Stats live per UI (count messaggi, utenti attivi, subscriber connessi). */
+export async function getChatStats(): Promise<ChatStats | null> {
+  const res = await publicFetch("/community/chat/stats")
+  if (!res.ok) return null
+  return (await res.json()) as ChatStats
+}
+
+/** Invia un messaggio. Auth required. Ritorna errore concreto su rate limit / slow mode. */
+export async function postMessage(body: string): Promise<
+  | { ok: true; message: ChatMessage }
+  | { ok: false; error: string; status?: number }
+> {
+  if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const res = await authedFetch("/community/chat/post", {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean
+    message?: ChatMessage
+    error?: string
+  }
+  if (!res.ok || !data.ok || !data.message) {
+    return { ok: false, error: data.error ?? `error ${res.status}`, status: res.status }
+  }
+  return { ok: true, message: data.message }
+}
+
+/** Soft-delete proprio messaggio. */
+export async function deleteMessage(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const res = await authedFetch(`/community/chat/msg/${id}`, { method: "DELETE" })
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+  if (!res.ok) return { ok: false, error: body.error ?? `error ${res.status}` }
+  return { ok: true }
+}
+
+/**
+ * Apre un EventSource sullo stream /community/chat/stream. Ritorna l'oggetto
+ * EventSource (chiamare .close() per disconnettersi). Il chiamante registra
+ * gli onmessage handler.
+ */
+export function openChatStream(): EventSource {
+  const url = CLOUD_BASE + "/community/chat/stream"
+  // EventSource non supporta custom headers (Bearer auth). Lo stream è
+  // PUBBLICO (read-only): chiunque può ricoltivare i messaggi pubblici.
+  // L'auth è richiesta solo al POST.
+  return new EventSource(url)
+}

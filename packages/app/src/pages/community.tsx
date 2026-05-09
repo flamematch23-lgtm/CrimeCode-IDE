@@ -1,4 +1,4 @@
-import { Component, createMemo, createResource, createSignal, For, Match, Show, Switch } from "solid-js"
+import { Component, createMemo, createResource, createSignal, createEffect, For, Match, onCleanup, Show, Switch } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -7,11 +7,17 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import {
   avatarUrl,
+  deleteMessage,
+  getChatStats,
   getLeaderboard,
   getMyProfile,
   getPublicProfile,
+  getRecentMessages,
   hasAccountSession,
+  openChatStream,
+  postMessage,
   setUsername,
+  type ChatMessage,
   type LeaderboardEntry,
 } from "@/utils/community-client"
 
@@ -36,13 +42,263 @@ function rankBadge(rank: number): { color: string; label: string } {
   return { color: "text-text-weak", label: `#${rank}` }
 }
 
+// ─── Phase 2: Chat panel ─────────────────────────────────────────────
+
+function ChatPanel(props: { myUsername: string | null; mySeed: string | null }) {
+  const navigate = useNavigate()
+  const [messages, setMessages] = createSignal<ChatMessage[]>([])
+  const [draft, setDraft] = createSignal("")
+  const [posting, setPosting] = createSignal(false)
+  const [live, setLive] = createSignal(false)
+  let scrollEl: HTMLDivElement | undefined
+  let textareaEl: HTMLTextAreaElement | undefined
+
+  const isAtBottom = () => {
+    const el = scrollEl
+    if (!el) return true
+    return el.scrollHeight - el.clientHeight - el.scrollTop < 60
+  }
+
+  const scrollToBottom = (smooth = true) => {
+    requestAnimationFrame(() => {
+      const el = scrollEl
+      if (!el) return
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" })
+    })
+  }
+
+  // Initial load + SSE subscribe
+  createEffect(() => {
+    let alive = true
+
+    void getRecentMessages(100)
+      .then((msgs) => {
+        if (!alive) return
+        setMessages(msgs)
+        scrollToBottom(false)
+      })
+      .catch(() => undefined)
+
+    const es = openChatStream()
+    es.addEventListener("open", () => alive && setLive(true))
+    es.addEventListener("error", () => alive && setLive(false))
+    es.addEventListener("message", (ev: MessageEvent) => {
+      try {
+        const msg = JSON.parse(ev.data) as ChatMessage
+        // Cancellazione: la backend manda un msg con username "_deleted_"
+        if (msg.username === "_deleted_") {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msg.id ? { ...m, body: "[messaggio cancellato]", username: "_deleted_" } : m)),
+          )
+          return
+        }
+        const stick = isAtBottom()
+        setMessages((prev) => {
+          // Dedup contro l'echo del POST locale che potrebbe arrivare anche via SSE
+          if (prev.some((m) => m.id === msg.id)) return prev
+          return [...prev, msg]
+        })
+        if (stick) scrollToBottom(true)
+      } catch {
+        /* ignora payload malformati */
+      }
+    })
+
+    onCleanup(() => {
+      alive = false
+      es.close()
+    })
+  })
+
+  const send = async () => {
+    if (!props.myUsername) {
+      showToast({
+        variant: "error",
+        title: "Username mancante",
+        description: "Imposta prima un username pubblico nella tab Leaderboard.",
+      })
+      return
+    }
+    const text = draft().trim()
+    if (!text) return
+    setPosting(true)
+    try {
+      const res = await postMessage(text)
+      if (!res.ok) {
+        showToast({ variant: "error", title: "Invio fallito", description: res.error })
+        return
+      }
+      // Optimistic insert (anche se l'SSE re-deliveri, dedupiamo)
+      setMessages((prev) => (prev.some((m) => m.id === res.message.id) ? prev : [...prev, res.message]))
+      setDraft("")
+      scrollToBottom(true)
+    } finally {
+      setPosting(false)
+      textareaEl?.focus()
+    }
+  }
+
+  const handleDelete = async (id: number) => {
+    const r = await deleteMessage(id)
+    if (!r.ok) {
+      showToast({ variant: "error", title: "Cancellazione fallita", description: r.error })
+    }
+  }
+
+  const handleKey = (e: KeyboardEvent) => {
+    // Enter = invia, Shift+Enter = newline
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      void send()
+    }
+  }
+
+  const charCount = () => draft().length
+  const charMax = 500
+
+  return (
+    <div class="flex flex-col h-[calc(100vh-12rem)] min-h-100 bg-surface-base border border-surface-weak rounded-lg overflow-hidden">
+      {/* Status bar */}
+      <div class="px-3 py-2 border-b border-surface-weak text-11-regular flex items-center gap-2 bg-surface-weak/30">
+        <span
+          class="size-2 rounded-full"
+          classList={{
+            "bg-icon-success-base": live(),
+            "bg-icon-warning-base animate-pulse": !live(),
+          }}
+        />
+        <span class="text-text-weak">{live() ? "Connesso live" : "Riconnessione…"}</span>
+        <span class="ml-auto text-text-weak">{messages().length} msg in vista</span>
+      </div>
+
+      {/* Messages list */}
+      <div ref={(el) => (scrollEl = el)} class="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+        <Show
+          when={messages().length > 0}
+          fallback={
+            <div class="h-full flex items-center justify-center text-12-regular text-text-weak text-center">
+              Niente messaggi ancora.<br />
+              Sii il primo a salutare la community 👋
+            </div>
+          }
+        >
+          <For each={messages()}>
+            {(msg) => {
+              const isMine = msg.username === props.myUsername
+              const isDeleted = msg.username === "_deleted_"
+              return (
+                <div
+                  class="flex gap-2 group"
+                  classList={{
+                    "opacity-50 italic": isDeleted,
+                  }}
+                >
+                  <Show
+                    when={!isDeleted}
+                    fallback={<div class="size-7 rounded-full bg-surface-weak shrink-0" />}
+                  >
+                    <button
+                      onClick={() => navigate(`/community?u=${encodeURIComponent(msg.username)}`)}
+                      class="shrink-0"
+                      title={`Profilo @${msg.username}`}
+                    >
+                      <img
+                        src={avatarUrl(msg.username, 28)}
+                        alt={msg.username}
+                        class="size-7 rounded-full bg-surface-weak"
+                      />
+                    </button>
+                  </Show>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-baseline gap-2">
+                      <span
+                        class="text-12-semibold"
+                        classList={{
+                          "text-icon-warning-base": isMine,
+                        }}
+                      >
+                        @{msg.username}
+                      </span>
+                      <span class="text-10-regular text-text-weak">{formatRelative(msg.ts)}</span>
+                      <Show when={isMine && !isDeleted}>
+                        <button
+                          onClick={() => void handleDelete(msg.id)}
+                          class="ml-auto opacity-0 group-hover:opacity-60 hover:opacity-100 text-10-regular text-text-weak"
+                          title="Cancella"
+                        >
+                          ✕
+                        </button>
+                      </Show>
+                    </div>
+                    <div class="text-12-regular text-text-base whitespace-pre-wrap break-words">{msg.body}</div>
+                  </div>
+                </div>
+              )
+            }}
+          </For>
+        </Show>
+      </div>
+
+      {/* Composer */}
+      <div class="border-t border-surface-weak p-3 bg-surface-weak/20">
+        <Show
+          when={props.myUsername}
+          fallback={
+            <div class="text-11-regular text-text-weak text-center py-2">
+              Imposta un username nella tab Leaderboard per scrivere in chat.
+            </div>
+          }
+        >
+          <div class="flex gap-2 items-end">
+            <Show when={props.mySeed}>
+              <img
+                src={avatarUrl(props.mySeed!, 28)}
+                alt="me"
+                class="size-7 rounded-full bg-surface-weak shrink-0"
+              />
+            </Show>
+            <textarea
+              ref={(el) => (textareaEl = el)}
+              value={draft()}
+              onInput={(e) => setDraft(e.currentTarget.value.slice(0, charMax))}
+              onKeyDown={handleKey}
+              placeholder={`Scrivi alla community come @${props.myUsername}…`}
+              rows={2}
+              class="flex-1 bg-surface-base border border-surface-weak rounded px-2 py-1.5 text-12-regular text-text-strong resize-none focus:outline-none focus:border-icon-warning-base"
+              disabled={posting()}
+            />
+            <div class="flex flex-col gap-1 items-end shrink-0">
+              <span
+                class="text-10-regular"
+                classList={{
+                  "text-text-weak": charCount() < charMax * 0.8,
+                  "text-icon-warning-base": charCount() >= charMax * 0.8 && charCount() < charMax,
+                  "text-text-on-critical-base": charCount() >= charMax,
+                }}
+              >
+                {charCount()}/{charMax}
+              </span>
+              <Button variant="primary" size="small" onClick={() => void send()} disabled={posting() || !draft().trim()}>
+                Invia
+              </Button>
+            </div>
+          </div>
+          <div class="text-10-regular text-text-weak mt-1">Enter invia · Shift+Enter newline · 10 msg/min · slow mode 2s</div>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
 const CommunityPage: Component = () => {
   const navigate = useNavigate()
+  const [tab, setTab] = createSignal<"leaderboard" | "chat">("leaderboard")
   const [period, setPeriod] = createSignal<"30d" | "all">("30d")
   const [signedIn, setSignedIn] = createSignal(hasAccountSession())
   const [usernameDraft, setUsernameDraft] = createSignal("")
   const [busy, setBusy] = createSignal(false)
   const [selectedUser, setSelectedUser] = createSignal<string | null>(null)
+  const [chatStats] = createResource(tab, async (t) => (t === "chat" ? await getChatStats() : null))
 
   // Re-check signed-in state on a 1.5s timer (cheap localStorage read).
   // Same pattern di settings-account.tsx.
@@ -99,14 +355,80 @@ const CommunityPage: Component = () => {
         <div class="flex-1">
           <h1 class="text-14-semibold">Community</h1>
           <p class="text-11-regular text-text-weak">
-            Leaderboard utenti CrimeCode IDE · profili pubblici · presto chat live + DM
+            Leaderboard · profili pubblici · chat globale live · presto DM
           </p>
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div class="flex gap-1 px-4 pt-3 pb-2 border-b border-surface-weak bg-surface-base">
+        <For
+          each={[
+            { id: "leaderboard" as const, label: "Leaderboard", icon: "branch" },
+            { id: "chat" as const, label: "Chat globale", icon: "code-lines" },
+          ]}
+        >
+          {(t) => (
+            <button
+              onClick={() => setTab(t.id)}
+              class="flex items-center gap-2 px-3 py-1.5 rounded text-12-regular transition-colors"
+              classList={{
+                "bg-icon-warning-base text-text-contrast": tab() === t.id,
+                "bg-surface-weak text-text-secondary hover:bg-surface-raised-base-hover": tab() !== t.id,
+              }}
+            >
+              <Icon name={t.icon as any} class="size-4" />
+              {t.label}
+              <Show when={t.id === "chat" && chatStats()}>
+                <span class="text-10-regular px-1.5 rounded bg-surface-base/50">
+                  {chatStats()!.live_subscribers} live
+                </span>
+              </Show>
+            </button>
+          )}
+        </For>
       </div>
 
       {/* Body */}
       <div class="flex-1 overflow-y-auto p-4">
         <div class="max-w-4xl mx-auto space-y-4">
+
+          {/* CHAT TAB */}
+          <Show when={tab() === "chat"}>
+            <Show
+              when={signedIn()}
+              fallback={
+                <div class="bg-surface-warning/10 border border-surface-warning/30 rounded-lg p-4 text-12-regular">
+                  <div class="font-semibold text-text-strong mb-1">Non sei loggato</div>
+                  <div class="text-text-weak mb-3">Per leggere e scrivere in chat globale, accedi al tuo CrimeCode account.</div>
+                  <Button variant="primary" size="small" onClick={() => navigate("/account")}>Vai a Account</Button>
+                </div>
+              }
+            >
+              <ChatPanel myUsername={me()?.username ?? null} mySeed={me()?.avatar_seed ?? null} />
+            </Show>
+            <Show when={chatStats()}>
+              {(s) => (
+                <div class="grid grid-cols-3 gap-3 text-center">
+                  <div class="bg-surface-base/50 border border-surface-weak rounded p-2">
+                    <div class="text-14-semibold">{s().messages_24h}</div>
+                    <div class="text-10-regular text-text-weak">messaggi 24h</div>
+                  </div>
+                  <div class="bg-surface-base/50 border border-surface-weak rounded p-2">
+                    <div class="text-14-semibold">{s().active_users_24h}</div>
+                    <div class="text-10-regular text-text-weak">utenti attivi 24h</div>
+                  </div>
+                  <div class="bg-surface-base/50 border border-surface-weak rounded p-2">
+                    <div class="text-14-semibold">{s().total_messages}</div>
+                    <div class="text-10-regular text-text-weak">totale storico</div>
+                  </div>
+                </div>
+              )}
+            </Show>
+          </Show>
+
+          {/* LEADERBOARD TAB */}
+          <Show when={tab() === "leaderboard"}>
           {/* Auth/me card */}
           <Switch>
             <Match when={!signedIn()}>
@@ -306,14 +628,18 @@ const CommunityPage: Component = () => {
             )}
           </Show>
 
-          {/* Coming soon footer */}
+          </Show>
+
+          {/* Coming soon footer (visible su entrambi i tab) */}
           <div class="bg-surface-base/50 border border-surface-weak rounded-lg p-4 text-12-regular text-text-weak">
             <div class="font-semibold text-text-strong mb-1 flex items-center gap-2">
-              <Icon name="code-lines" size="small" /> Coming soon
+              <Icon name="code-lines" size="small" /> Phase 3 in arrivo
             </div>
             <ul class="ml-4 list-disc space-y-0.5">
-              <li>Phase 2: Chat globale live tra tutti gli utenti connessi</li>
-              <li>Phase 3: DM 1:1, sistema +rep tra utenti, badges & achievements</li>
+              <li>DM 1:1 privati tra utenti</li>
+              <li>Sistema +rep tra utenti (anti-gaming + ponderato per rank)</li>
+              <li>Badges & achievements (First Bounty, Veteran, Helper, ...)</li>
+              <li>Notifiche desktop su menzioni @username</li>
             </ul>
           </div>
         </div>
