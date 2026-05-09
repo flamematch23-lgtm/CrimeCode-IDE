@@ -285,8 +285,13 @@ export default function BurpWorkspace() {
   // Initial load + polling/SSE
   const refreshAll = async (): Promise<boolean> => {
     try {
-      const [s, f, p, r] = await Promise.all([
-        api().settings(),
+      // Probe-then-fan-out: do ONE request first (settings is the smallest).
+      // Without this, when the proxy is offline (the common case before the
+      // user clicks "Start proxy") we'd fire 4 parallel fetches that all
+      // fail and spam 4 errors in the diagnostic overlay each cycle. With
+      // the probe, an offline proxy generates only 1 error per cycle.
+      const s = await api().settings()
+      const [f, p, r] = await Promise.all([
         api().flows({ limit: 200 }),
         api().pending(),
         api().rules(),
