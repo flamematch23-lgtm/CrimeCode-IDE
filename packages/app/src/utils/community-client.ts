@@ -9,6 +9,7 @@ export interface CommunityProfile {
   customer_id: string
   username: string | null
   avatar_seed: string
+  avatar_url: string | null
   bio: string | null
   created_at: number
   last_active: number
@@ -20,6 +21,7 @@ export interface CommunityProfile {
 export interface PublicCommunityProfile {
   username: string
   avatar_seed: string
+  avatar_url: string | null
   bio: string | null
   created_at: number
   last_active: number
@@ -36,6 +38,7 @@ export interface LeaderboardEntry {
   rank: number
   username: string
   avatar_seed: string
+  avatar_url: string | null
   bio: string | null
   score: number
   events: number
@@ -168,6 +171,89 @@ export async function logEvent(type: CommunityEventType, weight: number = 1): Pr
 export function avatarUrl(seed: string, size: number = 64): string {
   const safe = encodeURIComponent(seed)
   return `https://api.dicebear.com/7.x/identicon/svg?seed=${safe}&size=${size}&backgroundType=gradientLinear`
+}
+
+/**
+ * Risolve l'URL avatar effettivo per un utente: avatar_url custom uploadato
+ * (se presente) override su avatar_seed dicebear-generated.
+ */
+export function resolveAvatar(
+  user: { avatar_url?: string | null; avatar_seed: string },
+  size: number = 64,
+): string {
+  if (user.avatar_url) return user.avatar_url
+  return avatarUrl(user.avatar_seed, size)
+}
+
+// ─── Phase 4: Avatar upload + custom badges ──────────────────────────
+
+export interface CustomBadge {
+  id: number
+  label: string
+  image_url: string
+  description: string | null
+  created_at?: number
+  approved_at?: number | null
+}
+
+export async function uploadAvatar(file: File): Promise<{ ok: true; avatar_url: string } | { ok: false; error: string }> {
+  if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const fd = new FormData()
+  fd.append("file", file)
+  // Usa fetch direttamente perché authedFetch setta Content-Type: application/json
+  // che rompe il boundary multipart. Tutto fatto a mano qui.
+  const res = await fetch(CLOUD_BASE + "/community/uploads/avatar", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bearer()}` },
+    body: fd,
+  })
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; avatar_url?: string; error?: string }
+  if (!res.ok || !data.ok || !data.avatar_url) {
+    return { ok: false, error: data.error ?? `upload error ${res.status}` }
+  }
+  return { ok: true, avatar_url: data.avatar_url }
+}
+
+export async function deleteAvatar(): Promise<boolean> {
+  if (!hasAccountSession()) return false
+  const res = await authedFetch("/community/uploads/avatar", { method: "DELETE" })
+  return res.ok
+}
+
+export async function uploadCustomBadge(
+  file: File,
+  label: string,
+  description?: string,
+): Promise<{ ok: true; badge: CustomBadge } | { ok: false; error: string }> {
+  if (!hasAccountSession()) return { ok: false, error: "non sei loggato" }
+  const fd = new FormData()
+  fd.append("file", file)
+  fd.append("label", label)
+  if (description) fd.append("description", description)
+  const res = await fetch(CLOUD_BASE + "/community/uploads/badge", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bearer()}` },
+    body: fd,
+  })
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; badge?: CustomBadge; error?: string }
+  if (!res.ok || !data.ok || !data.badge) {
+    return { ok: false, error: data.error ?? `upload error ${res.status}` }
+  }
+  return { ok: true, badge: data.badge }
+}
+
+export async function getMyCustomBadges(): Promise<CustomBadge[]> {
+  if (!hasAccountSession()) return []
+  const res = await authedFetch("/community/uploads/badges")
+  if (!res.ok) return []
+  const body = (await res.json()) as { badges: CustomBadge[] }
+  return body.badges
+}
+
+export async function deleteCustomBadge(id: number): Promise<boolean> {
+  if (!hasAccountSession()) return false
+  const res = await authedFetch(`/community/uploads/badges/${id}`, { method: "DELETE" })
+  return res.ok
 }
 
 // ─── Phase 2: Chat globale live ──────────────────────────────────────

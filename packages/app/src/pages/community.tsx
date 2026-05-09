@@ -7,10 +7,13 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import {
   avatarUrl,
+  deleteAvatar,
+  deleteCustomBadge,
   deleteMessage,
   getChatStats,
   getLeaderboard,
   getMessagesSince,
+  getMyCustomBadges,
   getMyProfile,
   getPublicProfile,
   getRecentMessages,
@@ -21,9 +24,13 @@ import {
   openChatStream,
   postMessage,
   refreshMyBadges,
+  resolveAvatar,
   setUsername,
+  uploadAvatar,
+  uploadCustomBadge,
   type Badge,
   type ChatMessage,
+  type CustomBadge,
   type LeaderboardEntry,
 } from "@/utils/community-client"
 import { DmPanel } from "./community-dm"
@@ -511,6 +518,71 @@ const CommunityPage: Component = () => {
     return await getRepBudget()
   })
 
+  // Phase 4: Avatar custom + badge custom upload state
+  let myAvatarFileInputRef: HTMLInputElement | undefined
+  let myBadgeFileInputRef: HTMLInputElement | undefined
+  const [myCustomBadges, { refetch: refetchMyBadges_ }] = createResource(signedIn, async (yes) => {
+    if (!yes) return [] as CustomBadge[]
+    return await getMyCustomBadges().catch(() => [] as CustomBadge[])
+  })
+
+  const handleAvatarUpload = async (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    if (file.size > 1024 * 1024) {
+      showToast({ variant: "error", title: "Avatar troppo grande", description: `Max 1 MB (hai ${Math.round(file.size / 1024)} KB)` })
+      return
+    }
+    const res = await uploadAvatar(file)
+    if (!res.ok) {
+      showToast({ variant: "error", title: "Upload fallito", description: res.error })
+      return
+    }
+    showToast({ variant: "success", title: "Avatar aggiornato" })
+    void refetchMe()
+    if (myAvatarFileInputRef) myAvatarFileInputRef.value = ""
+  }
+
+  const handleAvatarDelete = async () => {
+    const ok = await deleteAvatar()
+    if (ok) {
+      showToast({ variant: "success", title: "Avatar resettato" })
+      void refetchMe()
+    } else {
+      showToast({ variant: "error", title: "Reset fallito" })
+    }
+  }
+
+  const handleBadgeUpload = async (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    if (file.size > 200 * 1024) {
+      showToast({ variant: "error", title: "Badge troppo grande", description: `Max 200 KB` })
+      return
+    }
+    const label = window.prompt("Nome del badge (max 40 char):")?.trim() ?? ""
+    if (!label) return
+    const description = window.prompt("Descrizione opzionale (max 200 char):")?.trim() || undefined
+    const res = await uploadCustomBadge(file, label, description)
+    if (!res.ok) {
+      showToast({ variant: "error", title: "Upload badge fallito", description: res.error })
+      return
+    }
+    showToast({ variant: "success", title: `Badge "${res.badge.label}" creato` })
+    void refetchMyBadges_()
+    if (myBadgeFileInputRef) myBadgeFileInputRef.value = ""
+  }
+
+  const handleBadgeDelete = async (id: number) => {
+    const ok = await deleteCustomBadge(id)
+    if (ok) {
+      showToast({ variant: "success", title: "Badge rimosso" })
+      void refetchMyBadges_()
+    } else {
+      showToast({ variant: "error", title: "Rimozione fallita" })
+    }
+  }
+
   const [givingRep, setGivingRep] = createSignal(false)
   const handleGiveRep = async (target: string) => {
     setGivingRep(true)
@@ -719,28 +791,113 @@ const CommunityPage: Component = () => {
               </div>
             </Match>
             <Match when={me()?.username}>
-              <div class="bg-surface-base border border-surface-weak rounded-lg p-4 flex items-center gap-3">
-                <img
-                  src={avatarUrl(me()!.avatar_seed, 48)}
-                  alt="avatar"
-                  class="size-12 rounded-full bg-surface-weak"
-                />
-                <div class="flex-1 min-w-0">
-                  <div class="text-14-semibold truncate">@{me()!.username}</div>
-                  <div class="text-11-regular text-text-weak">
-                    {me()!.events_30d} eventi (30g) · {me()!.events_total} totali · {me()!.rep_received} rep ricevuti
+              <div class="bg-surface-base border border-surface-weak rounded-lg p-4">
+                <div class="flex items-center gap-3">
+                  {/* Avatar custom uploadable: click apre file picker.
+                      resolveAvatar() prende avatar_url se settato, altrimenti
+                      dicebear seed-generated. */}
+                  <button
+                    onClick={() => myAvatarFileInputRef?.click()}
+                    title="Click per cambiare avatar (PNG/JPEG/WEBP, max 1 MB)"
+                    class="relative shrink-0 group"
+                  >
+                    <img
+                      src={resolveAvatar(me()!, 48)}
+                      alt="avatar"
+                      class="size-12 rounded-full bg-surface-weak"
+                    />
+                    <span class="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 text-text-contrast text-10-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                      ✎
+                    </span>
+                  </button>
+                  <input
+                    ref={(el) => (myAvatarFileInputRef = el)}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    class="hidden"
+                    onChange={(e) => void handleAvatarUpload(e.currentTarget.files)}
+                  />
+                  <div class="flex-1 min-w-0">
+                    <div class="text-14-semibold truncate">@{me()!.username}</div>
+                    <div class="text-11-regular text-text-weak">
+                      {me()!.events_30d} eventi (30g) · {me()!.events_total} totali · {me()!.rep_received} rep ricevuti
+                    </div>
                   </div>
+                  <Show when={me()?.avatar_url}>
+                    <button
+                      onClick={() => void handleAvatarDelete()}
+                      class="text-10-regular text-text-weak hover:text-text-on-critical-base"
+                      title="Rimuovi avatar custom (torna a quello generato)"
+                    >
+                      Reset
+                    </button>
+                  </Show>
+                  <Show when={myRank()}>
+                    {(r) => {
+                      const badge = rankBadge(r().rank)
+                      return (
+                        <div class={`text-16-semibold ${badge.color}`}>
+                          {badge.label}
+                        </div>
+                      )
+                    }}
+                  </Show>
                 </div>
-                <Show when={myRank()}>
-                  {(r) => {
-                    const badge = rankBadge(r().rank)
-                    return (
-                      <div class={`text-16-semibold ${badge.color}`}>
-                        {badge.label}
+
+                {/* Custom badges section */}
+                <div class="mt-4 pt-3 border-t border-surface-weak">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-12-semibold">I miei badge custom</span>
+                    <span class="text-10-regular text-text-weak">({(myCustomBadges() ?? []).length}/5)</span>
+                    <button
+                      onClick={() => myBadgeFileInputRef?.click()}
+                      class="ml-auto text-11-regular text-text-weak hover:text-text-strong"
+                      disabled={(myCustomBadges() ?? []).length >= 5}
+                    >
+                      + Aggiungi badge
+                    </button>
+                    <input
+                      ref={(el) => (myBadgeFileInputRef = el)}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      class="hidden"
+                      onChange={(e) => void handleBadgeUpload(e.currentTarget.files)}
+                    />
+                  </div>
+                  <Show
+                    when={(myCustomBadges() ?? []).length > 0}
+                    fallback={
+                      <div class="text-11-regular text-text-weak">
+                        Carica fino a 5 badge custom (PNG/JPEG/WEBP, max 200 KB cad.). Compariranno nel tuo profilo pubblico.
                       </div>
-                    )
-                  }}
-                </Show>
+                    }
+                  >
+                    <div class="flex flex-wrap gap-2">
+                      <For each={myCustomBadges() ?? []}>
+                        {(badge) => (
+                          <div
+                            class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-surface-weak text-11-regular group"
+                            title={badge.description ?? badge.label}
+                          >
+                            <img
+                              src={badge.image_url}
+                              alt={badge.label}
+                              class="size-4 rounded"
+                            />
+                            <span>{badge.label}</span>
+                            <button
+                              onClick={() => void handleBadgeDelete(badge.id)}
+                              class="opacity-0 group-hover:opacity-60 hover:opacity-100 text-text-weak"
+                              title="Rimuovi"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
               </div>
             </Match>
           </Switch>

@@ -42,6 +42,7 @@ import { mountCommunityChatRoutes } from "./routes/community-chat.ts"
 import { mountCommunityDmRoutes } from "./routes/community-dm.ts"
 import { mountCommunityRepRoutes } from "./routes/community-rep.ts"
 import { mountCommunityBadgesRoutes } from "./routes/community-badges.ts"
+import { mountCommunityUploadsRoutes } from "./routes/community-uploads.ts"
 import { join } from "node:path"
 import {
   acquireSlot,
@@ -166,6 +167,8 @@ mountCommunityChatRoutes(app, { licenseDb: getLicenseDb() })
 mountCommunityDmRoutes(app, { licenseDb: getLicenseDb() })
 mountCommunityRepRoutes(app, { licenseDb: getLicenseDb() })
 mountCommunityBadgesRoutes(app, { licenseDb: getLicenseDb() })
+// Community Phase 4 (partial): avatar custom + badge custom uploadabili.
+mountCommunityUploadsRoutes(app, { licenseDb: getLicenseDb() })
 
 // Public health
 app.get("/healthz", (c) => {

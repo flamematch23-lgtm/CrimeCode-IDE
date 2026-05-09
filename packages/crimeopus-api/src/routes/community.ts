@@ -90,6 +90,8 @@ type CommunityProfile = {
   customer_id: string
   username: string | null
   avatar_seed: string
+  /** URL all'avatar custom uploadato. Override su avatar_seed (dicebear). */
+  avatar_url: string | null
   bio: string | null
   created_at: number
   last_active: number
@@ -106,6 +108,7 @@ function getOrCreateProfile(db: Database, customerId: string): CommunityProfile 
         customer_id: string
         username: string | null
         avatar_seed: string
+        avatar_url: string | null
         bio: string | null
         created_at: number
         last_active: number
@@ -113,7 +116,7 @@ function getOrCreateProfile(db: Database, customerId: string): CommunityProfile 
       },
       [string]
     >(
-      "SELECT customer_id, username, avatar_seed, bio, created_at, last_active, rep_received FROM community_user WHERE customer_id = ?",
+      "SELECT customer_id, username, avatar_seed, avatar_url, bio, created_at, last_active, rep_received FROM community_user WHERE customer_id = ?",
     )
     .get(customerId)
 
@@ -121,6 +124,7 @@ function getOrCreateProfile(db: Database, customerId: string): CommunityProfile 
     customer_id: string
     username: string | null
     avatar_seed: string
+    avatar_url: string | null
     bio: string | null
     created_at: number
     last_active: number
@@ -138,6 +142,7 @@ function getOrCreateProfile(db: Database, customerId: string): CommunityProfile 
       customer_id: customerId,
       username: null,
       avatar_seed: seed,
+      avatar_url: null,
       bio: null,
       created_at: now,
       last_active: now,
@@ -269,6 +274,7 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
           customer_id: string
           username: string
           avatar_seed: string
+          avatar_url: string | null
           bio: string | null
           last_active: number
           rep_received: number
@@ -281,6 +287,7 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
           u.customer_id,
           u.username,
           u.avatar_seed,
+          u.avatar_url,
           u.bio,
           u.last_active,
           u.rep_received,
@@ -302,6 +309,7 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
         rank: i + 1,
         username: r.username,
         avatar_seed: r.avatar_seed,
+        avatar_url: r.avatar_url,
         bio: r.bio,
         score: r.score,
         events: r.events,
@@ -321,6 +329,7 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
           customer_id: string
           username: string
           avatar_seed: string
+          avatar_url: string | null
           bio: string | null
           created_at: number
           last_active: number
@@ -328,7 +337,7 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
         },
         [string]
       >(
-        "SELECT customer_id, username, avatar_seed, bio, created_at, last_active, rep_received FROM community_user WHERE LOWER(username) = LOWER(?)",
+        "SELECT customer_id, username, avatar_seed, avatar_url, bio, created_at, last_active, rep_received FROM community_user WHERE LOWER(username) = LOWER(?)",
       )
       .get(username)
     if (!row) return c.json({ error: "utente non trovato" }, 404)
@@ -350,6 +359,7 @@ export function mountCommunityRoutes(app: Hono, deps: CommunityRoutesDeps) {
       profile: {
         username: row.username,
         avatar_seed: row.avatar_seed,
+        avatar_url: row.avatar_url,
         bio: row.bio,
         created_at: row.created_at,
         last_active: row.last_active,

@@ -571,15 +571,34 @@ export default function BurpWorkspace() {
     }
   }
 
+  // BUG-FIX (v2.38.0): "Test cattura silent" — il toast a volte non era
+  // visibile (auto-dismiss troppo veloce, oppure window non focused). Ora:
+  //   - State `testing` per mostrare spinner sul pulsante mentre gira
+  //   - Persistent "Ultimo test" badge nel routing bar che resta visibile
+  //     finché l'utente non clicca di nuovo (no auto-dismiss)
+  //   - Console.warn esplicito se proxyApi.testCapture undefined (preload bug)
+  const [lastTestResult, setLastTestResult] = createSignal<
+    { ok: true; status: number; ts: number } | { ok: false; error: string; ts: number } | null
+  >(null)
+  const [testing, setTesting] = createSignal(false)
   const testCapture = async () => {
     if (!proxyApi?.testCapture) {
-      showToast({ variant: "error", title: "Non disponibile" })
+      // eslint-disable-next-line no-console
+      console.warn("[burp] proxyApi.testCapture is undefined — preload not exposing it?", proxyApi)
+      showToast({
+        variant: "error",
+        title: "Test cattura non disponibile",
+        description: "preload IPC mancante. Riavvia l'app per ricaricare il bridge.",
+      })
+      setLastTestResult({ ok: false, error: "preload IPC mancante", ts: Date.now() })
       return
     }
+    setTesting(true)
     try {
       const res = await proxyApi.testCapture(proxyPort())
       if (!res.ok) {
         showToast({ variant: "error", title: "Test fallito", description: res.error })
+        setLastTestResult({ ok: false, error: res.error ?? "errore sconosciuto", ts: Date.now() })
         return
       }
       showToast({
@@ -587,10 +606,15 @@ export default function BurpWorkspace() {
         title: `Cattura OK (HTTP ${res.statusCode})`,
         description: "Una richiesta di prova è apparsa nei flussi (refresh 2s).",
       })
+      setLastTestResult({ ok: true, status: res.statusCode ?? 0, ts: Date.now() })
       // Force a flow refresh so user sees the captured request immediately
       setTimeout(() => void api().flows({ limit: 200 }).then(setFlows).catch(() => undefined), 500)
     } catch (e) {
-      showToast({ variant: "error", title: "Errore", description: (e as Error).message })
+      const msg = (e as Error).message
+      showToast({ variant: "error", title: "Errore", description: msg })
+      setLastTestResult({ ok: false, error: msg, ts: Date.now() })
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -673,9 +697,25 @@ export default function BurpWorkspace() {
             Installa CA HTTPS
           </Button>
           <span class="text-text-weak">·</span>
-          <Button variant="secondary" size="small" onClick={testCapture}>
-            Test cattura
+          <Button variant="secondary" size="small" onClick={testCapture} disabled={testing()}>
+            {testing() ? "Test in corso…" : "Test cattura"}
           </Button>
+          <Show when={lastTestResult()}>
+            {(r) => (
+              <span
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-11-regular"
+                classList={{
+                  "bg-surface-success/30 text-icon-success-base": r().ok === true,
+                  "bg-surface-critical-weak text-text-on-critical-base": r().ok === false,
+                }}
+                title={`Test eseguito ${new Date(r().ts).toLocaleTimeString()}`}
+              >
+                {r().ok === true
+                  ? `✓ HTTP ${(r() as { status: number }).status}`
+                  : `✗ ${(r() as { error: string }).error.slice(0, 40)}`}
+              </span>
+            )}
+          </Show>
           <span class="ml-auto text-10-regular text-text-weak">
             Tip: dopo "Cattura traffico sistema", apri Edge/Chrome e naviga — i flussi compariranno qui.
           </span>
