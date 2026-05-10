@@ -157,5 +157,20 @@ import { renameSync } from "node:fs"
 const VENDOR_DIR = join(STAGE_DIR, "vendor")
 if (existsSync(VENDOR_DIR)) rmSync(VENDOR_DIR, { recursive: true, force: true })
 renameSync(TEMP_NM, VENDOR_DIR)
+
+// Drop `.bin/` from vendor — bun install populates it with symlinks
+// pointing into ../<pkg>/dist/cli.js etc. On macOS code signing
+// (electron-builder) walks every file in Resources/ and chokes on
+// dangling symlinks (target stripped by our copyDirSync filter or by
+// the package not shipping a CLI), failing with:
+//   ENOENT: no such file or directory, stat '.../vendor/.bin/claude-code-acp'
+// The .bin entries are CLI shims for npm scripts — useless at runtime
+// for our use case (we spawn `node dist/index.js` directly).
+const VENDOR_BIN = join(VENDOR_DIR, ".bin")
+if (existsSync(VENDOR_BIN)) {
+  rmSync(VENDOR_BIN, { recursive: true, force: true })
+  console.log(`stage-claude-acp: removed vendor/.bin (symlinks break macOS codesigning)`)
+}
+
 console.log(`stage-claude-acp: renamed node_modules → vendor (electron-builder workaround)`)
 console.log(`stage-claude-acp: done → ${STAGE_DIR}`)
