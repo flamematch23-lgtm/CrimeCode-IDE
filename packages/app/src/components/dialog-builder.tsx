@@ -245,8 +245,8 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
   })
 
   return (
-    <Dialog title={language.t("builder.title")} transition>
-      <div class="flex flex-col gap-5 px-2.5 pb-4 w-[820px] max-w-[92vw] relative">
+    <Dialog title={language.t("builder.title")} transition size="large">
+      <div class="flex flex-col gap-5 px-2.5 pb-4 w-full relative">
         {/* Subtle radial glow background, blink-style */}
         <div
           class="absolute inset-0 -z-10 pointer-events-none opacity-60"
@@ -295,12 +295,14 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
             disabled={submitting()}
           />
 
-          {/* Bottom toolbar — all icons + custom model picker */}
+          {/* Bottom toolbar — flex-wrap: nowrap (single row), but model
+              picker shrinks via min-w-0 + truncate so submit button is
+              ALWAYS visible on the right. */}
           <div class="flex items-center gap-1.5 px-2 py-2 border-t border-border-base/40 bg-surface-base/30">
             {/* + attach (placeholder) */}
             <button
               type="button"
-              class="p-1.5 rounded-md text-text-weak hover:text-text-base hover:bg-surface-weak/40 transition-colors"
+              class="p-1.5 rounded-md text-text-weak hover:text-text-base hover:bg-surface-weak/40 transition-colors shrink-0"
               title={language.t("builder.toolbar.attach")}
               aria-label={language.t("builder.toolbar.attach")}
               disabled
@@ -308,12 +310,15 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
               <Icon name="plus" class="size-4" />
             </button>
 
-            {/* Custom model picker */}
-            <div class="relative" ref={pickerRef}>
+            {/* Custom model picker — shrinkable: nome modello truncate
+                quando lo spazio è ridotto, badge tier e chevron sempre
+                visibili a destra. min-w-0 è il trucco per far funzionare
+                il truncate in flex children. */}
+            <div class="relative min-w-0 flex-shrink" ref={pickerRef}>
               <Show
                 when={modelOptions().length > 0}
                 fallback={
-                  <span class="px-2 py-1 text-12-regular text-icon-warning-base">
+                  <span class="px-2 py-1 text-12-regular text-icon-warning-base truncate block">
                     {language.t("builder.error.noModel")}
                   </span>
                 }
@@ -324,19 +329,19 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
                     e.stopPropagation()
                     setModelPickerOpen(!modelPickerOpen())
                   }}
-                  class="px-2 py-1 rounded-md text-12-regular text-text-base hover:bg-surface-weak/40 transition-colors flex items-center gap-1.5 border border-transparent hover:border-border-base/40"
+                  class="w-full px-2 py-1 rounded-md text-12-regular text-text-base hover:bg-surface-weak/40 transition-colors flex items-center gap-1.5 border border-transparent hover:border-border-base/40 min-w-0"
                   disabled={submitting()}
                 >
-                  <Icon name="brain" class="size-3.5 text-text-weak" />
-                  <span class="font-medium">{selectedModel()?.modelName ?? "Model"}</span>
+                  <Icon name="brain" class="size-3.5 text-text-weak shrink-0" />
+                  <span class="font-medium truncate">{selectedModel()?.modelName ?? "Model"}</span>
                   <span
-                    class={`text-10-regular px-1.5 py-0.5 rounded border ${
+                    class={`text-10-regular px-1.5 py-0.5 rounded border shrink-0 ${
                       TIER_STYLES[selectedModel()?.tier ?? "free"]
                     }`}
                   >
                     {language.t(`builder.model.tier.${selectedModel()?.tier ?? "free"}` as any)}
                   </span>
-                  <Icon name="chevron-down" class="size-3 text-text-weak" />
+                  <Icon name="chevron-down" class="size-3 text-text-weak shrink-0" />
                 </button>
                 <Show when={modelPickerOpen()}>
                   <div class="absolute bottom-full left-0 mb-1 z-50 min-w-[280px] max-h-[320px] overflow-y-auto bg-surface-base border border-border-base rounded-md shadow-lg p-1">
@@ -376,13 +381,13 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
               </Show>
             </div>
 
-            <div class="flex-1" />
+            <div class="flex-1 min-w-[8px]" />
 
-            {/* Agent toggle */}
+            {/* Agent toggle — shrink-0 so it's never crushed */}
             <button
               type="button"
               onClick={() => setAgentOn(!agentOn())}
-              class="px-2 py-1 rounded-md text-12-regular flex items-center gap-1.5 border transition-colors"
+              class="px-2 py-1 rounded-md text-12-regular flex items-center gap-1.5 border transition-colors shrink-0"
               classList={{
                 "bg-emerald-500/15 text-emerald-300 border-emerald-500/30": agentOn(),
                 "bg-transparent text-text-weak border-transparent hover:text-text-base hover:bg-surface-weak/40":
@@ -391,13 +396,13 @@ export const DialogBuilder: Component<DialogBuilderProps> = (props) => {
               title={language.t("builder.toolbar.agent")}
             >
               <Icon name="brain" class="size-3.5" />
-              {language.t("builder.toolbar.agent")}
+              <span class="hidden sm:inline">{language.t("builder.toolbar.agent")}</span>
             </button>
 
             {/* Mic (placeholder, not wired to STT) */}
             <button
               type="button"
-              class="p-1.5 rounded-md text-text-weak hover:text-text-base hover:bg-surface-weak/40 transition-colors"
+              class="p-1.5 rounded-md text-text-weak hover:text-text-base hover:bg-surface-weak/40 transition-colors shrink-0"
               title={language.t("builder.toolbar.mic")}
               aria-label={language.t("builder.toolbar.mic")}
               disabled
