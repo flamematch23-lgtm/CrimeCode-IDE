@@ -367,24 +367,35 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
                 const toolCallId = String(u.toolCallId ?? `tc-${Date.now()}`)
                 const name = String(u.title ?? u.kind ?? "tool")
                 toolBlocks.set(toolCallId, { id: toolCallId, name })
+                // AI SDK's `doParseToolCall` expects `toolCall.input` to be
+                // a JSON-encoded STRING (it calls .trim() on it, then
+                // safeParseJSON). Passing the raw object yields
+                // `toolCall.input.trim is not a function` and the model
+                // sees the tool as "invalid → unavailable", which surfaces
+                // as "Model tried to call unavailable tool 'Edit'" in the
+                // UI. Serialize defensively.
+                const inputJson =
+                  typeof u.rawInput === "string"
+                    ? u.rawInput
+                    : (() => {
+                        try { return JSON.stringify(u.rawInput ?? {}) } catch { return "{}" }
+                      })()
                 controller.enqueue({
                   type: "tool-input-start",
                   id: toolCallId,
                   toolName: name,
                 })
-                if (u.rawInput) {
-                  controller.enqueue({
-                    type: "tool-input-delta",
-                    id: toolCallId,
-                    delta: typeof u.rawInput === "string" ? u.rawInput : JSON.stringify(u.rawInput),
-                  })
-                }
+                controller.enqueue({
+                  type: "tool-input-delta",
+                  id: toolCallId,
+                  delta: inputJson,
+                })
                 controller.enqueue({ type: "tool-input-end", id: toolCallId })
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId,
                   toolName: name,
-                  input: u.rawInput ?? {},
+                  input: inputJson,
                   providerExecuted: true,
                 })
                 break
