@@ -393,12 +393,27 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
                 // Update existing tool call (e.g. status: in_progress → completed).
                 // When the agent finishes a tool, surface the result so
                 // the AI SDK consumer can show it in the chat UI.
+                //
+                // opencode's processor.ts reads `value.output.{output, title,
+                // metadata, attachments}` from the tool-result stream part to
+                // build ToolStateCompleted — so we have to ship that exact
+                // shape, NOT the AI-SDK-standard `result` field. Without
+                // this the session retries forever with zod errors:
+                //   "Invalid input: expected string, received undefined"
+                //   at path ["state", "output"|"title"|"metadata"]
                 if (u.status === "completed" && u.toolCallId && u.content) {
+                  const toolName = toolBlocks.get(String(u.toolCallId))?.name ?? "tool"
+                  const contentStr =
+                    typeof u.content === "string" ? u.content : JSON.stringify(u.content)
                   controller.enqueue({
                     type: "tool-result",
                     toolCallId: String(u.toolCallId),
-                    toolName: toolBlocks.get(String(u.toolCallId))?.name ?? "tool",
-                    result: u.content,
+                    toolName,
+                    output: {
+                      output: contentStr,
+                      title: toolName,
+                      metadata: {},
+                    },
                     providerExecuted: true,
                   } as any)
                 }
