@@ -181,19 +181,70 @@ export namespace SessionProcessor {
                 case "tool-result": {
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
+                    // Defensive: some providers (claude-code via ACP,
+                    // GitHub Copilot in older paths) historically emitted
+                    // `tool-result` with a non-opencode-shaped output —
+                    // either a bare string, the AI-SDK `LanguageModelV2
+                    // ToolResultOutput` discriminated union `{type, value}`,
+                    // or even `undefined` when the upstream tool was
+                    // aborted. Without these guards we'd crash with
+                    // "undefined is not an object (evaluating
+                    // value.output.output)" and the session would retry
+                    // forever (zod fails on ToolStateCompleted because
+                    // output/title/metadata become undefined).
+                    const raw = (value as any).output
+                    let output: string
+                    let title: string
+                    let metadata: Record<string, unknown>
+                    let attachments: any
+                    if (raw == null) {
+                      output = ""
+                      title = match.tool ?? "tool"
+                      metadata = {}
+                    } else if (typeof raw === "string") {
+                      output = raw
+                      title = match.tool ?? "tool"
+                      metadata = {}
+                    } else if (typeof raw === "object" && typeof (raw as any).output === "string") {
+                      // opencode-internal shape: { output, title, metadata, attachments? }
+                      output = (raw as any).output
+                      title = (raw as any).title ?? match.tool ?? "tool"
+                      metadata = (raw as any).metadata ?? {}
+                      attachments = (raw as any).attachments
+                    } else if (typeof raw === "object" && "type" in raw && "value" in raw) {
+                      // AI-SDK V2 LanguageModelV2ToolResultOutput.
+                      const u = raw as { type: string; value: unknown }
+                      output =
+                        u.type === "text" || u.type === "error-text"
+                          ? String(u.value)
+                          : (() => {
+                              try { return JSON.stringify(u.value) } catch { return String(u.value) }
+                            })()
+                      title = match.tool ?? "tool"
+                      metadata = { aiSdkType: u.type }
+                    } else {
+                      // Last resort: stringify whatever we got.
+                      try {
+                        output = JSON.stringify(raw)
+                      } catch {
+                        output = String(raw)
+                      }
+                      title = match.tool ?? "tool"
+                      metadata = {}
+                    }
                     await Session.updatePart({
                       ...match,
                       state: {
                         status: "completed",
                         input: value.input ?? match.state.input,
-                        output: value.output.output,
-                        metadata: value.output.metadata,
-                        title: value.output.title,
+                        output,
+                        metadata,
+                        title,
                         time: {
                           start: match.state.time.start,
                           end: Date.now(),
                         },
-                        attachments: value.output.attachments,
+                        attachments,
                       },
                     })
 
