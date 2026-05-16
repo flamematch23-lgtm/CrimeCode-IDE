@@ -52,6 +52,7 @@ import { AccountRoutes } from "./routes/account"
 import { startTelegramBot } from "../license/telegram"
 import { startTeamReaper } from "../license/team-reaper"
 import { startPaymentPoller } from "../license/poller"
+import { startListenersForOpenInvoices as startCrypoverseListeners } from "../license/crypoverse"
 import { startBackupScheduler } from "../license/backup"
 import { startRenewalReminders } from "../license/reminders"
 import { captureException, initSentry } from "../license/sentry"
@@ -743,6 +744,14 @@ export namespace Server {
       } catch (err) {
         log.warn("failed to start payment poller", { error: err instanceof Error ? err.message : String(err) })
       }
+    }
+    // Crypoverse hosted-gateway listeners — re-attach SSE streams for any
+    // invoice still in a non-terminal status. Safe to call unconditionally:
+    // when CRYPOVERSE_API_KEY is unset, the helper just logs and returns.
+    try {
+      startCrypoverseListeners()
+    } catch (err) {
+      log.warn("failed to start Crypoverse listeners", { error: err instanceof Error ? err.message : String(err) })
     }
     // Off-site backup of the license DB (Tigris / S3 / R2). Snapshots every
     // 12h via SQLite VACUUM INTO + gzip + AWS SigV4 PUT.

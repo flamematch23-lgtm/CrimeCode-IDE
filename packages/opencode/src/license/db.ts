@@ -197,6 +197,33 @@ CREATE TABLE IF NOT EXISTS team_sessions (
   FOREIGN KEY (host_customer_id) REFERENCES customers(id)
 );
 CREATE INDEX IF NOT EXISTS team_sessions_team_idx ON team_sessions(team_id, ended_at);
+
+-- Crypoverse-hosted crypto invoices. One row per pending order paid via the
+-- Crypoverse gateway. The gateway owns the wallet address + UX (QR, currency
+-- choice) so we only track the transaction_id, expected USD amount, and the
+-- last status we observed via the SSE stream. When status flips to 'paid'
+-- we call confirmOrderAndIssue on the linked order.
+--
+-- Separate table (vs. payment_offers) because the data shape is different:
+-- on-chain offers track wallet_address + on-chain confirmations, Crypoverse
+-- invoices track an opaque gateway id + remote status.
+CREATE TABLE IF NOT EXISTS crypoverse_invoices (
+  id                   TEXT PRIMARY KEY,
+  order_id             TEXT NOT NULL,
+  transaction_id       TEXT UNIQUE NOT NULL,    -- Crypoverse opaque id
+  amount_usd           REAL NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'initiated',
+  redirect_url         TEXT NOT NULL,           -- Crypoverse pay-page URL
+  last_event_at        INTEGER,
+  last_event_payload   TEXT,                    -- raw JSON of latest SSE event
+  paid_at              INTEGER,
+  paid_tx_hash         TEXT,                    -- on-chain hash if SSE provides it
+  created_at           INTEGER NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+CREATE INDEX IF NOT EXISTS crypoverse_invoices_order_idx ON crypoverse_invoices(order_id);
+CREATE INDEX IF NOT EXISTS crypoverse_invoices_open_idx ON crypoverse_invoices(status)
+  WHERE status IN ('initiated','pending');
 `
 
 function resolvePath(): string {
@@ -427,6 +454,36 @@ function runMigrations(db: Database): void {
     [
       "v8.team_agents_team_slug_idx",
       "CREATE UNIQUE INDEX IF NOT EXISTS team_agents_team_slug_idx ON team_agents(team_id, slug)",
+    ],
+    // v2.44.1: Crypoverse gateway invoices. Parallel to payment_offers but
+    // for the hosted-gateway flow — Crypoverse owns wallet + QR + currency
+    // choice, we just hold the opaque transaction_id and react to SSE
+    // status events. See crypoverse.ts for the full lifecycle.
+    [
+      "v9.crypoverse_invoices",
+      `CREATE TABLE IF NOT EXISTS crypoverse_invoices (
+         id                   TEXT PRIMARY KEY,
+         order_id             TEXT NOT NULL,
+         transaction_id       TEXT UNIQUE NOT NULL,
+         amount_usd           REAL NOT NULL,
+         status               TEXT NOT NULL DEFAULT 'initiated',
+         redirect_url         TEXT NOT NULL,
+         last_event_at        INTEGER,
+         last_event_payload   TEXT,
+         paid_at              INTEGER,
+         paid_tx_hash         TEXT,
+         created_at           INTEGER NOT NULL,
+         FOREIGN KEY (order_id) REFERENCES orders(id)
+       )`,
+    ],
+    [
+      "v9.crypoverse_invoices_order_idx",
+      "CREATE INDEX IF NOT EXISTS crypoverse_invoices_order_idx ON crypoverse_invoices(order_id)",
+    ],
+    [
+      "v9.crypoverse_invoices_open_idx",
+      `CREATE INDEX IF NOT EXISTS crypoverse_invoices_open_idx ON crypoverse_invoices(status)
+       WHERE status IN ('initiated','pending')`,
     ],
   ]
   for (const [name, sql] of ops) {

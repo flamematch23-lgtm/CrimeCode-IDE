@@ -93,6 +93,7 @@ export const dict = {
   "gate.paymentInfo":
     "Crypto-only payments (BTC / LTC / ETH) handled by our bot. Once the transaction is confirmed on-chain, the bot delivers your token automatically — usually under 10 minutes.",
   "gate.payButton": "Pay via Telegram bot",
+  "gate.payCryptoverseButton": "Pay with crypto (Crypoverse)",
   "gate.payHint": "Opens t.me/CrimeCodeSub_bot",
   "gate.payNote": "After the trial period, select a plan to continue using Pro features.",
   "gate.telegramPrimary": "Need help? @OpCrime1312",

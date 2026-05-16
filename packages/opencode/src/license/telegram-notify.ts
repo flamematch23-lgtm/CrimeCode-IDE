@@ -291,6 +291,70 @@ export async function notifyPaymentSeen(opts: {
   }
 }
 
+/**
+ * Crypoverse counterpart of sendCustomerToken. Same delivery layout — the
+ * license token in monospace, an "Activate in app" hint — but without the
+ * per-chain block explorer link (Crypoverse abstracts the on-chain leg
+ * away from us, and even when it does pass back a tx_hash we don't know
+ * which chain it's on). When `tx_hash` is provided it's shown inline so
+ * the user has a receipt; otherwise we omit it.
+ */
+export async function sendCustomerTokenCrypoverse(opts: {
+  telegram_user_id: number
+  license_id: string
+  interval: string
+  expires_at: number | null
+  token: string
+  amount_usd: number
+  tx_hash?: string | null
+}): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  if (!token) return
+  const lang = recallLang(opts.telegram_user_id)
+  const expDateStr = opts.expires_at
+    ? new Date(opts.expires_at * 1000).toLocaleDateString(lang === "it" ? "it-IT" : "en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : null
+  const expLine = expDateStr
+    ? lang === "it"
+      ? `Scadenza: *${expDateStr}*`
+      : `Expires: *${expDateStr}*`
+    : lang === "it"
+    ? "Scadenza: *mai (a vita)* 🎉"
+    : "Expires: *never (lifetime)* 🎉"
+  const intro =
+    lang === "it"
+      ? `🎉 *Pagamento Crypoverse confermato!*\n\nLicenza ID: \`${opts.license_id}\`\nPiano: *${opts.interval}*\nImporto: *$${opts.amount_usd}*\n${expLine}`
+      : `🎉 *Crypoverse payment confirmed!*\n\nLicense ID: \`${opts.license_id}\`\nPlan: *${opts.interval}*\nAmount: *$${opts.amount_usd}*\n${expLine}`
+  const receiptLine = opts.tx_hash
+    ? lang === "it"
+      ? `\nTx ricevuta: \`${escapeMd(opts.tx_hash)}\``
+      : `\nReceipt tx: \`${escapeMd(opts.tx_hash)}\``
+    : ""
+  const activate =
+    lang === "it"
+      ? `\n\n📋 *Attivazione*\n\nApri CrimeCode → Subscription → *"Ho un token"* → incolla → *Attiva*.\n\n\`${opts.token}\`\n\n(Tocca per copiare — tienilo al sicuro.)\n\nGrazie per il supporto 🖤`
+      : `\n\n📋 *Activation*\n\nOpen CrimeCode → Subscription → *"I have a token"* → paste → *Activate*.\n\n\`${opts.token}\`\n\n(Tap to copy — keep it safe.)\n\nThanks for supporting CrimeCode 🖤`
+  const body = intro + receiptLine + activate
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: opts.telegram_user_id,
+        text: body,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      }),
+    })
+  } catch (err) {
+    log.warn("sendCustomerTokenCrypoverse failed", { error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
 export async function sendCustomerToken(opts: SendOpts): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) return

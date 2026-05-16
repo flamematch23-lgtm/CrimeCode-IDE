@@ -45,7 +45,8 @@
         <li>Auto-updates</li>
         <li>Cross-device sync</li>
       </ul>
-      <a class="cta" href="https://t.me/CrimeCodeSub_bot?start=order_monthly">Get Monthly</a>
+      <a class="cta" href="https://t.me/CrimeCodeSub_bot?start=order_monthly">Get via Telegram</a>
+      <button class="cta-secondary" data-cv-checkout="monthly" data-cv-amount="20">Pay with crypto →</button>
     </div>
 
     <div class="price-card featured">
@@ -59,7 +60,8 @@
         <li>Renewal reminders 7 days early</li>
         <li>Full team seats (up to 20)</li>
       </ul>
-      <a class="cta" href="https://t.me/CrimeCodeSub_bot?start=order_annual">Get Annual</a>
+      <a class="cta" href="https://t.me/CrimeCodeSub_bot?start=order_annual">Get via Telegram</a>
+      <button class="cta-secondary" data-cv-checkout="annual" data-cv-amount="200">Pay with crypto →</button>
     </div>
 
     <div class="price-card featured">
@@ -73,9 +75,152 @@
         <li>All future feature drops</li>
         <li>Priority bug reports</li>
       </ul>
-      <a class="cta" href="https://t.me/CrimeCodeSub_bot?start=order_lifetime">Get Lifetime</a>
+      <a class="cta" href="https://t.me/CrimeCodeSub_bot?start=order_lifetime">Get via Telegram</a>
+      <button class="cta-secondary" data-cv-checkout="lifetime" data-cv-amount="500">Pay with crypto →</button>
     </div>
   </div>
+
+  <!-- ─────────────── Crypoverse checkout modal ───────────────
+       Shown when user clicks "Pay with crypto →". We need ONE thing
+       from the user: their Telegram handle, so the license can be
+       delivered through the existing bot flow. Then we POST to
+       /license/orders/crypoverse and redirect to the Crypoverse
+       hosted payment page. Status polling continues after payment
+       so the user gets a confirmation toast without leaving the
+       Crypoverse page (when they come back). -->
+  <div id="cv-overlay" hidden aria-modal="true" role="dialog" aria-labelledby="cv-title">
+    <div class="cv-modal">
+      <button class="cv-close" type="button" aria-label="Close">×</button>
+      <h3 id="cv-title">Pay with crypto</h3>
+      <p class="cv-sub" id="cv-sub">Select your plan above to continue.</p>
+      <form id="cv-form" autocomplete="off">
+        <label for="cv-handle">Your Telegram handle <span aria-hidden="true">*</span></label>
+        <input id="cv-handle" name="handle" placeholder="@yourname" required pattern="@?[A-Za-z][A-Za-z0-9_]{3,31}" autocapitalize="off" />
+        <p class="cv-hint">
+          We send the license token to <a href="https://t.me/CrimeCodeSub_bot" target="_blank" rel="noopener">@CrimeCodeSub_bot</a> right after payment. Make sure you've messaged the bot at least once with <code>/start</code>.
+        </p>
+        <button type="submit" class="cta" id="cv-submit">Continue to checkout</button>
+        <p class="cv-err" id="cv-err" hidden></p>
+      </form>
+    </div>
+  </div>
+
+  <style>
+    .cta-secondary {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      background: transparent;
+      border: 1px solid rgba(255, 87, 34, 0.45);
+      color: #ff8a5c;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .cta-secondary:hover { background: rgba(255, 87, 34, 0.08); border-color: #ff8a5c; }
+    #cv-overlay {
+      position: fixed; inset: 0;
+      background: rgba(8, 8, 12, 0.78);
+      backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+      padding: 18px;
+    }
+    #cv-overlay[hidden] { display: none; }
+    .cv-modal {
+      background: #15151a;
+      border: 1px solid rgba(255, 87, 34, 0.35);
+      border-radius: 14px;
+      max-width: 480px; width: 100%;
+      padding: 28px 26px 22px;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+    .cv-modal h3 { margin: 0 0 6px; font-size: 20px; }
+    .cv-sub { margin: 0 0 18px; color: #aaa; font-size: 13px; }
+    .cv-close { position: absolute; top: 12px; right: 14px; background: none; border: 0; color: #999; font-size: 22px; cursor: pointer; line-height: 1; }
+    .cv-close:hover { color: #fff; }
+    .cv-modal label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #ccc; }
+    .cv-modal input { width: 100%; padding: 11px 13px; background: #0d0d12; border: 1px solid #2c2c34; border-radius: 8px; color: #fff; font-size: 14px; box-sizing: border-box; }
+    .cv-modal input:focus { outline: none; border-color: #ff5722; }
+    .cv-hint { font-size: 12px; color: #888; margin: 10px 0 18px; }
+    .cv-hint a { color: #ff8a5c; }
+    #cv-submit { width: 100%; }
+    .cv-err { color: #f87171; font-size: 12px; margin-top: 12px; }
+  </style>
+
+  <script>
+  // Self-contained Crypoverse checkout flow. No build step, no framework —
+  // just enough JS to collect the handle, POST to our backend, and redirect.
+  (function () {
+    var API_BASE = "https://api.crimecode.cc";
+    var overlay = document.getElementById("cv-overlay");
+    var sub = document.getElementById("cv-sub");
+    var form = document.getElementById("cv-form");
+    var handleInput = document.getElementById("cv-handle");
+    var submitBtn = document.getElementById("cv-submit");
+    var errEl = document.getElementById("cv-err");
+    var current = { interval: null, amount: 0 };
+
+    function openModal(interval, amount) {
+      current.interval = interval;
+      current.amount = amount;
+      sub.textContent = "Plan: " + interval.toUpperCase() + " · $" + amount + " USD";
+      errEl.hidden = true;
+      errEl.textContent = "";
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Continue to checkout";
+      overlay.hidden = false;
+      setTimeout(function () { handleInput.focus(); }, 50);
+    }
+    function closeModal() { overlay.hidden = true; }
+
+    Array.prototype.forEach.call(document.querySelectorAll("[data-cv-checkout]"), function (btn) {
+      btn.addEventListener("click", function () {
+        openModal(btn.getAttribute("data-cv-checkout"), Number(btn.getAttribute("data-cv-amount")));
+      });
+    });
+    document.querySelector(".cv-close").addEventListener("click", closeModal);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeModal(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !overlay.hidden) closeModal(); });
+
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      errEl.hidden = true;
+      var raw = handleInput.value.trim().replace(/^@/, "");
+      if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(raw)) {
+        errEl.textContent = "Invalid Telegram handle.";
+        errEl.hidden = false;
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Creating invoice…";
+      fetch(API_BASE + "/license/orders/crypoverse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ interval: current.interval, telegram: "@" + raw }),
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (out) {
+          if (!out.ok || !out.body.redirect_url) {
+            throw new Error(out.body.error || out.body.details || ("HTTP " + (out.body.status || "?")));
+          }
+          // Persist tx id locally so a future visit can show "your payment is
+          // still pending" without re-asking for the handle. Best-effort.
+          try { localStorage.setItem("cv:lastTx", out.body.transaction_id); } catch (e) {}
+          window.location.href = out.body.redirect_url;
+        })
+        .catch(function (err) {
+          errEl.textContent = "Couldn't create invoice: " + (err.message || err);
+          errEl.hidden = false;
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Try again";
+        });
+    });
+  })();
+  </script>
 
   <h2>How payment works</h2>
   <div class="card">

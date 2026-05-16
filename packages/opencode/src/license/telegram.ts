@@ -47,6 +47,11 @@ import { makeToken, verifyToken } from "./token"
 import { formatAmount, usdToSmallestUnit, type Currency } from "./prices"
 import { paymentUri, qrCodeUrl, withDiscriminator } from "./payments"
 import { getWallets } from "./wallets"
+import {
+  PLAN_PRICES_USD as CRYPOVERSE_PRICES,
+  initiateInvoice as crypoverseInitiate,
+  getInvoiceByTransactionId as getCrypoverseInvoice,
+} from "./crypoverse"
 
 const log = Log.create({ service: "telegram-bot" })
 
@@ -263,6 +268,68 @@ async function newOrderMessage(
   return orderCreatedMessage(lang, orderId, interval, usd, lines.join("\n\n"), PAY_WINDOW_MINUTES)
 }
 
+/**
+ * Initiate a Crypoverse hosted-gateway upgrade flow from the bot. Creates
+ * the order + invoice, then sends the user a message with an "Open
+ * checkout" deep-link and a "Check status" button. Once Crypoverse fires
+ * the `paid` SSE event, the backend listener calls confirmOrderAndIssue —
+ * which triggers the existing `notifyAdminOrderConfirmed` flow that DMs
+ * the user with the license token. So no extra polling here.
+ */
+async function startCrypoverseUpgrade(opts: {
+  chatId: number
+  userId: number
+  username: string | null
+  interval: "monthly" | "annual" | "lifetime"
+}): Promise<void> {
+  const amountUsd = CRYPOVERSE_PRICES[opts.interval]
+  let order
+  try {
+    order = createOrder({
+      customer_telegram: opts.username,
+      customer_user_id: opts.userId,
+      interval: opts.interval,
+      note: `bot-crypoverse:${opts.interval}:$${amountUsd}`,
+    })
+  } catch (err) {
+    log.warn("createOrder failed for Crypoverse upgrade", {
+      error: err instanceof Error ? err.message : String(err),
+      user_id: opts.userId,
+    })
+    await send(opts.chatId, "❌ Couldn't create the order. Try again in a minute.")
+    return
+  }
+  try {
+    const { invoice, redirectUrl } = await crypoverseInitiate({ orderId: order.id, amountUsd })
+    const body =
+      `💳 *Crypoverse checkout ready*\n\n` +
+      `Plan: *${opts.interval}*  ·  $${amountUsd} USD\n` +
+      `Order: \`${order.id}\`\n` +
+      `Transaction: \`${invoice.transaction_id}\`\n\n` +
+      `Tap *Open checkout* below, pick your crypto and complete the payment. ` +
+      `I'll DM you the license token as soon as Crypoverse confirms it.`
+    await send(opts.chatId, body, "Markdown", [
+      [{ text: "🌐 Open checkout", url: redirectUrl }],
+      [
+        { text: "🔄 Check status", callback_data: `usr:cvstatus:${invoice.transaction_id}` },
+        { text: "📋 My orders", callback_data: "menu:myorders" },
+      ],
+    ])
+  } catch (err) {
+    log.warn("crypoverseInitiate failed", {
+      error: err instanceof Error ? err.message : String(err),
+      order_id: order.id,
+    })
+    await send(
+      opts.chatId,
+      "⚠️ Crypoverse is temporarily unavailable. You can still pay on-chain with `/order " +
+        opts.interval +
+        "` — same plan, BTC/LTC/ETH directly.",
+      "Markdown",
+    )
+  }
+}
+
 function tokenDeliveryMessage(licenseId: string, interval: string, expiresAt: number | null, token: string): string {
   const exp = expiresAt
     ? `\nExpires: *${new Date(expiresAt * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}*`
@@ -449,6 +516,40 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
         )
       }
       return ack("⏳ In attesa di pagamento — invia l'importo esatto a uno dei wallet sopra.", true)
+    }
+    // Crypoverse: start a hosted-gateway upgrade for the selected plan.
+    // Triggered by the inline-keyboard buttons under /upgrade.
+    if (verb === "cvupgrade" && (a1 === "monthly" || a1 === "annual" || a1 === "lifetime")) {
+      if (!cb.message) return ack("ok")
+      await ack("Creating invoice…")
+      await startCrypoverseUpgrade({
+        chatId: cb.message.chat.id,
+        userId: fromId,
+        username: fromUsername,
+        interval: a1,
+      })
+      return
+    }
+    // Crypoverse: status pull for a previously-created invoice. Returns
+    // a toast — no chat noise. The actual delivery is push-based (the
+    // backend listener DMs the user as soon as Crypoverse fires `paid`).
+    if (verb === "cvstatus" && a1) {
+      const invoice = getCrypoverseInvoice(a1)
+      if (!invoice) return ack("Invoice non trovata", true)
+      const order = getOrder(invoice.order_id)
+      if (!order || (order.customer_user_id && order.customer_user_id !== fromId)) {
+        return ack("Invoice non tua", true)
+      }
+      if (order.status === "confirmed") {
+        return ack("✅ Pagato — controlla i messaggi per il token licenza.", true)
+      }
+      if (order.status === "cancelled") {
+        return ack("❌ Invoice cancellata o scaduta.", true)
+      }
+      return ack(
+        `⏳ Stato Crypoverse: ${invoice.status}. Apri di nuovo il checkout se non l'hai ancora completato.`,
+        true,
+      )
     }
     return ack("Azione sconosciuta", true)
   }
@@ -712,6 +813,45 @@ async function handle(update: TgUpdate) {
           ],
         ],
       )
+      return
+    }
+    // `/upgrade` — alternative checkout flow via Crypoverse hosted gateway.
+    // Shows the same three plans but the user pays on crypoverse.com with
+    // their preferred crypto + currency conversion done server-side. The
+    // license still arrives via this bot once Crypoverse fires the SSE
+    // `paid` event (handled by the backend listener — no extra wiring here).
+    case "upgrade":
+    case "buy":
+    case "pay": {
+      // Without an argument show a menu. With one, jump straight to the
+      // selected plan's Crypoverse checkout.
+      const intervalArg = args.toLowerCase()
+      if (!intervalArg) {
+        await send(
+          chatId,
+          "💳 *Upgrade with Crypoverse*\n\nPay in any supported crypto via the hosted checkout — currency conversion + QR + tracking handled for you. Pick a plan:",
+          "Markdown",
+          [
+            [
+              { text: "⚡ Monthly $20", callback_data: "usr:cvupgrade:monthly" },
+              { text: "🔥 Annual $200", callback_data: "usr:cvupgrade:annual" },
+            ],
+            [{ text: "💎 Lifetime $500", callback_data: "usr:cvupgrade:lifetime" }],
+            [{ text: "↩️ Use on-chain instead", callback_data: "menu:order:monthly" }],
+          ],
+        )
+        return
+      }
+      if (!VALID_INTERVALS.has(intervalArg)) {
+        await send(chatId, "Usage: `/upgrade monthly|annual|lifetime`", "Markdown")
+        return
+      }
+      await startCrypoverseUpgrade({
+        chatId,
+        userId,
+        username,
+        interval: intervalArg as "monthly" | "annual" | "lifetime",
+      })
       return
     }
     case "status": {

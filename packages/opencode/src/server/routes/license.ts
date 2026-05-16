@@ -20,6 +20,11 @@ import {
   validateBySig,
 } from "../../license/store"
 import { getWallets } from "../../license/wallets"
+import {
+  PLAN_PRICES_USD,
+  initiateInvoice as crypoverseInitiate,
+  getInvoiceByTransactionId as getCrypoverseInvoice,
+} from "../../license/crypoverse"
 import { backupOnce } from "../../license/backup"
 import {
   s3Put,
@@ -756,6 +761,84 @@ export const LicenseRoutes = lazy(() => {
               required,
             }
           : { stage: "awaiting_payment" as const },
+    })
+  })
+
+  // ── Crypoverse hosted-gateway checkout ────────────────────────────
+  // POST /orders/crypoverse — create a pending order + Crypoverse invoice
+  // and return the redirect URL the client should open. Public on purpose:
+  // anyone with a Telegram handle can buy a license, no prior signup. The
+  // returned transaction_id is opaque and rate-limited per IP to prevent
+  // burning Crypoverse's free tier with bogus orders.
+  app.post("/orders/crypoverse", async (c) => {
+    const ip =
+      c.req.header("cf-connecting-ip") ??
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+      c.req.header("Fly-Client-IP") ??
+      "unknown"
+    const rl = checkRateLimit("crypo:" + ip, { max: 10 })
+    if (!rl.ok) return c.json({ error: "rate_limited", retry_after: rl.retryAfterSeconds }, 429)
+
+    const body = (await c.req.json().catch(() => ({}))) as {
+      interval?: string
+      telegram?: string
+      telegram_user_id?: number
+      email?: string
+    }
+    const interval = body.interval
+    if (interval !== "monthly" && interval !== "annual" && interval !== "lifetime") {
+      return c.json({ error: "invalid_interval" }, 400)
+    }
+    if (!body.telegram && !body.telegram_user_id) {
+      return c.json({ error: "missing_customer_handle" }, 400)
+    }
+    const amountUsd = PLAN_PRICES_USD[interval]
+    const customer = findOrCreateCustomerByTelegram({
+      telegram: body.telegram ?? null,
+      telegram_user_id: body.telegram_user_id ?? null,
+      email: body.email ?? null,
+    })
+    const order = createOrder({
+      customer_telegram: customer.telegram,
+      customer_user_id: customer.telegram_user_id,
+      interval,
+      note: `crypoverse:${interval}:$${amountUsd}`,
+    })
+    try {
+      const { invoice, redirectUrl } = await crypoverseInitiate({ orderId: order.id, amountUsd })
+      return c.json({
+        order_id: order.id,
+        invoice_id: invoice.id,
+        transaction_id: invoice.transaction_id,
+        amount_usd: invoice.amount_usd,
+        redirect_url: redirectUrl,
+        status: invoice.status,
+      })
+    } catch (err) {
+      // Order is created but invoice failed — leave the order pending so an
+      // admin can retry/refund manually if needed. Surface the upstream error.
+      const msg = err instanceof Error ? err.message : String(err)
+      return c.json({ error: "crypoverse_initiate_failed", details: msg, order_id: order.id }, 502)
+    }
+  })
+
+  // GET /orders/crypoverse/:transaction_id/status — lightweight polling
+  // endpoint for the marketing site + Telegram bot. The SSE listener owns
+  // the source of truth; this endpoint just reads the latest row.
+  app.get("/orders/crypoverse/:transaction_id/status", (c) => {
+    const tx = c.req.param("transaction_id")
+    if (!tx || tx.length < 8 || tx.length > 128) return c.json({ error: "invalid_transaction_id" }, 400)
+    const invoice = getCrypoverseInvoice(tx)
+    if (!invoice) return c.json({ error: "not_found" }, 404)
+    const order = getOrder(invoice.order_id)
+    return c.json({
+      transaction_id: invoice.transaction_id,
+      invoice_status: invoice.status,
+      order_status: order?.status ?? null,
+      license_id: order?.license_id ?? null,
+      paid_at: invoice.paid_at,
+      amount_usd: invoice.amount_usd,
+      redirect_url: invoice.redirect_url,
     })
   })
 

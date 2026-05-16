@@ -71,6 +71,56 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
     }
   }
 
+  /**
+   * Alternative checkout via Crypoverse hosted gateway. The user is always
+   * signed-in by the time we render the gate (auth-gate sits above us), so
+   * we have a telegram_user_id ready to attach to the order. We POST the
+   * order to our backend, get back a redirect URL, and open it in the
+   * system browser — the user picks crypto + completes payment on
+   * crypoverse.com, and the Telegram bot DMs the license token back as
+   * soon as the SSE listener fires.
+   */
+  async function payWithCrypoverse(interval: ProInterval) {
+    if (busy()) return
+    setBusy(interval)
+    setErr(null)
+    try {
+      const session = await window.api.account.get()
+      if (!session?.telegram_user_id && !session?.token) {
+        setErr("Please sign in first (Account → Sign in with Telegram).")
+        return
+      }
+      // Fall back to the marketing-site checkout if for some reason we
+      // don't have a telegram_user_id on this account row — the site's
+      // modal will ask for the handle explicitly.
+      if (!session.telegram_user_id) {
+        window.api.openLink(`https://crimecode.cc/pricing#${interval}`)
+        return
+      }
+      const resp = await fetch("https://api.crimecode.cc/license/orders/crypoverse", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session.token ? { Authorization: `Bearer ${session.token}` } : {}),
+        },
+        body: JSON.stringify({ interval, telegram_user_id: session.telegram_user_id }),
+      })
+      const data = (await resp.json().catch(() => ({}))) as {
+        redirect_url?: string
+        error?: string
+        details?: string
+      }
+      if (!resp.ok || !data.redirect_url) {
+        throw new Error(data.error || data.details || `HTTP ${resp.status}`)
+      }
+      window.api.openLink(data.redirect_url)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function onStartTrial() {
     if (busy()) return
     setBusy("trial")
@@ -171,6 +221,19 @@ export function SubscriptionGate(props: { children: JSX.Element }): JSX.Element 
                       onClick={() => openBot(plan.id)}
                     >
                       <span data-slot="btn-label">{t("gate.payButton")}</span>
+                      <span data-slot="btn-arrow" aria-hidden="true">
+                        →
+                      </span>
+                    </button>
+                    <button
+                      data-slot="pay-btn-alt"
+                      data-interval={plan.id}
+                      data-kind="crypoverse"
+                      disabled={!!busy()}
+                      onClick={() => payWithCrypoverse(plan.id)}
+                      title="Pay via Crypoverse hosted gateway (any crypto, USD conversion done for you)"
+                    >
+                      <span data-slot="btn-label">{t("gate.payCryptoverseButton")}</span>
                       <span data-slot="btn-arrow" aria-hidden="true">
                         →
                       </span>
