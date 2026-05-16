@@ -1,0 +1,135 @@
+# Reusable workflow_dispatch to add/replace a TXT record on a Cloudflare zone.
+#
+# Why this exists: domain-verification flows (Crypoverse, Stripe, Google Search
+# Console, etc.) want a TXT on the apex. Doing it through the dashboard is fast,
+# but doing it through a tracked workflow gives us an audit trail in the repo —
+# we know exactly when a verification token was added, by which run, and we can
+# diff the workflow logs to confirm propagation later.
+#
+# Auth: uses the `CLOUDFLARE_API_TOKEN` repo secret. The token must have at
+# least `Zone.DNS:Edit` scope on the target zone. The Pages-deploy token we
+# already use for `wrangler pages deploy` typically has it bundled with
+# Account.Cloudflare Pages — if not, the workflow exits with a clear message.
+#
+# Usage:
+#   gh workflow run cf-dns-txt-add.yml
+#   gh workflow run cf-dns-txt-add.yml -F zone=crimecode.cc -F name=@ -F content="..."
+#
+# Idempotency: if a TXT with the exact same `name` AND `content` already exists,
+# the workflow exits success without creating a duplicate. If a TXT with the
+# same `name` exists but with a different `content`, it is REPLACED (so the
+# operator can rotate a verification token without leaving a stale record).
+
+name: Cloudflare DNS · Add/Replace TXT
+
+on:
+  workflow_dispatch:
+    inputs:
+      zone:
+        description: "Zone (apex domain), e.g. crimecode.cc"
+        required: true
+        default: "crimecode.cc"
+      name:
+        description: "Record name (@ for apex, or subdomain label)"
+        required: true
+        default: "@"
+      content:
+        description: "TXT record content (no surrounding quotes — the API adds them)"
+        required: true
+        default: "platform-verification=57a9b37e-e2a2-4ba5-9433-359f5c2ad321"
+      ttl:
+        description: "TTL in seconds (1 = automatic)"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  add-txt:
+    name: Add/Replace TXT record
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call Cloudflare DNS API
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ZONE: ${{ inputs.zone }}
+          REC_NAME: ${{ inputs.name }}
+          REC_CONTENT: ${{ inputs.content }}
+          REC_TTL: ${{ inputs.ttl }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is empty"
+            exit 1
+          fi
+
+          # API helper
+          api() {
+            local method="$1"; shift
+            local path="$1"; shift
+            curl -sf --max-time 15 \
+              -X "$method" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.cloudflare.com/client/v4$path" "$@"
+          }
+
+          # 1. Resolve zone_id from zone name
+          echo "::group::Resolving zone_id for $ZONE"
+          zone_resp=$(api GET "/zones?name=$ZONE&status=active") || {
+            echo "::error::Token rejected by Cloudflare — check scope (need Zone.DNS:Edit on $ZONE)"
+            exit 1
+          }
+          zone_id=$(echo "$zone_resp" | jq -r '.result[0].id // empty')
+          if [ -z "$zone_id" ]; then
+            echo "::error::Zone '$ZONE' not found or token can't see it"
+            echo "$zone_resp" | jq .
+            exit 1
+          fi
+          echo "zone_id=$zone_id"
+          echo "::endgroup::"
+
+          # Cloudflare canonicalizes "@" to the apex domain in API responses,
+          # so query by exact apex for lookup but keep "@" for create payload.
+          query_name="$REC_NAME"
+          if [ "$REC_NAME" = "@" ]; then
+            query_name="$ZONE"
+          fi
+
+          # 2. Look for existing TXT with same name
+          echo "::group::Checking for existing TXT $query_name"
+          existing=$(api GET "/zones/$zone_id/dns_records?type=TXT&name=$query_name")
+          existing_id=$(echo "$existing" | jq -r '.result[0].id // empty')
+          existing_content=$(echo "$existing" | jq -r '.result[0].content // empty')
+          echo "existing_id=${existing_id:-<none>}"
+          echo "existing_content=${existing_content:-<none>}"
+          echo "::endgroup::"
+
+          # 3. Decide: noop / update / create
+          if [ -n "$existing_id" ] && [ "$existing_content" = "$REC_CONTENT" ]; then
+            echo "::notice::TXT already present with matching content — nothing to do"
+            exit 0
+          fi
+
+          payload=$(jq -nc \
+            --arg name "$REC_NAME" \
+            --arg content "$REC_CONTENT" \
+            --argjson ttl "$REC_TTL" \
+            '{type:"TXT", name:$name, content:$content, ttl:$ttl, comment:"Added by cf-dns-txt-add.yml"}')
+
+          if [ -n "$existing_id" ]; then
+            echo "::group::Replacing TXT (content drift detected)"
+            result=$(api PUT "/zones/$zone_id/dns_records/$existing_id" --data "$payload")
+            echo "$result" | jq '.result | {id, name, content, modified_on}'
+            echo "::endgroup::"
+            echo "::notice::Replaced existing TXT (was '$existing_content')"
+          else
+            echo "::group::Creating new TXT"
+            result=$(api POST "/zones/$zone_id/dns_records" --data "$payload")
+            echo "$result" | jq '.result | {id, name, content, created_on}'
+            echo "::endgroup::"
+            echo "::notice::Created new TXT $REC_NAME → $REC_CONTENT"
+          fi
