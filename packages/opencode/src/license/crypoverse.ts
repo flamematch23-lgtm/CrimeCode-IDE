@@ -37,6 +37,7 @@ import {
   notifyAdminOrderCreated,
   sendCustomerTokenCrypoverse,
 } from "./telegram-notify"
+import { emitAdminEvent } from "./admin-event-bus"
 import { makeToken } from "./token"
 
 const log = Log.create({ service: "license-crypoverse" })
@@ -196,6 +197,14 @@ export async function initiateInvoice(opts: {
     customer_id: null,
     created_at: order.created_at,
   }).catch(() => undefined)
+  emitAdminEvent("order_created", {
+    order_id: order.id,
+    interval: order.interval,
+    amount_usd: opts.amountUsd,
+    method: "crypoverse",
+    customer_telegram: order.customer_telegram,
+    transaction_id: invoice.transaction_id,
+  })
   return { invoice, redirectUrl }
 }
 
@@ -583,6 +592,15 @@ async function onPaid(transactionId: string, txHash: string | null): Promise<voi
     method: "crypoverse",
     tx_hash: txHash,
   }).catch(() => undefined)
+  emitAdminEvent("crypoverse_paid", {
+    order_id: invoice.order_id,
+    transaction_id: transactionId,
+    license_id: result.license.id,
+    amount_usd: invoice.amount_usd,
+    customer_telegram: result.customer.telegram,
+    customer_id: result.customer.id,
+    tx_hash: txHash,
+  })
   // Push the license token to the user on Telegram, mirroring what the
   // on-chain poller does. Best-effort: we don't fail license issuance
   // just because Telegram is down — the user can always /token to
@@ -650,6 +668,12 @@ function onFailed(transactionId: string, status: string): void {
       customer_id: null,
       reason: `Crypoverse terminal status: ${status}`,
     }).catch(() => undefined)
+    emitAdminEvent("crypoverse_failed", {
+      order_id: order.id,
+      transaction_id: transactionId,
+      status,
+      customer_telegram: order.customer_telegram,
+    })
   }
 }
 

@@ -12,6 +12,7 @@ import {
 } from "./store"
 import { getWallets } from "./wallets"
 import { notifyAdminCriticalError, notifyAdminOrderConfirmed, notifyPaymentSeen, sendCustomerToken } from "./telegram-notify"
+import { emitAdminEvent } from "./admin-event-bus"
 
 const log = Log.create({ service: "license-poller" })
 
@@ -149,6 +150,16 @@ async function pollOnce(): Promise<void> {
         method: "onchain",
         tx_hash: tx.txid,
       }).catch(() => undefined)
+      emitAdminEvent("order_paid", {
+        order_id: issued.order.id,
+        license_id: issued.license.id,
+        interval: issued.license.interval,
+        customer_telegram: issued.customer.telegram,
+        customer_id: issued.customer.id,
+        method: "onchain",
+        currency,
+        tx_hash: tx.txid,
+      })
       // Cancel sibling offers (other currencies) — order is already paid.
       for (const sibling of getOffersForOrder(match.order_id)) {
         if (sibling.id !== match.id && !sibling.matched_tx_hash) {

@@ -53,6 +53,26 @@ import {
   transferOwnershipAsAdmin,
 } from "../../license/teams"
 import { getSystemHealth } from "../../license/health"
+import {
+  listBroadcasts,
+  listSegmentSizes,
+  sendBroadcast,
+  type BroadcastSegment,
+} from "../../license/admin-broadcasts"
+import {
+  emitAdminEvent,
+  getRecentEvents,
+  subscribeAdminEvents,
+} from "../../license/admin-event-bus"
+import {
+  disable2fa,
+  enable2fa,
+  generateTotpSecret,
+  getEnabledSecret,
+  is2faEnabled,
+  otpauthUrl,
+  verifyTotpCode,
+} from "../../license/admin-2fa"
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -213,10 +233,10 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       <a href="#health"     data-route="health"><span class="ic">📡</span>Health</a>
       <div class="sect">Operations</div>
       <a href="#audit"      data-route="audit"><span class="ic">📋</span>Audit log</a>
+      <a href="#comms"      data-route="comms"><span class="ic">📢</span>Communications</a>
       <a href="#settings"   data-route="settings"><span class="ic">⚙️</span>Settings</a>
       <div class="sect">Coming soon</div>
       <a href="#payments"   data-route="payments" style="opacity:0.55"><span class="ic">💼</span>Payments</a>
-      <a href="#comms"      data-route="comms"    style="opacity:0.55"><span class="ic">📢</span>Communications</a>
     </nav>
   </aside>
   <div>
@@ -267,21 +287,36 @@ function toast(msg, opts = {}) {
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.hidden = true; }, opts.err ? 6000 : 3500);
 }
-async function api(path, opts = {}) {
-  const res = await fetch("/admin/api" + path, {
+let api = async function (path, opts = {}) {
+  // Auto-attach the cached admin OTP (set by the 2FA wizard / login
+  // prompt). The server only requires it when 2FA is enabled — for
+  // un-2FA'd setups it's a harmless extra header.
+  const cachedOtp = sessionStorage.getItem("admin_otp");
+  const baseHeaders = Object.assign({ "Content-Type": "application/json" }, cachedOtp ? { "x-admin-otp": cachedOtp } : {});
+  const doFetch = async (extraHeaders) => fetch("/admin/api" + path, {
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers: Object.assign({}, baseHeaders, extraHeaders || {}, opts.headers || {}),
   });
-  const text = await res.text();
+  let res = await doFetch();
+  let text = await res.text();
   let body;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  // OTP required → prompt + retry once. Caches the new code for the tab.
+  if (res.status === 401 && body && body.error === "otp_required") {
+    const code = prompt("Two-factor required — enter your 6-digit code:");
+    if (!code) throw new Error("otp_cancelled");
+    sessionStorage.setItem("admin_otp", code);
+    res = await doFetch({ "x-admin-otp": code });
+    text = await res.text();
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  }
   if (!res.ok) {
     const msg = typeof body === "string" ? body : (body && body.error) || ("HTTP " + res.status);
     throw new Error(msg);
   }
   return body;
-}
+};
 
 // ── routing (hash-based) ──────────────────────────────────────────────
 const ROUTES = {
@@ -296,7 +331,7 @@ const ROUTES = {
   payments:  renderComingSoon("Payments"),
   health:    renderHealth,
   audit:     renderAudit,
-  comms:     renderComingSoon("Communications"),
+  comms:     renderComms,
   settings:  renderSettings,
 };
 function route() {
@@ -312,7 +347,7 @@ function route() {
 window.addEventListener("hashchange", route);
 
 // ── Overview ──────────────────────────────────────────────────────────
-async function renderOverview() {
+let renderOverview = async function () {
   const view = $("#view");
   view.innerHTML = '<h1 class="page">Dashboard</h1><div class="kpi-grid" id="kpis"></div><section class="card"><h2>Revenue · last 30 days</h2><div class="chart-wrap"><canvas id="chart-overview"></canvas><div class="chart-tip" hidden></div></div><div class="chart-legend"><span><span class="legend-dot" style="background:#ff5722"></span>Revenue (USD)</span><span><span class="legend-dot" style="background:rgba(255,87,34,0.4)"></span>Orders</span></div></section>';
   try {
@@ -332,7 +367,16 @@ async function renderOverview() {
   } catch (err) {
     view.innerHTML += '<section class="card"><p class="empty">' + escapeHtml(err.message) + "</p></section>";
   }
-}
+  // Step 4: live activity feed widget under the chart.
+  try {
+    const ev = await api("/events/recent?limit=30");
+    liveFeed.events = (ev.events || []).slice().reverse();
+    if (liveFeed.events.length) liveFeed.lastId = liveFeed.events[0].id;
+  } catch (_) {}
+  $("#view").insertAdjacentHTML("beforeend", '<section class="card"><h2>Live activity feed</h2><div id="live-feed"></div></section>');
+  renderLiveFeedWidget();
+  startLiveFeed();
+};
 const kpi = (label, value, delta) => '<div class="kpi"><div class="label">' + escapeHtml(label) + '</div><div class="value">' + value + '</div>' + (delta ? '<div class="delta">' + escapeHtml(delta) + "</div>" : "") + "</div>";
 
 function refreshNavBadges(o) {
@@ -843,7 +887,7 @@ async function renderHealth() {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────
-async function renderSettings() {
+let renderSettings = async function () {
   const view = $("#view");
   view.innerHTML = '<h1 class="page">Settings</h1><div id="settings-wrap"><p class="empty">Loading…</p></div>';
   try {
@@ -906,7 +950,9 @@ async function renderSettings() {
       } catch (e) { toast(e.message, { err: true }); }
     }));
   } catch (err) { $("#settings-wrap").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
-}
+  // Step 4: 2FA card appended below the editable + read-only sections.
+  await append2faCard();
+};
 
 // ── Audit log (advanced) ──────────────────────────────────────────────
 const auditState = { offset: 0, limit: 50 };
@@ -1023,6 +1069,192 @@ function refreshBulkBar(actions) {
   }));
 }
 $("#bulkClear").addEventListener("click", () => { bulkSel.ids.clear(); $("#bulkbar").hidden = true; $$('input[data-bulk], input[data-bulk-all]').forEach((cb) => { cb.checked = false; }); });
+
+// ── Communications (broadcast) ────────────────────────────────────────
+async function renderComms() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">Communications</h1>'
+    + '<section class="card">'
+    + '<h2>Push broadcast via Telegram bot</h2>'
+    + '<div class="setting-row" style="display:block;border:0;padding-top:0">'
+    +   '<label class="k" for="cm-segment" style="display:block;margin-bottom:6px">Segment</label>'
+    +   '<select id="cm-segment" style="width:100%;max-width:520px;background:var(--bg);color:var(--text);padding:9px 12px;border-radius:7px;border:1px solid var(--border);font:inherit"><option value="">Loading segments…</option></select>'
+    + '</div>'
+    + '<div class="setting-row" style="display:block;border:0">'
+    +   '<label class="k" for="cm-msg" style="display:block;margin-bottom:6px">Message (max 4000 chars, Markdown supported)</label>'
+    +   '<textarea id="cm-msg" rows="6" placeholder="Hi @user! …" style="width:100%;background:var(--bg);color:var(--text);padding:10px 12px;border-radius:7px;border:1px solid var(--border);font:inherit;resize:vertical"></textarea>'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px"><span id="cm-count" style="color:var(--muted);font-size:11px">0 / 4000</span> <button id="cm-send">📢 Send broadcast</button></div>'
+    + '</div>'
+    + '</section>'
+    + '<section class="card"><h2>Recent broadcasts</h2><div id="cm-history"><p class="empty">Loading…</p></div></section>';
+  // Populate segments
+  try {
+    const seg = await api("/broadcasts/segments");
+    $("#cm-segment").innerHTML = seg.segments.map((s) => '<option value="' + escapeHtml(s.segment) + '">' + escapeHtml(s.label) + " (" + s.count + " recipients)</option>").join("");
+  } catch (err) { toast(err.message, { err: true }); }
+  // Counter
+  $("#cm-msg").addEventListener("input", () => { $("#cm-count").textContent = $("#cm-msg").value.length + " / 4000"; });
+  // Send
+  $("#cm-send").addEventListener("click", async () => {
+    const segment = $("#cm-segment").value;
+    const message = $("#cm-msg").value.trim();
+    if (!segment || !message) { toast("Pick a segment and write a message.", { err: true }); return; }
+    const segText = $("#cm-segment").options[$("#cm-segment").selectedIndex].text;
+    if (!confirm("Send this broadcast to: " + segText + " ?\n\nThis cannot be undone.")) return;
+    $("#cm-send").disabled = true;
+    $("#cm-send").textContent = "Sending…";
+    try {
+      const r = await api("/broadcasts", { method: "POST", body: JSON.stringify({ segment, message, parse_mode: "Markdown" }) });
+      toast("Broadcast: " + r.broadcast.delivered + "/" + r.broadcast.total + " delivered" + (r.broadcast.failed ? " (" + r.broadcast.failed + " failed)" : ""));
+      $("#cm-msg").value = "";
+      $("#cm-count").textContent = "0 / 4000";
+      loadHistory();
+    } catch (e) { toast(e.message, { err: true }); }
+    finally { $("#cm-send").disabled = false; $("#cm-send").textContent = "📢 Send broadcast"; }
+  });
+  async function loadHistory() {
+    try {
+      const r = await api("/broadcasts?limit=30");
+      $("#cm-history").innerHTML = r.broadcasts.length === 0
+        ? '<p class="empty">No broadcasts sent yet.</p>'
+        : '<table><thead><tr><th>When</th><th>Segment</th><th>Sent by</th><th>Delivered</th><th>Failed</th><th>Message preview</th></tr></thead><tbody>'
+          + r.broadcasts.map((b) => '<tr><td>' + escapeHtml(fmtTs(b.sent_at)) + "</td>"
+              + "<td>" + escapeHtml(b.segment) + "</td>"
+              + "<td>" + escapeHtml(b.sent_by) + "</td>"
+              + "<td><strong>" + fmtNum(b.delivered) + "</strong> / " + fmtNum(b.total) + "</td>"
+              + "<td>" + (b.failed > 0 ? '<span class="pill revoked">' + b.failed + "</span>" : "<span style=\"color:#666\">0</span>") + "</td>"
+              + '<td style="max-width:380px;color:var(--muted);font-size:11px;word-break:break-word">' + escapeHtml(b.message.slice(0,180)) + (b.message.length > 180 ? "…" : "") + "</td>"
+              + "</tr>").join("")
+          + "</tbody></table>";
+    } catch (err) { $("#cm-history").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
+  }
+  loadHistory();
+}
+
+// ── Live activity feed (subscribed once globally) ────────────────────
+const liveFeed = { events: [], lastId: 0, source: null, maxKeep: 100 };
+function startLiveFeed() {
+  if (liveFeed.source) return;
+  try {
+    const otp = sessionStorage.getItem("admin_otp");
+    // EventSource can't set headers — for the SSE we rely on BasicAuth
+    // cookies and the OTP being already established via prior /api/
+    // calls. If 2FA is on AND the operator hasn't unlocked it yet, the
+    // SSE 401s; we silently retry on the next nav.
+    const url = "/admin/api/events?since=" + liveFeed.lastId;
+    liveFeed.source = new EventSource(url, { withCredentials: true });
+    liveFeed.source.addEventListener("admin", (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        liveFeed.lastId = Math.max(liveFeed.lastId, ev.id);
+        liveFeed.events.unshift(ev);
+        if (liveFeed.events.length > liveFeed.maxKeep) liveFeed.events.length = liveFeed.maxKeep;
+        renderLiveFeedWidget();
+      } catch (_) {}
+    });
+    liveFeed.source.addEventListener("hello", () => {});
+    liveFeed.source.onerror = () => {
+      // Drop + retry on next route (cheap exponential-ish backoff)
+      try { liveFeed.source.close(); } catch (_) {}
+      liveFeed.source = null;
+      setTimeout(startLiveFeed, 5000);
+    };
+  } catch (_) { liveFeed.source = null; }
+}
+function eventIcon(t) {
+  return ({ signup:"🆕", order_created:"📦", order_paid:"💰", order_cancelled:"🚫",
+            license_issued:"🎟️", license_revoked:"⛔", crypoverse_paid:"💳",
+            crypoverse_failed:"❌", team_created:"👥", broadcast_sent:"📢",
+            system_error:"🚨" }[t]) || "•";
+}
+function renderLiveFeedWidget() {
+  const widget = $("#live-feed");
+  if (!widget) return;
+  widget.innerHTML = liveFeed.events.length === 0
+    ? '<p class="empty">Waiting for live events…</p>'
+    : '<ul style="list-style:none;padding:0;margin:0;max-height:380px;overflow-y:auto">'
+      + liveFeed.events.slice(0, 30).map((ev) => {
+          const handle = ev.payload.customer_telegram ? "@" + String(ev.payload.customer_telegram).replace(/^@/, "") : "";
+          const detail = (ev.type === "order_paid" || ev.type === "crypoverse_paid")
+              ? handle + " · " + (ev.payload.amount_usd ? "$" + ev.payload.amount_usd : "")
+              : ev.type === "order_created"
+                ? handle + " · " + (ev.payload.interval || "") + " · " + (ev.payload.amount_usd ? "$" + ev.payload.amount_usd : "") + " · " + (ev.payload.method || "")
+                : ev.type === "broadcast_sent"
+                  ? ev.payload.segment + " · " + ev.payload.delivered + "/" + ev.payload.total
+                  : JSON.stringify(ev.payload).slice(0,80);
+          return '<li style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:10px;align-items:center;font-size:12px">'
+            + '<span style="font-size:18px">' + eventIcon(ev.type) + "</span>"
+            + '<div style="flex:1"><strong>' + escapeHtml(ev.type.replaceAll("_", " ")) + "</strong> <span style=\"color:var(--muted)\">" + escapeHtml(detail) + "</span></div>"
+            + '<span style="color:var(--muted);font-size:11px">' + fmtRel(ev.ts) + "</span>"
+            + "</li>";
+        }).join("")
+      + "</ul>";
+}
+// Live feed widget is appended directly inside the renderOverview body.
+
+// ── 2FA wizard (rendered inside Settings via injection) ──────────────
+async function append2faCard() {
+  try {
+    const status = await api("/2fa/status");
+    const wrap = $("#settings-wrap");
+    if (!wrap) return;
+    const card = document.createElement("section");
+    card.className = "card";
+    card.innerHTML =
+        '<h2>Two-factor authentication (TOTP)</h2>'
+      + (status.enabled
+          ? '<p style="color:var(--muted);margin-bottom:14px"><span class="pill valid">ENABLED</span> Admin requests must include a 6-digit OTP in the <code>X-Admin-OTP</code> header. The dashboard prompts for it after login and caches it for the tab.</p>'
+            + '<div><input id="tfa-disable-code" placeholder="6-digit code" maxlength="6" style="background:var(--bg);color:var(--text);padding:8px 12px;border-radius:7px;border:1px solid var(--border)" /> <button class="danger" id="tfa-disable">Disable 2FA</button></div>'
+          : '<p style="color:var(--muted);margin-bottom:14px"><span class="pill revoked">OFF</span> Recommended for production. Once enabled, BasicAuth alone is no longer enough — every admin call must also carry a current 6-digit TOTP code.</p>'
+            + '<button id="tfa-setup">⚙️ Set up 2FA now</button>'
+            + '<div id="tfa-wizard" hidden style="margin-top:18px"></div>');
+    wrap.appendChild(card);
+    if (status.enabled) {
+      $("#tfa-disable").addEventListener("click", async () => {
+        const code = $("#tfa-disable-code").value.trim();
+        if (!/^\d{6}$/.test(code)) { toast("Need a 6-digit code", { err: true }); return; }
+        if (!confirm("Disable 2FA? Future admin requests will require only BasicAuth.")) return;
+        try {
+          await api("/2fa/disable", { method: "POST", body: JSON.stringify({ code }) });
+          toast("2FA disabled");
+          sessionStorage.removeItem("admin_otp");
+          renderSettings();
+        } catch (e) { toast(e.message, { err: true }); }
+      });
+    } else {
+      $("#tfa-setup").addEventListener("click", async () => {
+        try {
+          const s = await api("/2fa/setup", { method: "POST", body: "{}" });
+          const w = $("#tfa-wizard");
+          w.hidden = false;
+          w.innerHTML =
+              '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'
+            +   '<img src="' + escapeHtml(s.qr_url) + '" alt="TOTP QR" style="border-radius:8px;background:#fff;padding:6px" />'
+            +   '<div style="flex:1;min-width:280px">'
+            +     '<p style="margin-top:0">1) Scan this QR with Google Authenticator / Authy / 1Password / Bitwarden, or type the secret manually:</p>'
+            +     '<code style="background:var(--bg);padding:8px;border-radius:6px;display:block;font-size:13px;letter-spacing:2px;word-break:break-all">' + escapeHtml(s.secret) + "</code>"
+            +     '<p style="margin-top:14px">2) Enter the current 6-digit code to confirm + enable:</p>'
+            +     '<div style="display:flex;gap:8px"><input id="tfa-enable-code" placeholder="123456" maxlength="6" style="background:var(--bg);color:var(--text);padding:8px 12px;border-radius:7px;border:1px solid var(--border);font-family:ui-monospace,monospace;letter-spacing:4px;font-size:14px" /> <button id="tfa-enable">Enable</button></div>'
+            +   "</div>"
+            + "</div>";
+          $("#tfa-enable").addEventListener("click", async () => {
+            const code = $("#tfa-enable-code").value.trim();
+            if (!/^\d{6}$/.test(code)) { toast("Need a 6-digit code", { err: true }); return; }
+            try {
+              await api("/2fa/enable", { method: "POST", body: JSON.stringify({ secret: s.secret, code }) });
+              toast("✅ 2FA enabled — keep your authenticator app safe!");
+              sessionStorage.setItem("admin_otp", code);
+              renderSettings();
+            } catch (e) { toast(e.message, { err: true }); }
+          });
+        } catch (e) { toast(e.message, { err: true }); }
+      });
+    }
+  } catch (_) {}
+}
+// 2FA card is appended directly inside the renderSettings body.
+// api() handles OTP injection inline (see its body — reads sessionStorage
+// and on otp_required prompts + retries once).
 
 function renderComingSoon(name) { return function () { $("#view").innerHTML = '<h1 class="page">' + escapeHtml(name) + '</h1><section class="card"><p class="empty">Coming in the next iteration of the dashboard.</p></section>'; }; }
 
@@ -1175,6 +1407,26 @@ export function adminDashboardRouter(): Hono {
     await next()
   })
   r.use("*", basicAuth({ username: "admin", password }))
+
+  // 2FA gate (optional — only kicks in once enabled in Settings). The SPA
+  // shell, 2FA setup/disable endpoints, and the OTP-status probe are
+  // whitelisted so the operator can always recover access through the
+  // browser UI. Everything else under /admin/api/* requires the OTP if
+  // 2FA is on. The OTP travels in the `X-Admin-OTP` header; the
+  // dashboard prompts for it after BasicAuth and caches in sessionStorage.
+  r.use("/api/*", async (c, next) => {
+    const secret = getEnabledSecret()
+    if (!secret) return next() // 2FA disabled
+    const path = c.req.path
+    // Exempt the endpoints needed to disable/probe 2FA so a misconfigured
+    // device can't lock the operator out forever.
+    if (path.endsWith("/2fa/status") || path.endsWith("/2fa/disable")) return next()
+    const otp = c.req.header("x-admin-otp") ?? ""
+    if (!otp || !verifyTotpCode(secret, otp)) {
+      return c.json({ error: "otp_required", code_expected: 6 }, 401)
+    }
+    await next()
+  })
 
   // SPA shell — single file, no build step.
   r.get("/", (c) => c.html(DASHBOARD_HTML))
@@ -1491,6 +1743,121 @@ export function adminDashboardRouter(): Hono {
     c.header("Content-Type", "text/csv; charset=utf-8")
     c.header("Content-Disposition", 'attachment; filename="audit-' + new Date().toISOString().slice(0, 10) + '.csv"')
     return c.body(csv)
+  })
+
+  // ── Step 4: Communications broadcasts ─────────────────────────
+  r.get("/api/broadcasts/segments", (c) => c.json({ segments: listSegmentSizes() }))
+
+  r.get("/api/broadcasts", (c) => {
+    const limit = Number.parseInt(c.req.query("limit") ?? "50", 10) || 50
+    return c.json({ broadcasts: listBroadcasts(limit) })
+  })
+
+  r.post("/api/broadcasts", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      segment?: string
+      message?: string
+      parse_mode?: "Markdown" | "HTML" | null
+    }
+    if (!body.segment || !body.message) return c.json({ error: "missing_segment_or_message" }, 400)
+    if (body.message.length > 4000) return c.json({ error: "message_too_long_max_4000" }, 400)
+    try {
+      const row = await sendBroadcast({
+        segment: body.segment as BroadcastSegment,
+        message: body.message,
+        parse_mode: body.parse_mode === "HTML" ? null : "Markdown",
+        sent_by: "admin-panel",
+      })
+      emitAdminEvent("broadcast_sent", {
+        segment: row.segment,
+        total: row.total,
+        delivered: row.delivered,
+        failed: row.failed,
+      })
+      return c.json({ ok: true, broadcast: row })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+  })
+
+  // ── Step 4: Live SSE feed ─────────────────────────────────────
+  r.get("/api/events", (c) => {
+    const since = Number(c.req.query("since") ?? "0") || 0
+    // Build a manual SSE stream — Hono lets us return a ReadableStream
+    // with the right text/event-stream headers + we own the lifecycle.
+    let unsubscribe: () => void = () => undefined
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder()
+        const write = (chunk: string) => {
+          try {
+            controller.enqueue(enc.encode(chunk))
+          } catch {
+            // controller already closed (client disconnected) — clean up
+            unsubscribe()
+          }
+        }
+        // Backfill from buffer + subscribe to live
+        unsubscribe = subscribeAdminEvents((ev) => {
+          write("event: admin\ndata: " + JSON.stringify(ev) + "\n\n")
+        }, since)
+        // Keepalive every 25s so intermediaries (Cloudflare, Caddy) don't
+        // drop the idle connection. SSE comments are `: text\n\n` and
+        // browsers ignore them.
+        const ka = setInterval(() => write(": keepalive\n\n"), 25_000)
+        // Initial hello to flush headers
+        write("event: hello\ndata: " + JSON.stringify({ ts: Math.floor(Date.now() / 1000) }) + "\n\n")
+        ;(controller as ReadableStreamDefaultController<Uint8Array> & { _ka?: NodeJS.Timeout })._ka = ka
+      },
+      cancel() {
+        unsubscribe()
+      },
+    })
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      },
+    })
+  })
+
+  r.get("/api/events/recent", (c) => {
+    const limit = Math.max(1, Math.min(200, Number.parseInt(c.req.query("limit") ?? "30", 10) || 30))
+    return c.json({ events: getRecentEvents(limit) })
+  })
+
+  // ── Step 4: TOTP 2FA ──────────────────────────────────────────
+  r.get("/api/2fa/status", (c) => c.json({ enabled: is2faEnabled() }))
+
+  r.post("/api/2fa/setup", (c) => {
+    // Generate a fresh secret to display. Not persisted yet — the
+    // operator confirms by submitting the first valid code via /enable.
+    const secret = generateTotpSecret()
+    return c.json({
+      secret,
+      otpauth_url: otpauthUrl(secret, "admin"),
+      qr_url:
+        "https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=" +
+        encodeURIComponent(otpauthUrl(secret, "admin")),
+    })
+  })
+
+  r.post("/api/2fa/enable", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { secret?: string; code?: string }
+    if (!body.secret || !body.code) return c.json({ error: "missing_secret_or_code" }, 400)
+    const result = enable2fa(body.secret, body.code, "admin-panel")
+    if (!result.ok) return c.json({ error: result.reason ?? "enable_failed" }, 400)
+    return c.json({ ok: true, enabled: true })
+  })
+
+  r.post("/api/2fa/disable", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { code?: string }
+    if (!body.code) return c.json({ error: "missing_code" }, 400)
+    const result = disable2fa(body.code, "admin-panel")
+    if (!result.ok) return c.json({ error: result.reason ?? "disable_failed" }, 400)
+    return c.json({ ok: true, enabled: false })
   })
 
   return r

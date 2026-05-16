@@ -234,6 +234,22 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at   INTEGER NOT NULL,
   updated_by   TEXT
 );
+
+-- Push broadcasts the operator fires from the admin panel. One row per
+-- send, with delivery counters and an error sample for triage.
+CREATE TABLE IF NOT EXISTS admin_broadcasts (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  segment     TEXT NOT NULL,
+  message     TEXT NOT NULL,
+  parse_mode  TEXT,
+  sent_at     INTEGER NOT NULL,
+  sent_by     TEXT NOT NULL,
+  total       INTEGER NOT NULL DEFAULT 0,
+  delivered   INTEGER NOT NULL DEFAULT 0,
+  failed      INTEGER NOT NULL DEFAULT 0,
+  error_sample TEXT
+);
+CREATE INDEX IF NOT EXISTS admin_broadcasts_sent_at_idx ON admin_broadcasts(sent_at DESC);
 `
 
 function resolvePath(): string {
@@ -508,6 +524,29 @@ function runMigrations(db: Database): void {
          updated_at   INTEGER NOT NULL,
          updated_by   TEXT
        )`,
+    ],
+    // v2.44.x Step 4: admin broadcasts. Every push the operator fires
+    // through the admin panel lands here so the team has full history
+    // (who said what to which segment + delivery counters). Used to
+    // dedupe duplicate sends and to render a "broadcast inbox" log.
+    [
+      "v11.admin_broadcasts",
+      `CREATE TABLE IF NOT EXISTS admin_broadcasts (
+         id          INTEGER PRIMARY KEY AUTOINCREMENT,
+         segment     TEXT NOT NULL,
+         message     TEXT NOT NULL,
+         parse_mode  TEXT,
+         sent_at     INTEGER NOT NULL,
+         sent_by     TEXT NOT NULL,
+         total       INTEGER NOT NULL DEFAULT 0,
+         delivered   INTEGER NOT NULL DEFAULT 0,
+         failed      INTEGER NOT NULL DEFAULT 0,
+         error_sample TEXT
+       )`,
+    ],
+    [
+      "v11.admin_broadcasts_sent_at_idx",
+      "CREATE INDEX IF NOT EXISTS admin_broadcasts_sent_at_idx ON admin_broadcasts(sent_at DESC)",
     ],
   ]
   for (const [name, sql] of ops) {
