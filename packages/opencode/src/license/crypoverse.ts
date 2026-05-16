@@ -130,16 +130,18 @@ export async function initiateInvoice(opts: {
     resp = await fetch(`${API_BASE}/transactions/initiate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // platformApiKey lives in the BODY per Crypoverse docs (not in
-      // an Authorization header). transactionType is required even
-      // though /documentation doesn't mention it — the API rejects
-      // requests without it with "transactionType must be one of the
-      // following values: default, pos". We use "default" for normal
-      // (non-POS) checkouts. Don't move either field without checking.
+      // The /documentation page is incomplete — actual field names per
+      // live API probe:
+      //   - platformApiKey (body, not header)
+      //   - transactionType: "default" | "pos"   (required)
+      //   - currencyAmount: number               (required, NOT "amountUsd")
+      //   - currency: "USD" (assumed; only USD listed in dashboard pricing)
+      // Verified end-to-end against api.crypoverse.com on 2026-05-16.
       body: JSON.stringify({
-        amountUsd: opts.amountUsd,
         platformApiKey: API_KEY,
         transactionType: "default",
+        currencyAmount: opts.amountUsd,
+        currency: "USD",
       }),
       signal: ctrl.signal,
     })
