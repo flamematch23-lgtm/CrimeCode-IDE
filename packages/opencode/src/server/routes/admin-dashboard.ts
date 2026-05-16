@@ -74,6 +74,11 @@ import {
   otpauthUrl,
   verifyTotpCode,
 } from "../../license/admin-2fa"
+import {
+  getPaymentConfig,
+  getSettlementHistory,
+  getWalletsWithBalance,
+} from "../../license/payments-admin"
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -232,12 +237,11 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       <a href="#teams"      data-route="teams"><span class="ic">&#x1F465;</span>Teams</a>
       <div class="sect">System</div>
       <a href="#health"     data-route="health"><span class="ic">&#x1F4E1;</span>Health</a>
+      <a href="#payments"   data-route="payments"><span class="ic">&#x1F4BC;</span>Payments</a>
       <div class="sect">Operations</div>
       <a href="#audit"      data-route="audit"><span class="ic">&#x1F4CB;</span>Audit log</a>
       <a href="#comms"      data-route="comms"><span class="ic">&#x1F4E2;</span>Communications</a>
       <a href="#settings"   data-route="settings"><span class="ic">&#x2699;&#xFE0F;</span>Settings</a>
-      <div class="sect">Coming soon</div>
-      <a href="#payments"   data-route="payments" style="opacity:0.55"><span class="ic">&#x1F4BC;</span>Payments</a>
     </nav>
   </aside>
   <div>
@@ -329,11 +333,11 @@ const ROUTES = {
   licenses:  renderLicenses,
   crypoverse: renderCrypoverseList,
   teams:     renderTeamsList,
-  payments:  renderComingSoon("Payments"),
   health:    renderHealth,
   audit:     renderAudit,
   comms:     renderComms,
   settings:  renderSettings,
+  payments:  renderPayments,
 };
 function route() {
   const hash = (location.hash || "#overview").slice(1);
@@ -1257,6 +1261,107 @@ async function append2faCard() {
 // api() handles OTP injection inline (see its body &#x2014; reads sessionStorage
 // and on otp_required prompts + retries once).
 
+// &#x1F4BC; Payments — wallets balance, settlements unified history, provider config.
+async function renderPayments() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">Payments</h1>'
+    + '<div id="pay-cfg"><p class="empty">Loading config&#x2026;</p></div>'
+    + '<section class="card"><h2>On-chain wallets</h2><div id="pay-wallets"><p class="empty">Fetching live balances&#x2026;</p></div></section>'
+    + '<section class="card"><h2>Settlement history</h2>'
+    +   '<div style="margin-bottom:10px;color:var(--muted);font-size:12px">Unified ledger across on-chain + Crypoverse. Most recent first.</div>'
+    +   '<div id="pay-settlements"><p class="empty">Loading&#x2026;</p></div>'
+    + '</section>';
+  // 1. Config
+  try {
+    const cfg = await api("/payments/config");
+    const okBadge = (v) => v ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>';
+    $("#pay-cfg").innerHTML =
+      '<div class="kpi-grid">'
+      + kpi("On-chain", cfg.providers.onchain_enabled ? "ENABLED" : "off", cfg.providers.onchain_wallets_configured + " wallets")
+      + kpi("Crypoverse", cfg.providers.crypoverse_enabled ? "ENABLED" : "off", cfg.providers.crypoverse_listeners_active + " listeners")
+      + kpi("Monthly", "$" + cfg.plan_prices_usd.monthly)
+      + kpi("Annual", "$" + cfg.plan_prices_usd.annual)
+      + kpi("Lifetime", "$" + cfg.plan_prices_usd.lifetime)
+      + kpi("Poll interval", cfg.poller_interval_seconds + "s", "on-chain")
+      + '</div>'
+      + '<section class="card"><h2>Provider env config</h2><table>'
+      +   "<tr><th>BTC_WALLET_ADDRESS</th><td>" + okBadge(cfg.env.btc_wallet_set) + "</td></tr>"
+      +   "<tr><th>LTC_WALLET_ADDRESS</th><td>" + okBadge(cfg.env.ltc_wallet_set) + "</td></tr>"
+      +   "<tr><th>ETH_WALLET_ADDRESS</th><td>" + okBadge(cfg.env.eth_wallet_set) + "</td></tr>"
+      +   "<tr><th>ETHERSCAN_API_KEY</th><td>" + okBadge(cfg.env.etherscan_api_key) + ' <span style="color:var(--muted);font-size:11px">(optional &#x2014; fallback Blockcypher)</span></td></tr>'
+      +   "<tr><th>CRYPOVERSE_API_KEY</th><td>" + okBadge(cfg.env.crypoverse_api_key) + "</td></tr>"
+      + "</table><p style=\"color:var(--muted);font-size:11px;margin-top:10px\">Wallet addresses + API keys are env-only: <code>fly secrets set KEY=value</code> followed by a deploy. Prices are hard-coded; runtime changes via Settings &#x2192; default_trial_days etc.</p></section>";
+  } catch (err) { $("#pay-cfg").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
+
+  // 2. Wallets with live balance
+  try {
+    const data = await api("/payments/wallets");
+    if (!data.wallets.length) {
+      $("#pay-wallets").innerHTML = '<p class="empty">No on-chain wallets configured. Set <code>BTC_WALLET_ADDRESS</code>, <code>LTC_WALLET_ADDRESS</code> and/or <code>ETH_WALLET_ADDRESS</code> as Fly secrets and redeploy.</p>';
+    } else {
+      $("#pay-wallets").innerHTML = '<div style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">'
+        + data.wallets.map((w) =>
+            '<div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg)">'
+            +   '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+            +     '<div><strong style="font-size:16px">' + escapeHtml(w.currency) + '</strong> <span style="color:var(--muted);font-size:11px">'+ w.min_confirmations + ' conf needed</span></div>'
+            +     (w.error ? '<span class="pill revoked">' + escapeHtml(w.error) + '</span>' : '<span class="pill valid">live</span>')
+            +   '</div>'
+            +   '<div style="text-align:center;margin-bottom:12px">'
+            +     '<img src="' + escapeHtml(w.qr_url) + '" alt="QR ' + w.currency + '" style="background:#fff;padding:8px;border-radius:8px;max-width:180px" />'
+            +   '</div>'
+            +   '<div class="mono" style="font-size:10px;word-break:break-all;background:var(--panel);padding:8px;border-radius:6px;margin-bottom:10px">' + escapeHtml(w.address) + '</div>'
+            +   '<div style="display:flex;justify-content:space-between;font-size:12px">'
+            +     '<span style="color:var(--muted)">Balance</span>'
+            +     '<strong>' + escapeHtml(w.balance_formatted) + ' ' + escapeHtml(w.currency) + '</strong>'
+            +   '</div>'
+            +   (w.usd_value != null ? '<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px"><span style="color:var(--muted)">USD value</span><strong>' + fmtUsd(w.usd_value) + '</strong></div>' : '')
+            +   '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:8px"><span>tx count</span><span>' + fmtNum(w.tx_count) + '</span></div>'
+            +   '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px"><span>updated</span><span>' + escapeHtml(fmtRel(w.fetched_at)) + '</span></div>'
+            + '</div>',
+          ).join("")
+        + '</div>'
+        + '<p style="color:var(--muted);font-size:11px;margin-top:14px">Balances cached for 60s. Click <button class="ghost" id="pay-refresh">&#x21BB; Refresh now</button> to force-fetch.</p>';
+      $("#pay-refresh")?.addEventListener("click", renderPayments);
+    }
+  } catch (err) { $("#pay-wallets").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
+
+  // 3. Settlements unified history
+  try {
+    const r = await api("/payments/settlements?limit=100");
+    if (!r.settlements.length) {
+      $("#pay-settlements").innerHTML = '<p class="empty">No paid settlements yet.</p>';
+    } else {
+      const total = r.settlements.reduce((s, x) => s + (x.amount_usd || 0), 0);
+      $("#pay-settlements").innerHTML =
+        '<div style="margin-bottom:10px"><strong>' + r.settlements.length + '</strong> paid settlements &#xB7; total <strong>' + fmtUsd(total) + '</strong></div>'
+        + '<table><thead><tr><th>When</th><th>Source</th><th>Order</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Currency</th><th>Tx hash</th></tr></thead><tbody>'
+        + r.settlements.map((s) => {
+            const explorer = s.tx_hash
+              ? (s.currency === "BTC" ? "https://mempool.space/tx/" + s.tx_hash
+                : s.currency === "LTC" ? "https://litecoinspace.org/tx/" + s.tx_hash
+                : s.currency === "ETH" ? "https://etherscan.io/tx/" + s.tx_hash
+                : null)
+              : null;
+            const txCell = s.tx_hash
+              ? (explorer
+                  ? '<a class="link mono" href="' + escapeHtml(explorer) + '" target="_blank" rel="noopener" style="font-size:11px">' + escapeHtml(s.tx_hash.slice(0,16)) + "&#x2026;</a>"
+                  : '<span class="mono" style="font-size:11px">' + escapeHtml(s.tx_hash.slice(0,20)) + "&#x2026;</span>")
+              : '<span style="color:#666">&#x2014;</span>';
+            return '<tr><td>' + escapeHtml(fmtTs(s.ts)) + "</td>"
+              + '<td>' + (s.source === "crypoverse" ? '<span class="pill" style="background:rgba(255,87,34,0.15);color:#ff8a5c">&#x1F4B3; Crypoverse</span>' : '<span class="pill" style="background:rgba(150,150,150,0.2);color:#aaa">&#x26D3;&#xFE0F; on-chain</span>') + "</td>"
+              + '<td class="mono">' + escapeHtml(s.order_id) + "</td>"
+              + "<td>" + (s.customer_telegram ? "@" + escapeHtml(s.customer_telegram.replace(/^@/, "")) : '<span style="color:#666">&#x2014;</span>') + "</td>"
+              + "<td>" + escapeHtml(s.interval) + "</td>"
+              + "<td><strong>" + fmtUsd(s.amount_usd) + "</strong></td>"
+              + "<td>" + escapeHtml(s.currency) + "</td>"
+              + "<td>" + txCell + "</td>"
+              + "</tr>";
+          }).join("")
+        + "</tbody></table>";
+    }
+  } catch (err) { $("#pay-settlements").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
+}
+
 function renderComingSoon(name) { return function () { $("#view").innerHTML = '<h1 class="page">' + escapeHtml(name) + '</h1><section class="card"><p class="empty">Coming in the next iteration of the dashboard.</p></section>'; }; }
 
 // &#x2500;&#x2500; action bindings (delegated) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
@@ -1862,6 +1967,19 @@ export function adminDashboardRouter(): Hono {
     if (!result.ok) return c.json({ error: result.reason ?? "disable_failed" }, 400)
     return c.json({ ok: true, enabled: false })
   })
+
+  // ── Step Final: Payments dashboard (wallets + settlements + config) ──
+  r.get("/api/payments/wallets", async (c) => {
+    const wallets = await getWalletsWithBalance()
+    return c.json({ wallets })
+  })
+
+  r.get("/api/payments/settlements", (c) => {
+    const limit = Math.max(1, Math.min(500, Number.parseInt(c.req.query("limit") ?? "100", 10) || 100))
+    return c.json({ settlements: getSettlementHistory(limit) })
+  })
+
+  r.get("/api/payments/config", (c) => c.json(getPaymentConfig()))
 
   return r
 }
