@@ -89,6 +89,7 @@ export function createMainWindow(globals: Globals) {
       webviewTag: true,
     },
   })
+  state.manage(win)
   loadWindow(win, "index.html")
   wireZoom(win)
   injectGlobals(win, globals)
@@ -130,7 +131,7 @@ export function createLoadingWindow(globals: Globals) {
   })
 
   loadWindow(win, "loading.html")
-  injectGlobals(win, globals)
+  injectGlobals(win, { updaterEnabled: globals.updaterEnabled })
 
   return win
 }

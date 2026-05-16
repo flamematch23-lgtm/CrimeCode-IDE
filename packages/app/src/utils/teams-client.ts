@@ -203,6 +203,25 @@ export interface AccountPending {
 
 export type AccountResult = AccountSession | AccountPending
 
+interface AccountOk {
+  status: "ok"
+  token: string
+  exp: number
+  customer_id: string
+}
+
+function normalize(result: AccountResult | AccountOk): AccountResult {
+  if (result.status === "ok") {
+    return {
+      status: "approved",
+      token: result.token,
+      exp: result.exp,
+      customer_id: result.customer_id,
+    }
+  }
+  return result
+}
+
 export interface SignUpInput {
   username: string
   password: string
@@ -238,7 +257,7 @@ export async function signUpWithAccount(input: SignUpInput): Promise<AccountResu
     if (result.status === "ok") {
       await api.writeSession(result.token, result.customer_id, result.exp)
     }
-    return result
+    return normalize(result)
   }
   return accountJson("/license/auth/signup", input)
 }
@@ -251,7 +270,7 @@ export async function signInWithAccount(input: SignInInput): Promise<AccountResu
     if (result.status === "ok") {
       await api.writeSession(result.token, result.customer_id, result.exp)
     }
-    return result
+    return normalize(result)
   }
   return accountJson("/license/auth/signin", input)
 }
@@ -304,7 +323,7 @@ async function accountJson(path: string, body: unknown): Promise<AccountResult> 
         : String(res.status)
     throw new Error(msg)
   }
-  return parsed as AccountResult
+  return normalize(parsed as AccountResult | AccountOk)
 }
 
 export interface TeamsClient {

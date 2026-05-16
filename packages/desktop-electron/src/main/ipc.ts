@@ -222,7 +222,8 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("read-clipboard-image", () => {
     const image = clipboard.readImage()
     if (image.isEmpty()) return null
-    const buffer = image.toPNG().buffer
+    const png = image.toPNG()
+    const buffer = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength)
     const size = image.getSize()
     return { buffer, width: size.width, height: size.height }
   })

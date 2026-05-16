@@ -484,7 +484,6 @@ export function AuthGate(props: { children: (creds: Credentials) => JSX.Element 
             setCreds(next)
             void configureCloudSyncIfDesktop(result.token)
             void applyCloudLicenseIfDesktop(result.token)
-      void applyCloudLicenseIfDesktop(result.token)
           } catch (err) {
             setError(friendlyAuthError(err instanceof Error ? err.message : String(err)))
           }

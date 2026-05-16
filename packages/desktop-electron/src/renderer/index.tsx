@@ -47,7 +47,11 @@ const emitDeepLinks = (urls: string[]) => {
 
 const listenForDeepLinks = () => {
   const startUrls = window.__OPENCODE__?.deepLinks ?? []
-  if (startUrls.length) emitDeepLinks(startUrls)
+  if (startUrls.length) {
+    window.__OPENCODE__ ??= {}
+    window.__OPENCODE__.deepLinks = []
+    emitDeepLinks(startUrls)
+  }
   return window.api.onDeepLink((urls) => emitDeepLinks(urls))
 }
 

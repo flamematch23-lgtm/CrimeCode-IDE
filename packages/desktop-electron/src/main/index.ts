@@ -107,8 +107,14 @@ function setupApp() {
     return
   }
 
+  const urls = readDeepLinks(process.argv)
+  if (urls.length) {
+    logger.log("deep link received via initial argv", { urls })
+    emitDeepLinks(urls.filter((raw) => !handleActivateDeepLink(raw)))
+  }
+
   app.on("second-instance", (_event: Event, argv: string[]) => {
-    const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))
+    const urls = readDeepLinks(argv)
     const forwardable = urls.filter((raw) => !handleActivateDeepLink(raw))
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
@@ -165,6 +171,10 @@ function setupApp() {
   })
 }
 
+function readDeepLinks(argv: string[]) {
+  return argv.filter((arg) => arg.startsWith("opencode://"))
+}
+
 /**
  * Parses an `opencode://activate?...` deep-link URL, runs license activation if
  * the URL is well-formed, and returns whether the URL was consumed (so callers
@@ -195,13 +205,11 @@ function handleActivateDeepLink(raw: string): boolean {
     interval: intervalRaw,
     tokenPrefix: token.slice(0, 8),
   })
-  try {
-    licenseService.activateFromToken({ interval: intervalRaw as "monthly" | "annual" | "lifetime", token })
-    return true
-  } catch (err) {
-    logger.error("license activation failed", { err: String(err) })
-    return true // activation attempted; don't double-process by forwarding
-  }
+  void licenseService
+    .activateFromToken({ interval: intervalRaw as "monthly" | "annual" | "lifetime", token })
+    .then(() => logger.info("license activated from deep link", { interval: intervalRaw }))
+    .catch((err) => logger.error("license activation failed", { err: String(err) }))
+  return true // activation attempted; don't double-process by forwarding
 }
 
 function emitDeepLinks(urls: string[]) {
@@ -679,7 +687,7 @@ function sqliteFileExists() {
 function setupAutoUpdater() {
   if (!UPDATER_ENABLED) return
   autoUpdater.logger = logger
-  autoUpdater.channel = "latest"
+  autoUpdater.channel = CHANNEL === "beta" ? "beta" : "latest"
   autoUpdater.allowPrerelease = false
   autoUpdater.allowDowngrade = true
   autoUpdater.autoDownload = false
