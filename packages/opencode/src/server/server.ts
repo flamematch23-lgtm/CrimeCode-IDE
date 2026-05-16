@@ -47,6 +47,7 @@ import { GlobalRoutes } from "./routes/global"
 import { LiveShareRoutes } from "./routes/liveshare"
 import { InviteRoutes } from "./routes/invite"
 import { LicenseRoutes } from "./routes/license"
+import { adminDashboardRouter } from "./routes/admin-dashboard"
 import { SyncRoutes } from "./routes/sync"
 import { AccountRoutes } from "./routes/account"
 import { startTelegramBot } from "../license/telegram"
@@ -239,6 +240,12 @@ export namespace Server {
       })
       .route("/global", GlobalRoutes())
       .route("/security", SecurityRoutes())
+      // /admin — production-grade admin SPA (single file, BasicAuth via
+      // ADMIN_PASSWORD). The legacy /license/admin path still works (the
+      // license router renders its own minimal dashboard) but new users
+      // should be sent to /admin. Mounted BEFORE /license so /admin wins
+      // the path race even though they don't overlap today.
+      .route("/admin", adminDashboardRouter())
       .route("/license", LicenseRoutes())
       // /sync/* is auth-gated (Bearer token, customer-scoped) but does NOT
       // require a local project Instance — must be mounted BEFORE the

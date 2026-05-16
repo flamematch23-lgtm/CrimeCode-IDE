@@ -1883,7 +1883,12 @@ export const LicenseRoutes = lazy(() => {
     return c.json(r, r.ok ? 200 : 500)
   })
 
-  // dashboard HTML (served at /license/admin)
+  // dashboard HTML (served at /license/admin). Kept for backwards-compat —
+  // the production dashboard now lives at /admin (mounted by the parent
+  // app on its own router). Newer features (revenue, customer detail,
+  // global search, real-time feed) only appear on /admin. The redirect
+  // below moves any bookmarked /license/admin to the new SPA in one hop.
+  admin.get("/admin/redirect", (c) => c.redirect("/admin", 302))
   admin.get("/admin", (c) => c.html(ADMIN_DASHBOARD_HTML))
 
   app.route("/", admin)

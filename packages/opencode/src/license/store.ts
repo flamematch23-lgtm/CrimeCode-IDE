@@ -650,3 +650,181 @@ export function statsCounts(): {
     licenses_revoked: row("SELECT COUNT(*) AS n FROM licenses WHERE revoked_at IS NOT NULL"),
   }
 }
+
+// ── Admin dashboard helpers ──────────────────────────────────────────
+// Below are the entries used by the production admin SPA (routes/admin-
+// dashboard.ts). They could live in a separate file but the store is
+// the single source of truth for licensing data and Bun's tree-shaker
+// drops anything the admin route doesn't pull in.
+
+/**
+ * Daily timeseries of revenue + order counts for the last N days. Buckets
+ * are aligned on UTC midnight. Used by the dashboard chart at /admin.
+ */
+export function revenueTimeseries(days = 30): Array<{
+  day: string // YYYY-MM-DD (UTC)
+  ts: number // unix seconds at start of day
+  orders: number
+  revenue_usd: number
+}> {
+  const db = getDb()
+  const priceByInterval: Record<string, number> = { monthly: 20, annual: 200, lifetime: 500 }
+  const oneDay = 86_400
+  const nowSec = now()
+  // Truncate now to start of current UTC day so buckets line up cleanly.
+  const todayStart = Math.floor(nowSec / oneDay) * oneDay
+  const out: Array<{ day: string; ts: number; orders: number; revenue_usd: number }> = []
+  // We compute one query per bucket — N is small (≤90) and the
+  // confirmed_at index makes each query O(log n). Cleaner than a giant
+  // GROUP BY strftime that needs a second pass to fill empty days.
+  for (let i = days - 1; i >= 0; i--) {
+    const start = todayStart - i * oneDay
+    const end = start + oneDay
+    const rows = db
+      .prepare<{ interval: string; n: number }, [number, number]>(
+        "SELECT interval, COUNT(*) AS n FROM orders WHERE status = 'confirmed' AND confirmed_at >= ? AND confirmed_at < ? GROUP BY interval",
+      )
+      .all(start, end)
+    const orders = rows.reduce((s, r) => s + r.n, 0)
+    const revenue_usd = rows.reduce((s, r) => s + (priceByInterval[r.interval] ?? 0) * r.n, 0)
+    out.push({
+      day: new Date(start * 1000).toISOString().slice(0, 10),
+      ts: start,
+      orders,
+      revenue_usd,
+    })
+  }
+  return out
+}
+
+/**
+ * Full drill-down for one customer — what the admin sees when clicking
+ * a row in the customers table. Returns everything we have linked to
+ * this customer in one round-trip: profile + orders + licenses + active
+ * sessions + recent audit.
+ */
+export function getCustomerDetail(customerId: string): {
+  customer: CustomerRow
+  orders: OrderRow[]
+  licenses: LicenseRow[]
+  sessions: Array<{ id: string; device_label: string | null; created_at: number; last_seen_at: number; revoked_at: number | null }>
+  audit: Array<{ ts: number; action: string; details: string | null }>
+  team_memberships: Array<{ team_id: string; team_name: string; role: string; added_at: number }>
+  spend_total_usd: number
+} | null {
+  const db = getDb()
+  const customer = db
+    .prepare<CustomerRow, [string]>("SELECT * FROM customers WHERE id = ?")
+    .get(customerId)
+  if (!customer) return null
+
+  const tg = customer.telegram_user_id ?? -1
+  const orders = customer.telegram_user_id
+    ? db
+        .prepare<OrderRow, [number]>(
+          "SELECT * FROM orders WHERE customer_user_id = ? ORDER BY created_at DESC LIMIT 50",
+        )
+        .all(tg)
+    : []
+
+  const licenses = db
+    .prepare<LicenseRow, [string]>(
+      "SELECT * FROM licenses WHERE customer_id = ? ORDER BY issued_at DESC LIMIT 50",
+    )
+    .all(customerId)
+
+  const sessions = db
+    .prepare<
+      { id: string; device_label: string | null; created_at: number; last_seen_at: number; revoked_at: number | null },
+      [string]
+    >(
+      "SELECT id, device_label, created_at, last_seen_at, revoked_at FROM auth_sessions WHERE customer_id = ? ORDER BY last_seen_at DESC LIMIT 30",
+    )
+    .all(customerId)
+
+  // Audit is keyed by string detail JSON — we match the customer_id substring
+  // since it's stored in many shapes ({customer_id}, {cid}, etc.).
+  const audit = db
+    .prepare<{ ts: number; action: string; details: string | null }, [string]>(
+      "SELECT ts, action, details FROM audit WHERE details LIKE ? ORDER BY ts DESC LIMIT 80",
+    )
+    .all(`%${customerId}%`)
+
+  const team_memberships = db
+    .prepare<{ team_id: string; team_name: string; role: string; added_at: number }, [string]>(
+      `SELECT tm.team_id, t.name AS team_name, tm.role, tm.added_at
+       FROM team_members tm JOIN teams t ON tm.team_id = t.id
+       WHERE tm.customer_id = ? ORDER BY tm.added_at DESC`,
+    )
+    .all(customerId)
+
+  // Lifetime spend: sum revenue across all confirmed orders.
+  const priceByInterval: Record<string, number> = { monthly: 20, annual: 200, lifetime: 500 }
+  const spend_total_usd = orders
+    .filter((o) => o.status === "confirmed")
+    .reduce((s, o) => s + (priceByInterval[o.interval] ?? 0), 0)
+
+  return { customer, orders, licenses, sessions, audit, team_memberships, spend_total_usd }
+}
+
+/**
+ * Global search across customers / orders / licenses by id, telegram
+ * handle, email, tx_hash. Returns up to 10 hits per category — designed
+ * for the dashboard's quick-find bar.
+ *
+ * Plain LIKE (not FTS) because the row counts on this DB are tiny
+ * (<10k anywhere) and FTS would mean another table + sync trigger.
+ */
+export function searchEntities(query: string): {
+  customers: Array<{ id: string; telegram: string | null; email: string | null; approval_status: string }>
+  orders: Array<{ id: string; status: string; interval: string; customer_telegram: string | null; created_at: number }>
+  licenses: Array<{ id: string; customer_id: string; interval: string; revoked_at: number | null; expires_at: number | null }>
+  teams: Array<{ id: string; name: string; owner_customer_id: string }>
+} {
+  const db = getDb()
+  const q = query.trim()
+  if (q.length < 2) {
+    return { customers: [], orders: [], licenses: [], teams: [] }
+  }
+  const like = `%${q.replace(/[%_]/g, (m) => "\\" + m)}%`
+
+  const customers = db
+    .prepare<{ id: string; telegram: string | null; email: string | null; approval_status: string }, [string, string, string]>(
+      `SELECT id, telegram, email, approval_status FROM customers
+       WHERE id LIKE ? ESCAPE '\\' OR telegram LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\'
+       ORDER BY created_at DESC LIMIT 10`,
+    )
+    .all(like, like, like)
+
+  const orders = db
+    .prepare<
+      { id: string; status: string; interval: string; customer_telegram: string | null; created_at: number },
+      [string, string, string]
+    >(
+      `SELECT id, status, interval, customer_telegram, created_at FROM orders
+       WHERE id LIKE ? ESCAPE '\\' OR customer_telegram LIKE ? ESCAPE '\\' OR tx_hash LIKE ? ESCAPE '\\'
+       ORDER BY created_at DESC LIMIT 10`,
+    )
+    .all(like, like, like)
+
+  const licenses = db
+    .prepare<
+      { id: string; customer_id: string; interval: string; revoked_at: number | null; expires_at: number | null },
+      [string, string]
+    >(
+      `SELECT id, customer_id, interval, revoked_at, expires_at FROM licenses
+       WHERE id LIKE ? ESCAPE '\\' OR customer_id LIKE ? ESCAPE '\\'
+       ORDER BY issued_at DESC LIMIT 10`,
+    )
+    .all(like, like)
+
+  const teams = db
+    .prepare<{ id: string; name: string; owner_customer_id: string }, [string, string]>(
+      `SELECT id, name, owner_customer_id FROM teams
+       WHERE id LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\'
+       ORDER BY created_at DESC LIMIT 10`,
+    )
+    .all(like, like)
+
+  return { customers, orders, licenses, teams }
+}
