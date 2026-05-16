@@ -196,6 +196,13 @@ export namespace Server {
         // /license/order/:id/status). Let it through unconditionally — it
         // enforces its own authz downstream.
         if (c.req.path.startsWith("/license/")) return next()
+        // /admin/* is the production-grade admin SPA + JSON API mounted
+        // by routes/admin-dashboard.ts. It has its own BasicAuth gate
+        // (username "admin", password = ADMIN_PASSWORD env var) plus an
+        // optional TOTP layer when 2FA is enabled. Bypass the outer
+        // OPENCODE_SERVER_PASSWORD middleware so operators don't need
+        // two sets of credentials.
+        if (c.req.path === "/admin" || c.req.path.startsWith("/admin/")) return next()
         const password = Flag.OPENCODE_SERVER_PASSWORD
         if (!password) return next()
         // Accept EITHER classic Basic Auth with the server password OR a
