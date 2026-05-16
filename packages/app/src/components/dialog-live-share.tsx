@@ -8,6 +8,7 @@ import { createStore } from "solid-js/store"
 import { useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
 import { useGlobalSync } from "@/context/global-sync"
+import { getTeamsClient } from "@/utils/teams-client"
 import { useLiveShareState } from "@/context/liveshare-state"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { useLanguage } from "@/context/language"
@@ -156,7 +157,48 @@ export function DialogLiveShare() {
   const [copiedToken, setCopiedToken] = createSignal(false)
   const [sock, setSock] = createSignal<SocketHandle | null>(null)
   const wsState = () => sock()?.store.state ?? "disconnected"
-  const [tab, setTab] = createSignal<"host" | "join">("host")
+  const [tab, setTab] = createSignal<"team" | "host" | "join">("team")
+  // Team relay autodiscover — fetch on dialog mount the relay
+  // coordinates for the user's most recent team. The "Team Session" tab
+  // pre-fills relay URL + code + token + (if owner) host key from this
+  // so the user just clicks "Host" or "Join" without copy-pasting.
+  const [teamRelay, setTeamRelay] = createSignal<{
+    teamId: string
+    teamName?: string
+    relayUrl: string
+    code: string
+    token: string
+    key: string | null
+    canHost: boolean
+  } | null>(null)
+  const [teamRelayLoading, setTeamRelayLoading] = createSignal(true)
+  createEffect(async () => {
+    try {
+      const client = getTeamsClient()
+      const r = await client.list().catch(() => ({ teams: [] }))
+      const t = r.teams?.[0]
+      if (!t) {
+        setTeamRelayLoading(false)
+        return
+      }
+      const relay = await client.relay(t.id).catch(() => null)
+      if (!relay) {
+        setTeamRelayLoading(false)
+        return
+      }
+      setTeamRelay({
+        teamId: t.id,
+        teamName: t.name,
+        relayUrl: relay.relayUrl,
+        code: relay.code,
+        token: relay.token,
+        key: relay.key,
+        canHost: relay.canHost,
+      })
+    } finally {
+      setTeamRelayLoading(false)
+    }
+  })
   const [follow, setFollow] = createSignal(false)
   const [lastFollowed, setLastFollowed] = createSignal<string | null>(null)
   const [screen, setScreen] = createSignal<ScreenHandle | null>(null)
@@ -441,6 +483,15 @@ export function DialogLiveShare() {
         <div class="flex gap-2 border-b border-border-base pb-2">
           <button
             class={`px-3 py-1.5 text-sm rounded-t ${
+              tab() === "team" ? "bg-fill-accent text-text-on-accent" : "text-text-secondary hover:bg-fill-hover"
+            }`}
+            onClick={() => setTab("team")}
+            title="Auto-join the relay session pre-provisioned for your team"
+          >
+            Team Session
+          </button>
+          <button
+            class={`px-3 py-1.5 text-sm rounded-t ${
               tab() === "host" ? "bg-fill-accent text-text-on-accent" : "text-text-secondary hover:bg-fill-hover"
             }`}
             onClick={() => setTab("host")}
@@ -456,6 +507,77 @@ export function DialogLiveShare() {
             Join Session
           </button>
         </div>
+
+        <Show when={tab() === "team"}>
+          <Show
+            when={!teamRelayLoading()}
+            fallback={<div class="text-sm text-text-secondary">Loading team relay…</div>}
+          >
+            <Show
+              when={teamRelay()}
+              fallback={
+                <div class="flex flex-col gap-3 text-sm text-text-secondary">
+                  <div>
+                    No team available. Create a team from the workspace switcher (top-left), then
+                    return here — every member gets auto-join, zero setup.
+                  </div>
+                </div>
+              }
+            >
+              {(r) => (
+                <div class="flex flex-col gap-3">
+                  <div class="rounded border border-border-base bg-surface-weak/40 px-3 py-2 text-sm">
+                    <div class="text-text-base">
+                      Team: <span class="font-medium text-text-strong">{r().teamName ?? r().teamId}</span>
+                    </div>
+                    <div class="text-12-regular text-text-weak mt-0.5">
+                      Relay: <code class="font-mono">{r().relayUrl}</code>
+                    </div>
+                    <div class="text-12-regular text-text-weak">
+                      Session code: <code class="font-mono">{r().code}</code>
+                    </div>
+                    <div class="text-12-regular text-text-weak">
+                      Your role: <span class="font-medium">{r().canHost ? "Host (owner)" : "Client (member)"}</span>
+                    </div>
+                  </div>
+                  <Show when={r().canHost}>
+                    <Button
+                      onClick={async () => {
+                        // Reuse the same host flow as the manual tab:
+                        // startShare() reads relayInput/tokenInput, so we
+                        // pre-fill them with the team's auto-provisioned
+                        // coordinates and the host flow takes over from
+                        // there. Same code on all members → seamless join.
+                        setRelayInput(r().relayUrl)
+                        setTokenInput(r().token)
+                        await startShare()
+                      }}
+                      disabled={status().active}
+                    >
+                      {status().active ? "Hosting…" : "Start hosting team session"}
+                    </Button>
+                  </Show>
+                  <Show when={!r().canHost}>
+                    <Button
+                      onClick={async () => {
+                        setRelayInput(r().relayUrl)
+                        setTokenInput(r().token)
+                        setInput(r().code)
+                        await joinSession()
+                      }}
+                    >
+                      Join team session
+                    </Button>
+                    <div class="text-12-regular text-text-weak">
+                      Only the team owner can host. As a member, click Join to enter the session
+                      once the owner has started it.
+                    </div>
+                  </Show>
+                </div>
+              )}
+            </Show>
+          </Show>
+        </Show>
 
         <Show when={tab() === "host"}>
           <Show

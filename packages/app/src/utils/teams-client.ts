@@ -326,10 +326,26 @@ async function accountJson(path: string, body: unknown): Promise<AccountResult> 
   return normalize(parsed as AccountResult | AccountOk)
 }
 
+/** LiveShare relay coordinates pre-provisioned for a team. */
+export interface TeamRelay {
+  /** WSS URL of the relay server (e.g. wss://ai.crimecode.cc/relay). */
+  relayUrl: string
+  /** Session code shared by all team members (deterministic from teamId). */
+  code: string
+  /** Client token — every member uses this to authenticate join. */
+  token: string
+  /** Host key — only owner receives a non-null value. */
+  key: string | null
+  role: "host" | "client"
+  canHost: boolean
+}
+
 export interface TeamsClient {
   list(): Promise<{ teams: TeamSummary[] }>
   create(name: string): Promise<{ team: TeamSummary }>
   detail(id: string): Promise<TeamDetail>
+  /** Auto-provisioned LiveShare relay coordinates for the team. */
+  relay(id: string): Promise<TeamRelay>
   rename(id: string, name: string): Promise<{ team: TeamSummary }>
   remove(id: string): Promise<{ ok: true }>
   addMember(id: string, identifier: string): Promise<{ mode: "added" | "invited" }>
@@ -400,6 +416,7 @@ function desktopClient(): TeamsClient {
     list: () => api().list(),
     create: (name) => api().create(name),
     detail: (id) => api().detail(id),
+    relay: (id) => api().relay(id),
     rename: (id, name) => api().rename(id, name),
     remove: (id) => api().delete(id),
     addMember: (id, identifier) => api().addMember(id, identifier),
@@ -562,6 +579,7 @@ function webClient(): TeamsClient {
     list: () => json(`/license/teams`),
     create: (name) => json(`/license/teams`, { method: "POST", body: JSON.stringify({ name }) }),
     detail: (id) => json(`/license/teams/${encodeURIComponent(id)}`),
+    relay: (id) => json(`/license/teams/${encodeURIComponent(id)}/relay`),
     rename: (id, name) =>
       json(`/license/teams/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }),
     remove: (id) => json(`/license/teams/${encodeURIComponent(id)}`, { method: "DELETE" }),

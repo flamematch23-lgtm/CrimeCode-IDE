@@ -883,6 +883,56 @@ export const LicenseRoutes = lazy(() => {
     return c.json(detail)
   })
 
+  // ── GET /teams/:id/relay — auth required, members-only ─────────────
+  // Returns LiveShare relay coordinates for the team. Codes and tokens
+  // are HMAC-derived from the team id so they're deterministic across
+  // server restarts and don't need any DB schema. All members share
+  // the same code; the owner gets a host key (allowed to host a live
+  // session), members get a client token (allowed to join). When the
+  // owner connects as host, every other member's frontend can auto-
+  // join the same code seamlessly — "team Live Share, zero setup".
+  app.get("/teams/:id/relay", async (c) => {
+    const sess = sessionGuard(c as never)
+    if (!sess) return c.json({ error: "unauthorized" }, 401)
+    const teamId = c.req.param("id")
+    const { getMemberRole } = await import("../../license/teams")
+    const role = getMemberRole(teamId, sess.sub)
+    if (!role) return c.json({ error: "not_a_team_member" }, 403)
+
+    // HMAC-derived secrets: only people with LICENSE_HMAC_SECRET can mint
+    // valid codes/tokens. Same secret used everywhere else in license
+    // signing — guaranteed present in prod.
+    const secret =
+      process.env["LICENSE_HMAC_SECRET"] ||
+      process.env["OPENCODE_LICENSE_HMAC_SECRET"] ||
+      "insecure-dev-only"
+    const hmac = (label: string) => {
+      const { createHmac } = require("node:crypto") as typeof import("node:crypto")
+      return createHmac("sha256", secret).update(`${label}:${teamId}`).digest("base64url").slice(0, 32)
+    }
+    const code = `team-${teamId}`.slice(0, 32)
+    const token = hmac("relay-client")
+    const hostKey = hmac("relay-host")
+
+    // Public relay URL — wired to packages/relay via Caddy reverse proxy
+    // at https://ai.crimecode.cc/relay → 127.0.0.1:3747. Override per
+    // self-hosted deployments via env var.
+    const relayUrl =
+      process.env["CRIMECODE_RELAY_URL"] || "wss://ai.crimecode.cc/relay"
+
+    return c.json({
+      relayUrl,
+      code,
+      token,
+      // Only owners receive the host key — members can't accidentally
+      // hijack the session by starting their own host on the same code.
+      key: role === "owner" ? hostKey : null,
+      role: role === "owner" ? "host" : "client",
+      // Hint for the UI: should we offer "Start hosting" or "Join only".
+      canHost: role === "owner",
+    })
+  })
+
   app.patch("/teams/:id", async (c) => {
     const sess = sessionGuard(c as never)
     if (!sess) return c.json({ error: "unauthorized" }, 401)

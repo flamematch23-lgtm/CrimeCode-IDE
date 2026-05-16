@@ -687,6 +687,12 @@ export function registerIpcHandlers(deps: Deps) {
     }),
   )
   ipcMain.handle("teams-detail", (_e, teamId: string) => teamJson(`/license/teams/${encodeURIComponent(teamId)}`))
+  // LiveShare relay coordinates for a team — fetched on demand by the
+  // dialog-live-share "Team Session" tab to auto-fill relay URL +
+  // code + token. Owner gets host key, members get client token.
+  ipcMain.handle("teams-relay", (_e, teamId: string) =>
+    teamJson(`/license/teams/${encodeURIComponent(teamId)}/relay`),
+  )
   ipcMain.handle("teams-rename", (_e, teamId: string, name: string) =>
     teamJson(`/license/teams/${encodeURIComponent(teamId)}`, {
       method: "PATCH",

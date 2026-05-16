@@ -127,6 +127,7 @@ const api: ElectronAPI = {
     list: () => ipcRenderer.invoke("teams-list"),
     create: (name: string) => ipcRenderer.invoke("teams-create", name),
     detail: (id: string) => ipcRenderer.invoke("teams-detail", id),
+    relay: (id: string) => ipcRenderer.invoke("teams-relay", id),
     rename: (id: string, name: string) => ipcRenderer.invoke("teams-rename", id, name),
     delete: (id: string) => ipcRenderer.invoke("teams-delete", id),
     addMember: (id: string, identifier: string) => ipcRenderer.invoke("teams-add-member", id, identifier),

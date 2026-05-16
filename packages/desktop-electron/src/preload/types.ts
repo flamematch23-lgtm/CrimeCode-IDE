@@ -229,6 +229,15 @@ export type ElectronAPI = {
     readonly list: () => Promise<{ teams: Array<TeamSummary> }>
     readonly create: (name: string) => Promise<{ team: TeamSummary }>
     readonly detail: (id: string) => Promise<TeamDetailPayload>
+    /** LiveShare relay coordinates auto-provisioned for the team. */
+    readonly relay: (id: string) => Promise<{
+      relayUrl: string
+      code: string
+      token: string
+      key: string | null
+      role: "host" | "client"
+      canHost: boolean
+    }>
     readonly rename: (id: string, name: string) => Promise<{ team: TeamSummary }>
     readonly delete: (id: string) => Promise<{ ok: true }>
     readonly addMember: (id: string, identifier: string) => Promise<AddMemberPayload>
