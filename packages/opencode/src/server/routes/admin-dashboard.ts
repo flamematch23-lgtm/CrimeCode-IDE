@@ -1717,7 +1717,10 @@ export function adminDashboardRouter(): Hono {
 
   // ── Step 3: Audit log (advanced) ───────────────────────────────
   r.get("/api/audit", (c) => {
-    const q = c.req.query
+    // Bind to keep `this` pointing at c.req — Hono's c.req.query is a
+    // method, plain destructuring loses the binding and throws
+    // "undefined is not an object (this.url)".
+    const q = c.req.query.bind(c.req)
     return c.json(
       listAuditAdvanced({
         actor: q("actor") || undefined,
@@ -1732,7 +1735,7 @@ export function adminDashboardRouter(): Hono {
   })
 
   r.get("/api/audit/export.csv", (c) => {
-    const q = c.req.query
+    const q = c.req.query.bind(c.req)
     const csv = audtCsvExport({
       actor: q("actor") || undefined,
       action: q("action") || undefined,
