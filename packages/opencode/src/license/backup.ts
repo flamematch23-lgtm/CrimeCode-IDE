@@ -107,10 +107,22 @@ function objectKey(): string {
   return `licenses/${yyyy}/${mm}/${dd}/licenses-${yyyy}${mm}${dd}T${hhmmss}Z.db.gz`
 }
 
+// In-memory cache of the most recent backup outcome — shown by the admin
+// dashboard so the operator can tell at a glance if the cron is healthy.
+// Survives only the process lifetime, which matches its purpose (a
+// "since last boot, has the scheduler ticked?" indicator).
+let _lastBackup: { ok: boolean; at: number; key?: string; size?: number; error?: string } | null = null
+
+export function getLastBackupInfo(): typeof _lastBackup {
+  return _lastBackup
+}
+
 export async function backupOnce(): Promise<{ ok: true; key: string; size: number } | { ok: false; error: string }> {
   const cfg = s3Config()
   if (!cfg) {
-    return { ok: false, error: "S3 env vars not configured" }
+    const result = { ok: false as const, error: "S3 env vars not configured" }
+    _lastBackup = { ok: false, at: Math.floor(Date.now() / 1000), error: result.error }
+    return result
   }
   // Atomic snapshot via VACUUM INTO — produces a clean .db file we can ship.
   const tmpPath = join(tmpdir(), `licenses-snapshot-${Date.now()}.db`)
@@ -123,11 +135,13 @@ export async function backupOnce(): Promise<{ ok: true; key: string; size: numbe
     await putObject(key, gz, "application/gzip")
     const stats = statSync(tmpPath)
     log.info("backup uploaded", { key, raw: stats.size, gz: gz.byteLength })
+    _lastBackup = { ok: true, at: Math.floor(Date.now() / 1000), key, size: gz.byteLength }
     return { ok: true, key, size: gz.byteLength }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     log.warn("backup failed", { error: msg })
     captureException(err, { tags: { surface: "license-backup" } })
+    _lastBackup = { ok: false, at: Math.floor(Date.now() / 1000), error: msg }
     return { ok: false, error: msg }
   } finally {
     try {

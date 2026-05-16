@@ -35,6 +35,18 @@ import {
   rejectCustomer,
   revokeSession,
 } from "../../license/auth"
+import {
+  getCrypoverseStats,
+  getInvoiceByTransactionId as getCrypoverseInvoice,
+  listInvoicesForAdmin,
+  retryListener as crypoverseRetryListener,
+} from "../../license/crypoverse"
+import {
+  getTeamDetailForAdmin,
+  listAllTeamsForAdmin,
+  transferOwnershipAsAdmin,
+} from "../../license/teams"
+import { getSystemHealth } from "../../license/health"
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -162,15 +174,18 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       <a href="#customers" data-route="customers"><span class="ic">👤</span>Customers</a>
       <a href="#pending"   data-route="pending"><span class="ic">⏳</span>Pending approvals<span class="badge" id="nav-pending-count" hidden>0</span></a>
       <div class="sect">Money</div>
-      <a href="#orders"   data-route="orders"><span class="ic">📦</span>Orders<span class="badge" id="nav-orders-count" hidden>0</span></a>
-      <a href="#licenses" data-route="licenses"><span class="ic">🎟️</span>Licenses</a>
+      <a href="#orders"     data-route="orders"><span class="ic">📦</span>Orders<span class="badge" id="nav-orders-count" hidden>0</span></a>
+      <a href="#licenses"   data-route="licenses"><span class="ic">🎟️</span>Licenses</a>
+      <a href="#crypoverse" data-route="crypoverse"><span class="ic">💳</span>Crypoverse</a>
+      <div class="sect">Workspace</div>
+      <a href="#teams"      data-route="teams"><span class="ic">👥</span>Teams</a>
+      <div class="sect">System</div>
+      <a href="#health"     data-route="health"><span class="ic">📡</span>Health</a>
       <div class="sect">Coming soon</div>
-      <a href="#teams"    data-route="teams"   style="opacity:0.55"><span class="ic">👥</span>Teams</a>
-      <a href="#payments" data-route="payments" style="opacity:0.55"><span class="ic">💳</span>Payments</a>
-      <a href="#health"   data-route="health"   style="opacity:0.55"><span class="ic">📡</span>Health</a>
-      <a href="#audit"    data-route="audit"    style="opacity:0.55"><span class="ic">📋</span>Audit</a>
-      <a href="#comms"    data-route="comms"    style="opacity:0.55"><span class="ic">📢</span>Communications</a>
-      <a href="#settings" data-route="settings" style="opacity:0.55"><span class="ic">⚙️</span>Settings</a>
+      <a href="#payments"   data-route="payments" style="opacity:0.55"><span class="ic">💼</span>Payments</a>
+      <a href="#audit"      data-route="audit"    style="opacity:0.55"><span class="ic">📋</span>Audit</a>
+      <a href="#comms"      data-route="comms"    style="opacity:0.55"><span class="ic">📢</span>Communications</a>
+      <a href="#settings"   data-route="settings" style="opacity:0.55"><span class="ic">⚙️</span>Settings</a>
     </nav>
   </aside>
   <div>
@@ -239,9 +254,10 @@ const ROUTES = {
   pending:   renderPendingApprovals,
   orders:    renderOrders,
   licenses:  renderLicenses,
-  teams:     renderComingSoon("Teams"),
+  crypoverse: renderCrypoverseList,
+  teams:     renderTeamsList,
   payments:  renderComingSoon("Payments"),
-  health:    renderComingSoon("System Health"),
+  health:    renderHealth,
   audit:     renderComingSoon("Audit log"),
   comms:     renderComingSoon("Communications"),
   settings:  renderComingSoon("Settings"),
@@ -250,9 +266,9 @@ function route() {
   const hash = (location.hash || "#overview").slice(1);
   const [name, ...args] = hash.split("/");
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === name));
-  if (name === "customers" && args[0]) {
-    return renderCustomerDetail(args[0]);
-  }
+  if (name === "customers" && args[0]) return renderCustomerDetail(args[0]);
+  if (name === "crypoverse" && args[0]) return renderCrypoverseDetail(args[0]);
+  if (name === "teams" && args[0]) return renderTeamDetail(args[0]);
   const fn = ROUTES[name] || ROUTES.overview;
   fn(args);
 }
@@ -499,6 +515,253 @@ async function renderPendingApprovals() {
       try { await api("/customers/" + b.dataset.reject + "/reject", { method: "POST", body: "{}" }); toast("Rejected"); renderPendingApprovals(); } catch (e) { toast(e.message, { err: true }); }
     }));
   } catch (err) { toast(err.message, { err: true }); }
+}
+
+// ── Crypoverse invoices ───────────────────────────────────────────────
+async function renderCrypoverseList() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">Crypoverse invoices</h1>'
+    + '<div class="kpi-grid" id="cv-kpis"></div>'
+    + '<section class="card">'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
+    +   '<select id="cv-filter-status" class="ghost" style="background:#0d0d12;color:#ccc;padding:7px 10px;border-radius:7px;border:1px solid rgba(255,255,255,0.15);font:inherit">'
+    +     '<option value="all">All statuses</option>'
+    +     '<option value="open">🟡 Open (initiated/pending)</option>'
+    +     '<option value="paid">✅ Paid</option>'
+    +     '<option value="failed">❌ Failed / expired</option>'
+    +   '</select>'
+    +   '<input id="cv-filter-q" placeholder="Search by tx, order, @handle…" style="flex:1;min-width:240px;background:#0d0d12;color:#ccc;padding:7px 12px;border-radius:7px;border:1px solid rgba(255,255,255,0.15);font:inherit" />'
+    +   '<button class="ghost" id="cv-reload">↻ Reload</button>'
+    + '</div>'
+    + '<div id="cv-table"><p class="empty">Loading…</p></div></section>';
+  async function reload() {
+    try {
+      const [stats, list] = await Promise.all([
+        api("/crypoverse/stats"),
+        api("/crypoverse/invoices?status=" + encodeURIComponent($("#cv-filter-status").value) + "&q=" + encodeURIComponent($("#cv-filter-q").value)),
+      ]);
+      $("#cv-kpis").innerHTML = [
+        kpi("Total revenue", fmtUsd(stats.total_revenue_usd)),
+        kpi("Paid invoices", fmtNum(stats.paid_invoices), stats.total_invoices + " created"),
+        kpi("Open invoices", fmtNum(stats.open_invoices)),
+        kpi("Failed", fmtNum(stats.failed_invoices)),
+        kpi("Conversion", stats.conversion_rate_pct + "%"),
+        kpi("Avg time-to-pay", stats.avg_time_to_pay_minutes ? stats.avg_time_to_pay_minutes + " min" : "—"),
+        kpi("Listeners active", fmtNum(stats.listeners_active), "SSE streams"),
+      ].join("");
+      const invoices = list.invoices;
+      $("#cv-table").innerHTML = invoices.length
+        ? '<table><thead><tr><th>Transaction</th><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th><th>Created</th><th>Paid</th><th></th></tr></thead><tbody>'
+          + invoices.map((i) => {
+              const cls = ["paid","confirmed","completed","succeeded"].includes(i.status) ? "valid"
+                        : ["expired","cancelled","canceled","failed","refunded"].includes(i.status) ? "revoked"
+                        : "pending";
+              return '<tr class="click" onclick="location.hash=\'crypoverse/' + escapeHtml(i.transaction_id) + "'\">"
+                + '<td class="mono" style="font-size:11px">' + escapeHtml(i.transaction_id.slice(0,16)) + '…</td>'
+                + '<td class="mono">' + escapeHtml(i.order_id) + "</td>"
+                + "<td>" + (i.customer_telegram ? "@" + escapeHtml(i.customer_telegram.replace(/^@/, "")) : '<span style="color:#666">—</span>') + "</td>"
+                + "<td><strong>" + fmtUsd(i.amount_usd) + "</strong></td>"
+                + '<td><span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span></td>"
+                + "<td>" + escapeHtml(fmtTs(i.created_at)) + "</td>"
+                + "<td>" + escapeHtml(fmtRel(i.paid_at)) + "</td>"
+                + '<td><button class="ghost" onclick="event.stopPropagation();location.hash=\'crypoverse/' + escapeHtml(i.transaction_id) + "'\">Open</button></td>"
+                + "</tr>";
+            }).join("")
+          + "</tbody></table>"
+        : '<p class="empty">No invoices match these filters.</p>';
+    } catch (err) { toast(err.message, { err: true }); }
+  }
+  $("#cv-filter-status").addEventListener("change", reload);
+  $("#cv-reload").addEventListener("click", reload);
+  let qTimer = null;
+  $("#cv-filter-q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(reload, 250); });
+  reload();
+}
+
+async function renderCrypoverseDetail(tx) {
+  const view = $("#view");
+  view.innerHTML = '<div class="crumb"><a href="#crypoverse" class="link">← Crypoverse invoices</a></div><section class="card"><p class="empty">Loading…</p></section>';
+  try {
+    const i = await api("/crypoverse/invoices/" + encodeURIComponent(tx));
+    const cls = ["paid","confirmed","completed","succeeded"].includes(i.status) ? "valid"
+              : ["expired","cancelled","canceled","failed","refunded"].includes(i.status) ? "revoked"
+              : "pending";
+    const lastEv = i.last_event_parsed ? JSON.stringify(i.last_event_parsed, null, 2) : (i.last_event_payload || "—");
+    view.innerHTML =
+        '<div class="crumb"><a href="#crypoverse" class="link">← Crypoverse invoices</a></div>'
+      + '<section class="card">'
+      + '<h1 class="page" style="margin-bottom:6px">Invoice <span class="mono" style="font-size:14px;color:#888">' + escapeHtml(i.transaction_id) + "</span></h1>"
+      + '<div style="color:#888;margin-bottom:18px">Order <a href="#customers" class="link mono">' + escapeHtml(i.order_id) + "</a> · <strong>" + fmtUsd(i.amount_usd) + "</strong> · "
+      +   'Status <span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span> · Created " + escapeHtml(fmtTs(i.created_at)) + "</div>"
+      + '<table style="margin-bottom:18px">'
+      +   '<tr><th>Internal id</th><td class="mono">' + escapeHtml(i.id) + "</td></tr>"
+      +   '<tr><th>Transaction id</th><td class="mono">' + escapeHtml(i.transaction_id) + "</td></tr>"
+      +   '<tr><th>Order id</th><td class="mono">' + escapeHtml(i.order_id) + "</td></tr>"
+      +   "<tr><th>Amount</th><td><strong>" + fmtUsd(i.amount_usd) + "</strong></td></tr>"
+      +   '<tr><th>Status</th><td><span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span></td></tr>"
+      +   "<tr><th>Order status</th><td>" + (i.order_status ? '<span class="pill ' + escapeHtml(i.order_status) + '">' + escapeHtml(i.order_status) + "</span>" : "—") + "</td></tr>"
+      +   "<tr><th>Created</th><td>" + escapeHtml(fmtTs(i.created_at)) + "</td></tr>"
+      +   "<tr><th>Last event</th><td>" + escapeHtml(fmtRel(i.last_event_at)) + "</td></tr>"
+      +   "<tr><th>Paid</th><td>" + escapeHtml(fmtTs(i.paid_at)) + "</td></tr>"
+      +   "<tr><th>Paid tx hash</th><td class=\"mono\" style=\"font-size:11px;word-break:break-all\">" + escapeHtml(i.paid_tx_hash || "—") + "</td></tr>"
+      +   "<tr><th>Pay URL</th><td><a class=\"link mono\" href=\"" + escapeHtml(i.redirect_url) + "\" target=\"_blank\" rel=\"noopener\">" + escapeHtml(i.redirect_url) + "</a></td></tr>"
+      + "</table>"
+      + '<h2>Last SSE event payload</h2>'
+      + '<pre class="mono" style="background:#0d0d12;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;overflow:auto;max-height:260px;font-size:11px">' + escapeHtml(lastEv) + "</pre>"
+      + '<div style="margin-top:14px"><button id="cv-retry">🔄 Retry SSE listener</button> <button class="ghost" onclick="location.reload()">↻ Reload page</button></div>'
+      + "</section>";
+    $("#cv-retry").addEventListener("click", async () => {
+      try {
+        const r = await api("/crypoverse/invoices/" + encodeURIComponent(i.transaction_id) + "/retry", { method: "POST", body: "{}" });
+        toast(r.ok ? (r.was_running ? "Listener restarted" : "Listener started") : ("Cannot retry: " + (r.reason || "unknown")), { err: !r.ok });
+      } catch (e) { toast(e.message, { err: true }); }
+    });
+  } catch (err) { view.innerHTML = '<section class="card"><p class="empty">' + escapeHtml(err.message) + "</p></section>"; }
+}
+
+// ── Teams ─────────────────────────────────────────────────────────────
+async function renderTeamsList() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">Teams</h1><section class="card" id="teams-card"><p class="empty">Loading…</p></section>';
+  try {
+    const r = await api("/teams?limit=200");
+    if (!r.teams.length) { $("#teams-card").innerHTML = '<p class="empty">No teams yet.</p>'; return; }
+    $("#teams-card").innerHTML = '<table><thead><tr><th>Name</th><th>ID</th><th>Owner</th><th>Members</th><th>Active sessions</th><th>Created</th></tr></thead><tbody>'
+      + r.teams.map((t) =>
+          '<tr class="click" onclick="location.hash=\'teams/' + escapeHtml(t.id) + "'\">"
+          + "<td><strong>" + escapeHtml(t.name) + "</strong></td>"
+          + '<td class="mono" style="font-size:11px">' + escapeHtml(t.id) + "</td>"
+          + "<td>" + escapeHtml(t.owner_display || t.owner_customer_id) + "</td>"
+          + "<td>" + fmtNum(t.member_count) + "</td>"
+          + "<td>" + (t.active_session_count > 0 ? '<span class="pill valid">' + t.active_session_count + " live</span>" : '<span style="color:#666">—</span>') + "</td>"
+          + "<td>" + escapeHtml(fmtDate(t.created_at)) + "</td>"
+          + "</tr>").join("")
+      + "</tbody></table>";
+  } catch (err) { toast(err.message, { err: true }); }
+}
+
+async function renderTeamDetail(id) {
+  const view = $("#view");
+  view.innerHTML = '<div class="crumb"><a href="#teams" class="link">← Teams</a></div><section class="card"><p class="empty">Loading…</p></section>';
+  try {
+    const d = await api("/teams/" + encodeURIComponent(id));
+    view.innerHTML =
+        '<div class="crumb"><a href="#teams" class="link">← Teams</a></div>'
+      + '<section class="card">'
+      +   '<h1 class="page" style="margin-bottom:4px">' + escapeHtml(d.team.name) + "</h1>"
+      +   '<div style="color:#888;margin-bottom:18px"><span class="mono">' + escapeHtml(d.team.id) + "</span> · created " + escapeHtml(fmtDate(d.team.created_at)) + " · "
+      +     d.members.length + " members · " + d.invites.length + " invites · " + d.active_sessions.length + " active sessions</div>"
+      +   '<h2>Members</h2>'
+      +   '<table style="margin-bottom:18px"><thead><tr><th>Customer</th><th>Display</th><th>Telegram</th><th>Role</th><th>Joined</th><th>Transfer ownership</th></tr></thead><tbody>'
+      +     d.members.map((m) =>
+              '<tr><td class="mono" style="font-size:11px">' + escapeHtml(m.customer_id) + "</td>"
+              + "<td>" + escapeHtml(m.display || "—") + "</td>"
+              + "<td>" + (m.telegram ? "@" + escapeHtml(m.telegram.replace(/^@/, "")) : "—") + "</td>"
+              + "<td><strong>" + escapeHtml(m.role) + "</strong></td>"
+              + "<td>" + escapeHtml(fmtDate(m.added_at)) + "</td>"
+              + "<td>" + (m.role !== "owner" ? '<button class="ghost" data-transfer="' + escapeHtml(m.customer_id) + '">→ Make owner</button>' : '<span style="color:#666">owner</span>') + "</td>"
+              + "</tr>").join("")
+      +   "</tbody></table>"
+      +   '<h2>Active sessions (' + d.active_sessions.length + ")</h2>"
+      +   (d.active_sessions.length === 0
+          ? '<p class="empty">No active workspaces.</p>'
+          : '<table style="margin-bottom:18px"><thead><tr><th>Session</th><th>Host</th><th>Title</th><th>Started</th><th>Last heartbeat</th></tr></thead><tbody>'
+            + d.active_sessions.map((s) =>
+                '<tr><td class="mono" style="font-size:11px">' + escapeHtml(s.id) + "</td>"
+                + '<td class="mono" style="font-size:11px">' + escapeHtml(s.host_customer_id) + "</td>"
+                + "<td>" + escapeHtml(s.title || "—") + "</td>"
+                + "<td>" + escapeHtml(fmtTs(s.created_at)) + "</td>"
+                + "<td>" + escapeHtml(fmtRel(s.last_heartbeat_at)) + "</td>"
+                + "</tr>").join("")
+            + "</tbody></table>")
+      +   "<h2>Pending invites (" + d.invites.length + ")</h2>"
+      +   (d.invites.length === 0
+          ? '<p class="empty">No outstanding invites.</p>'
+          : '<table><thead><tr><th>Identifier</th><th>Role</th><th>Invited by</th><th>Created</th></tr></thead><tbody>'
+            + d.invites.map((iv) =>
+                "<tr><td>" + escapeHtml(iv.identifier) + "</td>"
+                + "<td>" + escapeHtml(iv.role) + "</td>"
+                + '<td class="mono" style="font-size:11px">' + escapeHtml(iv.invited_by) + "</td>"
+                + "<td>" + escapeHtml(fmtTs(iv.created_at)) + "</td>"
+                + "</tr>").join("")
+            + "</tbody></table>")
+      + "</section>";
+    $$('button[data-transfer]').forEach((b) => b.addEventListener("click", async () => {
+      const nid = b.dataset.transfer;
+      if (!confirm("Transfer ownership of '" + d.team.name + "' to " + nid + "?")) return;
+      try {
+        await api("/teams/" + encodeURIComponent(id) + "/transfer", { method: "POST", body: JSON.stringify({ new_owner_customer_id: nid }) });
+        toast("Ownership transferred");
+        renderTeamDetail(id);
+      } catch (e) { toast(e.message, { err: true }); }
+    }));
+  } catch (err) { view.innerHTML = '<section class="card"><p class="empty">' + escapeHtml(err.message) + "</p></section>"; }
+}
+
+// ── System health ─────────────────────────────────────────────────────
+async function renderHealth() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">System health</h1><div id="hc"><p class="empty">Loading…</p></div>';
+  try {
+    const h = await api("/health");
+    const fmtBytes = (b) => {
+      if (b < 1024) return b + " B";
+      if (b < 1024*1024) return (b/1024).toFixed(1) + " KB";
+      if (b < 1024*1024*1024) return (b/1024/1024).toFixed(1) + " MB";
+      return (b/1024/1024/1024).toFixed(2) + " GB";
+    };
+    const fmtUptime = (s) => {
+      const d = Math.floor(s/86400), hrs = Math.floor((s%86400)/3600), mns = Math.floor((s%3600)/60);
+      return (d ? d+"d " : "") + (hrs ? hrs+"h " : "") + mns + "m";
+    };
+    const okBadge = (v) => v ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>';
+    const sub = (title, body) => '<section class="card"><h2>' + title + "</h2>" + body + "</section>";
+    $("#hc").innerHTML =
+      '<div class="kpi-grid">'
+      + kpi("Uptime", fmtUptime(h.process.uptime_seconds), "pid " + h.process.pid)
+      + kpi("RSS memory", fmtBytes(h.process.rss_bytes), "heap " + fmtBytes(h.process.heap_used_bytes) + " / " + fmtBytes(h.process.heap_total_bytes))
+      + kpi("DB size", h.db ? fmtBytes(h.db.file_size_bytes) : "—", h.db ? h.db.page_count + " pages · " + h.db.journal_mode : "")
+      + kpi("Crypoverse SSE", h.workers.crypoverse_listeners_active + "", "active listeners")
+      + "</div>"
+      + sub("Background workers", '<table>'
+          + "<tr><th>Payment poller (on-chain)</th><td>" + okBadge(h.workers.payment_poller_enabled) + "</td></tr>"
+          + "<tr><th>Crypoverse provider</th><td>" + okBadge(h.workers.crypoverse_enabled) + "</td></tr>"
+          + "<tr><th>Crypoverse listeners</th><td><strong>" + h.workers.crypoverse_listeners_active + "</strong> running</td></tr>"
+          + "<tr><th>Backup scheduler</th><td>" + okBadge(h.workers.backup_scheduler_enabled) + "</td></tr>"
+          + "<tr><th>Last backup</th><td>" + (h.workers.last_backup
+              ? (h.workers.last_backup.ok
+                  ? '<span class="pill valid">ok</span> ' + escapeHtml(fmtRel(h.workers.last_backup.at)) + " · " + fmtBytes(h.workers.last_backup.size || 0)
+                  : '<span class="pill revoked">failed</span> ' + escapeHtml(fmtRel(h.workers.last_backup.at)) + " · " + escapeHtml(h.workers.last_backup.error || ""))
+              : '<span style="color:#666">never (no backup since boot)</span>') + "</td></tr>"
+          + "</table>")
+      + sub("Environment", '<table>'
+          + Object.entries(h.env).map(([k,v]) => "<tr><th>" + escapeHtml(k.replaceAll("_", " ")) + "</th><td>" + okBadge(v) + "</td></tr>").join("")
+          + "</table>")
+      + sub("Database", h.db ? '<table>'
+          + "<tr><th>File size</th><td>" + fmtBytes(h.db.file_size_bytes) + "</td></tr>"
+          + "<tr><th>Pages</th><td>" + fmtNum(h.db.page_count) + " × " + fmtBytes(h.db.page_size) + "</td></tr>"
+          + "<tr><th>Journal mode</th><td>" + escapeHtml(h.db.journal_mode) + "</td></tr>"
+          + "<tr><th>Customers</th><td>" + fmtNum(h.db.customers) + "</td></tr>"
+          + "<tr><th>Orders</th><td>" + fmtNum(h.db.orders) + "</td></tr>"
+          + "<tr><th>Licenses</th><td>" + fmtNum(h.db.licenses) + "</td></tr>"
+          + "<tr><th>Audit rows</th><td>" + fmtNum(h.db.audit_rows) + "</td></tr>"
+          + "</table>" : '<p class="empty">DB unreachable</p>')
+      + sub("Recent errors (last 20)", h.recent_errors.length === 0
+          ? '<p class="empty">No errors recorded.</p>'
+          : '<table><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody>'
+            + h.recent_errors.map((e) =>
+                '<tr><td>' + escapeHtml(fmtTs(e.ts)) + "</td>"
+                + '<td class="mono">' + escapeHtml(e.action) + "</td>"
+                + '<td class="mono" style="font-size:11px;word-break:break-all">' + escapeHtml((e.details || "").slice(0,180)) + "</td>"
+                + "</tr>").join("")
+            + "</tbody></table>")
+      + sub("Runtime", '<table>'
+          + "<tr><th>Bun</th><td>" + escapeHtml(h.process.bun_version || "—") + "</td></tr>"
+          + "<tr><th>Node</th><td>" + escapeHtml(h.process.node_version) + "</td></tr>"
+          + "<tr><th>PID</th><td>" + h.process.pid + "</td></tr>"
+          + "<tr><th>Started</th><td>" + escapeHtml(fmtTs(h.process.started_at)) + "</td></tr>"
+          + "</table>");
+  } catch (err) { $("#hc").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
 }
 
 function renderComingSoon(name) { return function () { $("#view").innerHTML = '<h1 class="page">' + escapeHtml(name) + '</h1><section class="card"><p class="empty">Coming in the next iteration of the dashboard.</p></section>'; }; }
@@ -759,6 +1022,69 @@ export function adminDashboardRouter(): Hono {
     const q = c.req.query("q") ?? ""
     return c.json(searchEntities(q))
   })
+
+  // ── Step 2: Crypoverse invoices ────────────────────────────────
+  r.get("/api/crypoverse/stats", (c) => c.json(getCrypoverseStats()))
+
+  r.get("/api/crypoverse/invoices", (c) => {
+    const limit = Number.parseInt(c.req.query("limit") ?? "100", 10) || 100
+    const status = c.req.query("status") ?? "all"
+    const query = c.req.query("q") ?? ""
+    return c.json({
+      invoices: listInvoicesForAdmin({ limit, status, query }),
+    })
+  })
+
+  r.get("/api/crypoverse/invoices/:tx", (c) => {
+    const tx = c.req.param("tx")
+    const inv = getCrypoverseInvoice(tx)
+    if (!inv) return c.json({ error: "not_found" }, 404)
+    // Pretty-print the last event payload if it's valid JSON so the
+    // dashboard can render it nicely.
+    let last_event_parsed: unknown = null
+    if (inv.last_event_payload) {
+      try {
+        last_event_parsed = JSON.parse(inv.last_event_payload)
+      } catch {
+        last_event_parsed = inv.last_event_payload
+      }
+    }
+    return c.json({ ...inv, last_event_parsed })
+  })
+
+  r.post("/api/crypoverse/invoices/:tx/retry", (c) => {
+    const tx = c.req.param("tx")
+    const result = crypoverseRetryListener(tx)
+    return c.json(result)
+  })
+
+  // ── Step 2: Teams ──────────────────────────────────────────────
+  r.get("/api/teams", (c) => {
+    const limit = Number.parseInt(c.req.query("limit") ?? "200", 10) || 200
+    return c.json({ teams: listAllTeamsForAdmin(limit) })
+  })
+
+  r.get("/api/teams/:id", (c) => {
+    const id = c.req.param("id")
+    const d = getTeamDetailForAdmin(id)
+    if (!d) return c.json({ error: "not_found" }, 404)
+    return c.json(d)
+  })
+
+  r.post("/api/teams/:id/transfer", async (c) => {
+    const id = c.req.param("id")
+    const body = (await c.req.json().catch(() => ({}))) as { new_owner_customer_id?: string }
+    if (!body.new_owner_customer_id) return c.json({ error: "missing_new_owner_customer_id" }, 400)
+    try {
+      const team = transferOwnershipAsAdmin(id, body.new_owner_customer_id)
+      return c.json({ ok: true, team })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  // ── Step 2: System health ──────────────────────────────────────
+  r.get("/api/health", (c) => c.json(getSystemHealth()))
 
   return r
 }

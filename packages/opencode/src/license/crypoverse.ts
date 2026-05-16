@@ -215,6 +215,136 @@ export function getInvoiceByTransactionId(transactionId: string): CrypoverseInvo
   )
 }
 
+/**
+ * Admin-friendly invoice list — paginated, optional status filter, joins
+ * the customer telegram handle from the linked order for display. Used by
+ * the production admin dashboard's Crypoverse section.
+ */
+export function listInvoicesForAdmin(opts: {
+  limit?: number
+  status?: string
+  query?: string
+}): Array<CrypoverseInvoiceRow & { customer_telegram: string | null; order_status: string }> {
+  const db = getDb()
+  const limit = Math.max(1, Math.min(500, opts.limit ?? 100))
+  const params: Array<string | number> = []
+  let where = "1=1"
+  if (opts.status && opts.status !== "all") {
+    if (opts.status === "open") {
+      where +=
+        " AND i.status NOT IN ('paid','confirmed','completed','succeeded','expired','cancelled','canceled','failed','refunded')"
+    } else if (opts.status === "paid") {
+      where += " AND i.status IN ('paid','confirmed','completed','succeeded')"
+    } else if (opts.status === "failed") {
+      where += " AND i.status IN ('expired','cancelled','canceled','failed','refunded')"
+    } else {
+      where += " AND i.status = ?"
+      params.push(opts.status)
+    }
+  }
+  if (opts.query) {
+    const like = `%${opts.query.replace(/[%_]/g, (m) => "\\" + m)}%`
+    where +=
+      " AND (i.id LIKE ? ESCAPE '\\' OR i.transaction_id LIKE ? ESCAPE '\\' OR i.order_id LIKE ? ESCAPE '\\' OR o.customer_telegram LIKE ? ESCAPE '\\')"
+    params.push(like, like, like, like)
+  }
+  params.push(limit)
+  return db
+    .prepare<
+      CrypoverseInvoiceRow & { customer_telegram: string | null; order_status: string },
+      typeof params
+    >(
+      `SELECT i.*, o.customer_telegram, o.status AS order_status
+       FROM crypoverse_invoices i
+       LEFT JOIN orders o ON o.id = i.order_id
+       WHERE ${where}
+       ORDER BY i.created_at DESC
+       LIMIT ?`,
+    )
+    .all(...params)
+}
+
+/**
+ * Aggregate stats for the dashboard Crypoverse panel — totals + conversion
+ * rate (paid / created) + average time-to-pay in minutes.
+ */
+export function getCrypoverseStats(): {
+  total_invoices: number
+  open_invoices: number
+  paid_invoices: number
+  failed_invoices: number
+  total_revenue_usd: number
+  conversion_rate_pct: number
+  avg_time_to_pay_minutes: number | null
+  listeners_active: number
+} {
+  const db = getDb()
+  const row = <T>(q: string, params: unknown[] = []) =>
+    db.prepare(q).get(...(params as never)) as T | undefined
+  const total_invoices = (row<{ n: number }>("SELECT COUNT(*) AS n FROM crypoverse_invoices") ?? { n: 0 }).n
+  const open_invoices = (row<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM crypoverse_invoices WHERE status NOT IN ('paid','confirmed','completed','succeeded','expired','cancelled','canceled','failed','refunded')",
+  ) ?? { n: 0 }).n
+  const paid_invoices = (row<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM crypoverse_invoices WHERE status IN ('paid','confirmed','completed','succeeded')",
+  ) ?? { n: 0 }).n
+  const failed_invoices = (row<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM crypoverse_invoices WHERE status IN ('expired','cancelled','canceled','failed','refunded')",
+  ) ?? { n: 0 }).n
+  const total_revenue_usd = (row<{ s: number | null }>(
+    "SELECT SUM(amount_usd) AS s FROM crypoverse_invoices WHERE status IN ('paid','confirmed','completed','succeeded')",
+  ) ?? { s: 0 }).s ?? 0
+  const conversion_rate_pct = total_invoices > 0 ? (paid_invoices / total_invoices) * 100 : 0
+  const avg = row<{ avg_sec: number | null }>(
+    "SELECT AVG(paid_at - created_at) AS avg_sec FROM crypoverse_invoices WHERE paid_at IS NOT NULL",
+  )
+  const avg_time_to_pay_minutes = avg?.avg_sec ? Math.round(avg.avg_sec / 60) : null
+  return {
+    total_invoices,
+    open_invoices,
+    paid_invoices,
+    failed_invoices,
+    total_revenue_usd: Math.round(total_revenue_usd * 100) / 100,
+    conversion_rate_pct: Math.round(conversion_rate_pct * 10) / 10,
+    avg_time_to_pay_minutes,
+    listeners_active: listeners.size,
+  }
+}
+
+/**
+ * Admin operation: forcibly restart the SSE listener for one invoice.
+ * Used when the dashboard shows a stuck "initiated" invoice and the
+ * operator wants to retry without restarting the whole server.
+ */
+export function retryListener(transactionId: string): {
+  ok: boolean
+  reason?: string
+  was_running: boolean
+} {
+  const invoice = getInvoiceByTransactionId(transactionId)
+  if (!invoice) return { ok: false, reason: "not_found", was_running: false }
+  const was_running = listeners.has(transactionId)
+  if (was_running) {
+    const ctrl = listeners.get(transactionId)
+    ctrl?.abort()
+    listeners.delete(transactionId)
+  }
+  if (isTerminalPaid(invoice.status) || isTerminalFailed(invoice.status)) {
+    return { ok: false, reason: "already_terminal", was_running }
+  }
+  void subscribeToInvoice(transactionId).catch((err) => {
+    log.error("retry subscribe failed", {
+      transaction_id: transactionId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
+  return { ok: true, was_running }
+}
+
+export function getListenerCount(): number {
+  return listeners.size
+}
+
 export function listOpenInvoices(): CrypoverseInvoiceRow[] {
   return getDb()
     .prepare<CrypoverseInvoiceRow, []>(

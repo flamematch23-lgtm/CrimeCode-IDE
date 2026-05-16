@@ -138,6 +138,103 @@ export function listTeamsForCustomer(customerId: string): Array<TeamRow & { role
     .all(customerId)
 }
 
+/**
+ * Admin-only: list every team in the system with denormalised member count
+ * and the owner's display handle. Used by the production admin dashboard
+ * (no customer-scope check — caller is authenticated via the admin
+ * BasicAuth gate higher up the stack).
+ */
+export function listAllTeamsForAdmin(limit = 200): Array<TeamRow & {
+  member_count: number
+  active_session_count: number
+  owner_display: string | null
+}> {
+  const db = getDb()
+  return db
+    .prepare<
+      TeamRow & { member_count: number; active_session_count: number; owner_display: string | null },
+      [number]
+    >(
+      `SELECT t.*,
+              (SELECT COUNT(*) FROM team_members WHERE team_id = t.id)                                     AS member_count,
+              (SELECT COUNT(*) FROM team_sessions WHERE team_id = t.id AND ended_at IS NULL)                AS active_session_count,
+              (SELECT COALESCE(c.email, c.telegram, c.id) FROM customers c WHERE c.id = t.owner_customer_id) AS owner_display
+       FROM teams t
+       ORDER BY t.created_at DESC
+       LIMIT ?`,
+    )
+    .all(limit)
+}
+
+/**
+ * Admin-only counterpart of getTeamDetail() — same shape, but skips the
+ * caller-must-be-member check. Returns null only when the team does not
+ * exist. Also returns the team's currently-active sessions (vs. just the
+ * member list) so the dashboard can show live workspaces.
+ */
+export function getTeamDetailForAdmin(teamId: string): (TeamDetail & {
+  active_sessions: TeamSessionRow[]
+}) | null {
+  const team = getTeam(teamId)
+  if (!team) return null
+  const db = getDb()
+  const members = db
+    .prepare<
+      TeamMemberRow & {
+        display: string | null
+        telegram_user_id: number | null
+        telegram: string | null
+      },
+      [string]
+    >(
+      `SELECT tm.team_id, tm.customer_id, tm.role, tm.added_at,
+              COALESCE(c.email, c.telegram, c.id) AS display,
+              c.telegram_user_id, c.telegram
+         FROM team_members tm
+         LEFT JOIN customers c ON c.id = tm.customer_id
+        WHERE tm.team_id = ?
+        ORDER BY tm.role DESC, tm.added_at ASC`,
+    )
+    .all(teamId)
+  const invites = db
+    .prepare<TeamInviteRow, [string]>("SELECT * FROM team_invites WHERE team_id = ? ORDER BY created_at DESC")
+    .all(teamId)
+  const active_sessions = db
+    .prepare<TeamSessionRow, [string]>(
+      "SELECT * FROM team_sessions WHERE team_id = ? AND ended_at IS NULL ORDER BY last_heartbeat_at DESC",
+    )
+    .all(teamId)
+  return { team, members, invites, self_role: "owner", active_sessions }
+}
+
+/**
+ * Admin-only transfer ownership — bypasses the actor check in
+ * transferOwnership(). Returns the updated team row.
+ */
+export function transferOwnershipAsAdmin(teamId: string, newOwnerCustomerId: string): TeamRow {
+  const db = getDb()
+  const team = getTeam(teamId)
+  if (!team) throw new Error("team_not_found")
+  const newOwnerRole = getMemberRole(teamId, newOwnerCustomerId)
+  if (!newOwnerRole) {
+    // Add the new owner as a member first if they're not part of the team.
+    db.prepare(
+      "INSERT INTO team_members (team_id, customer_id, role, added_at) VALUES (?, ?, 'owner', strftime('%s','now'))",
+    ).run(teamId, newOwnerCustomerId)
+  } else {
+    db.prepare("UPDATE team_members SET role = 'owner' WHERE team_id = ? AND customer_id = ?").run(
+      teamId,
+      newOwnerCustomerId,
+    )
+  }
+  db.prepare("UPDATE team_members SET role = 'admin' WHERE team_id = ? AND customer_id = ?").run(
+    teamId,
+    team.owner_customer_id,
+  )
+  db.prepare("UPDATE teams SET owner_customer_id = ? WHERE id = ?").run(newOwnerCustomerId, teamId)
+  return getTeam(teamId)!
+}
+
 export function getTeamDetail(teamId: string, actor: string): TeamDetail | null {
   const team = getTeam(teamId)
   if (!team) return null
