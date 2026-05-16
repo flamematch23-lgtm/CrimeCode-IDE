@@ -224,6 +224,16 @@ CREATE TABLE IF NOT EXISTS crypoverse_invoices (
 CREATE INDEX IF NOT EXISTS crypoverse_invoices_order_idx ON crypoverse_invoices(order_id);
 CREATE INDEX IF NOT EXISTS crypoverse_invoices_open_idx ON crypoverse_invoices(status)
   WHERE status IN ('initiated','pending');
+
+-- Runtime-mutable application settings (default trial days, maintenance
+-- banner, signup approval gate, etc.). Code reads via getAppSetting()
+-- with a fallback to in-code defaults, so missing rows are safe.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key          TEXT PRIMARY KEY,
+  value        TEXT NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  updated_by   TEXT
+);
 `
 
 function resolvePath(): string {
@@ -484,6 +494,20 @@ function runMigrations(db: Database): void {
       "v9.crypoverse_invoices_open_idx",
       `CREATE INDEX IF NOT EXISTS crypoverse_invoices_open_idx ON crypoverse_invoices(status)
        WHERE status IN ('initiated','pending')`,
+    ],
+    // v2.44.x: runtime-mutable application settings. Things that used to be
+    // hard-coded constants (default trial days, signup-approval gate,
+    // maintenance banner) move here so an operator can flip them from the
+    // admin dashboard without a redeploy. Code reads via getAppSetting()
+    // with a fallback to its in-code default, so missing rows are safe.
+    [
+      "v10.app_settings",
+      `CREATE TABLE IF NOT EXISTS app_settings (
+         key          TEXT PRIMARY KEY,
+         value        TEXT NOT NULL,
+         updated_at   INTEGER NOT NULL,
+         updated_by   TEXT
+       )`,
     ],
   ]
   for (const [name, sql] of ops) {

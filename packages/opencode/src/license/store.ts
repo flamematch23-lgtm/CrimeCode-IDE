@@ -775,6 +775,192 @@ export function getCustomerDetail(customerId: string): {
  * Plain LIKE (not FTS) because the row counts on this DB are tiny
  * (<10k anywhere) and FTS would mean another table + sync trigger.
  */
+// ── App settings (runtime-editable) ──────────────────────────────────
+// Single source of truth for tweakable values that used to live as
+// hard-coded constants. Code reads via getAppSetting(key, fallback) so
+// a missing row gracefully degrades to its compile-time default.
+
+export interface AppSettingRow {
+  key: string
+  value: string
+  updated_at: number
+  updated_by: string | null
+}
+
+/**
+ * Read one setting. Returns the typed default if missing or unparseable
+ * (so callers never get a runtime crash from a bad row a human typed).
+ * The parser is inferred from the default's type: numbers are
+ * Number(value), booleans accept "true"/"1"/"yes" (case-insensitive),
+ * strings are pass-through, objects use JSON.parse.
+ */
+export function getAppSetting<T extends string | number | boolean | object>(key: string, defaultValue: T): T {
+  const db = getDb()
+  const row = db
+    .prepare<{ value: string }, [string]>("SELECT value FROM app_settings WHERE key = ?")
+    .get(key)
+  if (!row) return defaultValue
+  try {
+    if (typeof defaultValue === "number") {
+      const n = Number(row.value)
+      return (Number.isFinite(n) ? (n as T) : defaultValue)
+    }
+    if (typeof defaultValue === "boolean") {
+      const v = row.value.toLowerCase().trim()
+      return (["true", "1", "yes", "on"].includes(v) as T)
+    }
+    if (typeof defaultValue === "string") {
+      return row.value as T
+    }
+    return JSON.parse(row.value) as T
+  } catch {
+    return defaultValue
+  }
+}
+
+export function setAppSetting(key: string, value: string | number | boolean | object, actor: string): void {
+  const db = getDb()
+  const serialised = typeof value === "object" ? JSON.stringify(value) : String(value)
+  db.prepare(
+    `INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
+  ).run(key, serialised, now(), actor)
+  audit("settings.update", { key, value: serialised, actor })
+}
+
+export function listAppSettings(): AppSettingRow[] {
+  return getDb()
+    .prepare<AppSettingRow, []>("SELECT * FROM app_settings ORDER BY key")
+    .all()
+}
+
+// ── Bulk operations ──────────────────────────────────────────────────
+// Each one wraps the existing single-entity helper in a transaction so a
+// failure halfway leaves no partial state. Per-id results are returned
+// so the dashboard can show a green tick or a per-row error message.
+
+export interface BulkResult {
+  ok: string[]
+  errors: Array<{ id: string; error: string }>
+}
+
+export function bulkRevokeLicenses(ids: string[], reason: string | null): BulkResult {
+  const out: BulkResult = { ok: [], errors: [] }
+  const db = getDb()
+  db.transaction(() => {
+    for (const id of ids) {
+      try {
+        const r = revokeLicense(id, reason)
+        if (r) out.ok.push(id)
+        else out.errors.push({ id, error: "license_not_found" })
+      } catch (err) {
+        out.errors.push({ id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+  })()
+  audit("license.bulk_revoke", { count: ids.length, ok: out.ok.length, failed: out.errors.length, reason })
+  return out
+}
+
+export function bulkCancelOrders(ids: string[]): BulkResult {
+  const out: BulkResult = { ok: [], errors: [] }
+  const db = getDb()
+  db.transaction(() => {
+    for (const id of ids) {
+      try {
+        const r = cancelOrder(id)
+        if (r) out.ok.push(id)
+        else out.errors.push({ id, error: "order_not_pending" })
+      } catch (err) {
+        out.errors.push({ id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+  })()
+  audit("order.bulk_cancel", { count: ids.length, ok: out.ok.length, failed: out.errors.length })
+  return out
+}
+
+// ── Advanced audit ───────────────────────────────────────────────────
+// Filters mirror what the dashboard form exposes. All optional. The
+// query LIKE search runs against both action AND details so an operator
+// can paste a customer_id and find every row that touched them.
+
+export interface AuditFilters {
+  actor?: string // freeform — matches details JSON
+  action?: string // exact prefix match on action column
+  since?: number // unix seconds
+  until?: number // unix seconds
+  query?: string // freeform LIKE search
+  limit?: number
+  offset?: number
+}
+
+export interface AuditRow {
+  id: number
+  action: string
+  details: string | null
+  ts: number
+}
+
+export function listAuditAdvanced(f: AuditFilters): { rows: AuditRow[]; total: number } {
+  const db = getDb()
+  const where: string[] = []
+  const params: Array<string | number> = []
+  if (f.action) {
+    where.push("action LIKE ? ESCAPE '\\'")
+    params.push(f.action.replace(/[%_]/g, (m) => "\\" + m) + "%")
+  }
+  if (f.actor) {
+    where.push("details LIKE ? ESCAPE '\\'")
+    params.push("%" + f.actor.replace(/[%_]/g, (m) => "\\" + m) + "%")
+  }
+  if (f.since) {
+    where.push("ts >= ?")
+    params.push(f.since)
+  }
+  if (f.until) {
+    where.push("ts <= ?")
+    params.push(f.until)
+  }
+  if (f.query) {
+    where.push("(action LIKE ? ESCAPE '\\' OR details LIKE ? ESCAPE '\\')")
+    const like = "%" + f.query.replace(/[%_]/g, (m) => "\\" + m) + "%"
+    params.push(like, like)
+  }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : ""
+  const limit = Math.max(1, Math.min(500, f.limit ?? 100))
+  const offset = Math.max(0, f.offset ?? 0)
+  const total = db
+    .prepare<{ n: number }, typeof params>(`SELECT COUNT(*) AS n FROM audit ${whereSql}`)
+    .get(...params)?.n ?? 0
+  const rows = db
+    .prepare<AuditRow, typeof params>(
+      `SELECT id, action, details, ts FROM audit ${whereSql} ORDER BY ts DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset)
+  return { rows, total }
+}
+
+/**
+ * Build a CSV export of audit rows matching the filters. RFC 4180-ish:
+ * quotes always wrapped, internal quotes doubled. Returns the whole
+ * string — fine because the dashboard caps the export at 10k rows.
+ */
+export function audtCsvExport(f: AuditFilters): string {
+  const result = listAuditAdvanced({ ...f, limit: 10_000, offset: 0 })
+  const esc = (v: string | number | null): string => {
+    if (v == null) return ""
+    const s = String(v).replaceAll('"', '""')
+    return '"' + s + '"'
+  }
+  const lines = ["id,ts,iso_time,action,details"]
+  for (const r of result.rows) {
+    const iso = new Date(r.ts * 1000).toISOString()
+    lines.push([esc(r.id), esc(r.ts), esc(iso), esc(r.action), esc(r.details)].join(","))
+  }
+  return lines.join("\n")
+}
+
 export function searchEntities(query: string): {
   customers: Array<{ id: string; telegram: string | null; email: string | null; approval_status: string }>
   orders: Array<{ id: string; status: string; interval: string; customer_telegram: string | null; created_at: number }>

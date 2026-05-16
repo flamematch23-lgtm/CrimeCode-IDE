@@ -18,14 +18,20 @@ import { Hono } from "hono"
 import { basicAuth } from "hono/basic-auth"
 import {
   analyticsSnapshot,
+  audtCsvExport,
+  bulkCancelOrders,
+  bulkRevokeLicenses,
   cancelOrder,
   confirmOrderAndIssue,
   getCustomerDetail,
+  listAppSettings,
+  listAuditAdvanced,
   listLicenses,
   listPendingOrders,
   revenueTimeseries,
   revokeLicense,
   searchEntities,
+  setAppSetting,
   statsCounts,
 } from "../../license/store"
 import {
@@ -149,6 +155,30 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
   .crumb { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
   .crumb a { color: var(--muted); }
   .crumb a:hover { color: var(--o); }
+  /* Bulk action bar — slides in from bottom when at least one row selected. */
+  #bulkbar { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--o); border-radius: 10px; padding: 10px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 14px; z-index: 90; min-width: 320px; }
+  #bulkbar[hidden] { display: none; }
+  #bulkbar .count { font-weight: 700; color: var(--o); }
+  #bulkbar .sep { color: var(--muted); }
+  /* Settings */
+  .setting-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .setting-row:last-child { border-bottom: 0; }
+  .setting-meta { flex: 1; }
+  .setting-meta .k { font-weight: 700; font-size: 13px; }
+  .setting-meta .desc { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .setting-meta .ts { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .setting-value { min-width: 260px; }
+  .setting-value input[type=text], .setting-value input[type=number] { width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 7px; font: inherit; }
+  .setting-value .toggle { width: 44px; height: 24px; background: #2a2a2f; border-radius: 999px; position: relative; cursor: pointer; transition: background 0.15s; }
+  .setting-value .toggle.on { background: var(--o); }
+  .setting-value .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+  .setting-value .toggle.on::after { transform: translateX(20px); }
+  /* Audit */
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .filters input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 7px; font: inherit; }
+  details.audit-row summary { cursor: pointer; padding: 8px 0; list-style: none; }
+  details.audit-row summary::-webkit-details-marker { display: none; }
+  details.audit-row pre { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px; font-size: 11px; overflow: auto; max-height: 320px; }
   @media (max-width: 760px) {
     .app { grid-template-columns: 1fr; }
     aside { position: relative; height: auto; }
@@ -181,11 +211,12 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
       <a href="#teams"      data-route="teams"><span class="ic">👥</span>Teams</a>
       <div class="sect">System</div>
       <a href="#health"     data-route="health"><span class="ic">📡</span>Health</a>
+      <div class="sect">Operations</div>
+      <a href="#audit"      data-route="audit"><span class="ic">📋</span>Audit log</a>
+      <a href="#settings"   data-route="settings"><span class="ic">⚙️</span>Settings</a>
       <div class="sect">Coming soon</div>
       <a href="#payments"   data-route="payments" style="opacity:0.55"><span class="ic">💼</span>Payments</a>
-      <a href="#audit"      data-route="audit"    style="opacity:0.55"><span class="ic">📋</span>Audit</a>
       <a href="#comms"      data-route="comms"    style="opacity:0.55"><span class="ic">📢</span>Communications</a>
-      <a href="#settings"   data-route="settings" style="opacity:0.55"><span class="ic">⚙️</span>Settings</a>
     </nav>
   </aside>
   <div>
@@ -202,6 +233,12 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
   </div>
 </div>
 <div id="toast" class="toast" hidden></div>
+<div id="bulkbar" hidden>
+  <span><span class="count" id="bulkCount">0</span> selected</span>
+  <span class="sep">·</span>
+  <span id="bulkActions"></span>
+  <button class="ghost" id="bulkClear">Clear</button>
+</div>
 
 <script>
 "use strict";
@@ -258,9 +295,9 @@ const ROUTES = {
   teams:     renderTeamsList,
   payments:  renderComingSoon("Payments"),
   health:    renderHealth,
-  audit:     renderComingSoon("Audit log"),
+  audit:     renderAudit,
   comms:     renderComingSoon("Communications"),
-  settings:  renderComingSoon("Settings"),
+  settings:  renderSettings,
 };
 function route() {
   const hash = (location.hash || "#overview").slice(1);
@@ -471,8 +508,24 @@ async function renderOrders() {
   view.innerHTML = '<h1 class="page">Pending orders</h1><section class="card" id="orders-card"><p class="empty">Loading…</p></section>';
   try {
     const orders = await api("/orders/pending");
-    $("#orders-card").innerHTML = renderOrdersTable(orders, { showActions: true });
+    const checkboxes = orders.length > 0;
+    let html = checkboxes
+      ? '<table><thead><tr><th><input type="checkbox" data-bulk-all="orders" /></th><th>ID</th><th>Plan</th><th>Customer</th><th>Created</th><th></th></tr></thead><tbody>'
+        + orders.map((o) =>
+            '<tr><td><input type="checkbox" data-bulk="orders" value="' + escapeHtml(o.id) + '" /></td>'
+            + '<td class="mono">' + escapeHtml(o.id) + "</td>"
+            + "<td>" + escapeHtml(o.interval) + "</td>"
+            + "<td>" + (o.customer_telegram ? "@" + escapeHtml(o.customer_telegram.replace(/^@/, "")) : "—") + "</td>"
+            + "<td>" + escapeHtml(fmtTs(o.created_at)) + "</td>"
+            + '<td class="actions-row"><button class="ghost" data-confirm="' + escapeHtml(o.id) + '">Confirm</button> <button class="danger" data-cancel="' + escapeHtml(o.id) + '">Cancel</button></td>'
+            + "</tr>").join("")
+        + "</tbody></table>"
+      : '<p class="empty">No pending orders.</p>';
+    $("#orders-card").innerHTML = html;
     bindOrderActions();
+    if (checkboxes) rebindBulkSelection("orders", [
+      { id: "cancel", label: "Cancel " + bulkSel.ids.size + " orders", danger: true, endpoint: "/orders/bulk-cancel", confirm: "Cancel {n} pending orders?" },
+    ]);
   } catch (err) { toast(err.message, { err: true }); }
 }
 
@@ -481,8 +534,28 @@ async function renderLicenses() {
   view.innerHTML = '<h1 class="page">Licenses</h1><section class="card" id="lic-card"><p class="empty">Loading…</p></section>';
   try {
     const licenses = await api("/licenses?limit=200");
-    $("#lic-card").innerHTML = renderLicensesTable(licenses, { showActions: true });
+    const nowSec = Math.floor(Date.now()/1000);
+    $("#lic-card").innerHTML = licenses.length
+      ? '<table><thead><tr><th><input type="checkbox" data-bulk-all="licenses" /></th><th>ID</th><th>Customer</th><th>Plan</th><th>Status</th><th>Issued</th><th>Expires</th><th></th></tr></thead><tbody>'
+        + licenses.map((l) => {
+            const status = l.revoked_at ? "revoked" : (l.expires_at && l.expires_at <= nowSec ? "expired" : "valid");
+            const canBulk = status === "valid";
+            return '<tr><td>' + (canBulk ? '<input type="checkbox" data-bulk="licenses" value="' + escapeHtml(l.id) + '" />' : "") + "</td>"
+              + '<td class="mono">' + escapeHtml(l.id) + "</td>"
+              + "<td>" + escapeHtml(l.customer_telegram || l.customer_id) + "</td>"
+              + "<td>" + escapeHtml(l.interval) + "</td>"
+              + '<td><span class="pill ' + status + '">' + status + "</span></td>"
+              + "<td>" + escapeHtml(fmtDate(l.issued_at)) + "</td>"
+              + "<td>" + (l.expires_at ? escapeHtml(fmtDate(l.expires_at)) : '<span style="color:#666">never</span>') + "</td>"
+              + "<td>" + (canBulk ? '<button class="danger" data-revoke="' + escapeHtml(l.id) + '">Revoke</button>' : "") + "</td>"
+              + "</tr>";
+          }).join("")
+        + "</tbody></table>"
+      : '<p class="empty">No licenses yet.</p>';
     bindLicenseActions();
+    rebindBulkSelection("licenses", [
+      { id: "revoke", label: "Revoke selected", danger: true, endpoint: "/licenses/bulk-revoke", prompt: "Reason for revocation?", confirm: "Revoke {n} licenses?" },
+    ]);
   } catch (err) { toast(err.message, { err: true }); }
 }
 
@@ -492,9 +565,10 @@ async function renderPendingApprovals() {
   try {
     const list = await api("/customers/pending");
     if (!list.length) { $("#pa-card").innerHTML = '<p class="empty">No pending approvals.</p>'; return; }
-    $("#pa-card").innerHTML = '<table><thead><tr><th>Customer</th><th>Telegram</th><th>Email</th><th>Method</th><th>Registered</th><th></th></tr></thead><tbody>'
+    $("#pa-card").innerHTML = '<table><thead><tr><th><input type="checkbox" data-bulk-all="pending" /></th><th>Customer</th><th>Telegram</th><th>Email</th><th>Method</th><th>Registered</th><th></th></tr></thead><tbody>'
       + list.map((c) =>
-          '<tr><td class="mono">' + escapeHtml(c.id) + "</td>"
+          '<tr><td><input type="checkbox" data-bulk="pending" value="' + escapeHtml(c.id) + '" /></td>'
+          + '<td class="mono">' + escapeHtml(c.id) + "</td>"
           + "<td>" + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : "—") + "</td>"
           + "<td>" + escapeHtml(c.email || "—") + "</td>"
           + "<td>" + escapeHtml(c.method || "—") + "</td>"
@@ -504,6 +578,10 @@ async function renderPendingApprovals() {
           +   '<button class="danger" data-reject="' + escapeHtml(c.id) + '">Reject</button></td>'
           + "</tr>").join("")
       + "</tbody></table>";
+    rebindBulkSelection("pending", [
+      { id: "approve7", label: "Approve all (7d trial)", endpoint: "/customers/bulk-approve", extra: () => ({ trial_days: 7 }), confirm: "Approve {n} customers with 7-day trial?" },
+      { id: "approve2", label: "Approve all (2d)", endpoint: "/customers/bulk-approve", extra: () => ({ trial_days: 2 }), confirm: "Approve {n} customers with 2-day trial?" },
+    ]);
     $$('button[data-approve]').forEach((b) => b.addEventListener("click", async () => {
       try {
         await api("/customers/" + b.dataset.approve + "/approve", { method: "POST", body: JSON.stringify({ trial_days: Number(b.dataset.days) }) });
@@ -763,6 +841,188 @@ async function renderHealth() {
           + "</table>");
   } catch (err) { $("#hc").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
 }
+
+// ── Settings ──────────────────────────────────────────────────────────
+async function renderSettings() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">Settings</h1><div id="settings-wrap"><p class="empty">Loading…</p></div>';
+  try {
+    const data = await api("/settings");
+    let html = '<section class="card"><h2>Runtime-editable</h2>';
+    for (const s of data.catalogue) {
+      const current = s.current_value != null ? s.current_value : String(s.default);
+      const tsBadge = s.updated_at
+        ? '<span class="ts">last changed ' + fmtRel(s.updated_at) + (s.updated_by ? " by " + escapeHtml(s.updated_by) : "") + "</span>"
+        : '<span class="ts">using default</span>';
+      let valueCtl = "";
+      if (s.type === "boolean") {
+        const on = current === "true" || current === "1" || current === true;
+        valueCtl = '<div class="toggle ' + (on ? "on" : "") + '" data-toggle="' + escapeHtml(s.key) + '" data-on="' + on + '"></div>';
+      } else if (s.type === "number") {
+        valueCtl = '<input type="number" data-input="' + escapeHtml(s.key) + '" value="' + escapeHtml(String(current)) + '" />';
+      } else {
+        valueCtl = '<input type="text" data-input="' + escapeHtml(s.key) + '" value="' + escapeHtml(String(current)) + '" />';
+      }
+      html += '<div class="setting-row">'
+        +   '<div class="setting-meta">'
+        +     '<div class="k">' + escapeHtml(s.key) + ' <span style="color:var(--muted);font-weight:400;font-size:11px">(default: ' + escapeHtml(String(s.default)) + ")</span></div>"
+        +     '<div class="desc">' + escapeHtml(s.description) + "</div>"
+        +     '<div class="ts">' + tsBadge + "</div>"
+        +   "</div>"
+        +   '<div class="setting-value">' + valueCtl + (s.type !== "boolean" ? ' <button data-save="' + escapeHtml(s.key) + '">Save</button>' : "") + "</div>"
+        + "</div>";
+    }
+    html += "</section>";
+    html += '<section class="card"><h2>Read-only (env-backed)</h2><table>'
+      + '<tr><th>Plan prices (USD)</th><td>monthly: $' + data.env_readonly.plan_prices_usd.monthly
+      + " · annual: $" + data.env_readonly.plan_prices_usd.annual
+      + " · lifetime: $" + data.env_readonly.plan_prices_usd.lifetime + "</td></tr>"
+      + '<tr><th>Admin user ids</th><td>' + data.env_readonly.admin_user_ids_count + " configured</td></tr>"
+      + '<tr><th>Crypoverse</th><td>' + (data.env_readonly.crypoverse_enabled ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>') + "</td></tr>"
+      + '<tr><th>Sentry</th><td>' + (data.env_readonly.sentry_enabled ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>') + "</td></tr>"
+      + '<tr><th>S3 backup</th><td>' + (data.env_readonly.backup_enabled ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>') + "</td></tr>"
+      + '</table><p style="color:var(--muted);font-size:11px;margin-top:10px">These are sourced from env vars / Fly secrets — change them with <code>fly secrets set KEY=value</code> followed by a deploy.</p></section>';
+    $("#settings-wrap").innerHTML = html;
+    // Wire toggles (boolean — auto-save on click)
+    $$('div[data-toggle]').forEach((el) => el.addEventListener("click", async () => {
+      const key = el.dataset.toggle;
+      const on = el.dataset.on === "true";
+      const next = !on;
+      try {
+        await api("/settings/" + encodeURIComponent(key), { method: "PUT", body: JSON.stringify({ value: next }) });
+        el.classList.toggle("on", next);
+        el.dataset.on = String(next);
+        toast("Saved · " + key + " = " + next);
+      } catch (e) { toast(e.message, { err: true }); }
+    }));
+    // Wire save buttons (number/string — explicit save)
+    $$('button[data-save]').forEach((b) => b.addEventListener("click", async () => {
+      const key = b.dataset.save;
+      const input = $('input[data-input="' + key + '"]');
+      try {
+        await api("/settings/" + encodeURIComponent(key), { method: "PUT", body: JSON.stringify({ value: input.value }) });
+        toast("Saved · " + key);
+        renderSettings();
+      } catch (e) { toast(e.message, { err: true }); }
+    }));
+  } catch (err) { $("#settings-wrap").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
+}
+
+// ── Audit log (advanced) ──────────────────────────────────────────────
+const auditState = { offset: 0, limit: 50 };
+async function renderAudit() {
+  const view = $("#view");
+  view.innerHTML = '<h1 class="page">Audit log</h1>'
+    + '<section class="card">'
+    + '<div class="filters">'
+    +   '<input id="a-actor" placeholder="Actor / customer id" />'
+    +   '<input id="a-action" placeholder="Action prefix (e.g. license.)" />'
+    +   '<input id="a-q" placeholder="Free text search…" />'
+    +   '<input id="a-since" type="date" />'
+    +   '<input id="a-until" type="date" />'
+    +   '<button id="a-apply">Apply</button>'
+    +   '<button class="ghost" id="a-csv">↓ Export CSV</button>'
+    + "</div>"
+    + '<div id="a-table"><p class="empty">Loading…</p></div>'
+    + '<div style="margin-top:14px;display:flex;gap:8px;align-items:center">'
+    +   '<button class="ghost" id="a-prev">← Prev</button>'
+    +   '<span id="a-page" style="color:var(--muted);font-size:12px"></span>'
+    +   '<button class="ghost" id="a-next">Next →</button>'
+    + "</div></section>";
+  function qstring() {
+    const p = [];
+    const since = $("#a-since").value ? Math.floor(new Date($("#a-since").value).getTime()/1000) : null;
+    const until = $("#a-until").value ? Math.floor(new Date($("#a-until").value + "T23:59:59Z").getTime()/1000) : null;
+    if ($("#a-actor").value) p.push("actor=" + encodeURIComponent($("#a-actor").value));
+    if ($("#a-action").value) p.push("action=" + encodeURIComponent($("#a-action").value));
+    if ($("#a-q").value) p.push("q=" + encodeURIComponent($("#a-q").value));
+    if (since) p.push("since=" + since);
+    if (until) p.push("until=" + until);
+    p.push("limit=" + auditState.limit);
+    p.push("offset=" + auditState.offset);
+    return p.join("&");
+  }
+  async function reload() {
+    try {
+      const r = await api("/audit?" + qstring());
+      $("#a-page").textContent = "Showing " + (r.rows.length === 0 ? "0" : (auditState.offset+1) + "–" + (auditState.offset + r.rows.length)) + " of " + r.total;
+      $("#a-prev").disabled = auditState.offset === 0;
+      $("#a-next").disabled = auditState.offset + r.rows.length >= r.total;
+      $("#a-table").innerHTML = r.rows.length === 0
+        ? '<p class="empty">No matching audit rows.</p>'
+        : '<table><thead><tr><th style="width:160px">Time</th><th>Action</th><th>Details</th></tr></thead><tbody>'
+          + r.rows.map((row) => {
+              let pretty = row.details || "";
+              try { pretty = JSON.stringify(JSON.parse(row.details), null, 2); } catch {}
+              return '<tr><td style="vertical-align:top">' + escapeHtml(fmtTs(row.ts)) + "</td>"
+                + '<td class="mono" style="vertical-align:top">' + escapeHtml(row.action) + "</td>"
+                + '<td><details class="audit-row"><summary class="mono" style="font-size:11px;color:var(--muted)">' + escapeHtml((row.details || "").slice(0, 180)) + "</summary>"
+                + "<pre>" + escapeHtml(pretty) + "</pre></details></td>"
+                + "</tr>";
+            }).join("")
+          + "</tbody></table>";
+    } catch (err) { toast(err.message, { err: true }); }
+  }
+  $("#a-apply").addEventListener("click", () => { auditState.offset = 0; reload(); });
+  $("#a-prev").addEventListener("click", () => { auditState.offset = Math.max(0, auditState.offset - auditState.limit); reload(); });
+  $("#a-next").addEventListener("click", () => { auditState.offset += auditState.limit; reload(); });
+  $("#a-csv").addEventListener("click", () => { window.open("/admin/api/audit/export.csv?" + qstring(), "_blank"); });
+  reload();
+}
+
+// ── Bulk selection system ─────────────────────────────────────────────
+// Tables that opt in render <input type="checkbox" data-bulk="<scope>"
+// value="<id>" /> and call rebindBulkSelection(scope). The bar shows
+// scope-specific actions and posts to the corresponding bulk endpoint.
+const bulkSel = { scope: null, ids: new Set() };
+function rebindBulkSelection(scope, actions) {
+  bulkSel.scope = scope;
+  bulkSel.ids.clear();
+  refreshBulkBar(actions);
+  $$('input[data-bulk="' + scope + '"]').forEach((cb) => {
+    cb.checked = false;
+    cb.addEventListener("change", () => {
+      if (cb.checked) bulkSel.ids.add(cb.value); else bulkSel.ids.delete(cb.value);
+      refreshBulkBar(actions);
+    });
+  });
+  const headerCb = $('input[data-bulk-all="' + scope + '"]');
+  if (headerCb) {
+    headerCb.checked = false;
+    headerCb.addEventListener("change", () => {
+      $$('input[data-bulk="' + scope + '"]').forEach((cb) => { cb.checked = headerCb.checked; if (headerCb.checked) bulkSel.ids.add(cb.value); else bulkSel.ids.delete(cb.value); });
+      refreshBulkBar(actions);
+    });
+  }
+}
+function refreshBulkBar(actions) {
+  const bar = $("#bulkbar");
+  $("#bulkCount").textContent = bulkSel.ids.size;
+  if (bulkSel.ids.size === 0) { bar.hidden = true; return; }
+  bar.hidden = false;
+  $("#bulkActions").innerHTML = actions.map((a) => '<button data-bulk-act="' + a.id + '" class="' + (a.danger ? "danger" : "") + '">' + escapeHtml(a.label) + "</button>").join(" ");
+  $$('button[data-bulk-act]').forEach((b) => b.addEventListener("click", async () => {
+    const act = actions.find((x) => x.id === b.dataset.bulkAct);
+    if (!act) return;
+    if (act.confirm && !confirm(act.confirm.replace("{n}", bulkSel.ids.size))) return;
+    let extra = {};
+    if (act.prompt) {
+      const v = prompt(act.prompt, "");
+      if (v === null) return;
+      extra = act.extra ? act.extra(v) : { reason: v };
+    } else if (act.extra) {
+      extra = act.extra();
+    }
+    try {
+      const r = await api(act.endpoint, { method: "POST", body: JSON.stringify({ ids: Array.from(bulkSel.ids), ...extra }) });
+      toast("Bulk " + act.id + ": " + (r.ok ? r.ok.length : "?") + " ok" + (r.errors && r.errors.length ? ", " + r.errors.length + " failed" : ""));
+      bulkSel.ids.clear();
+      bar.hidden = true;
+      route();
+    } catch (e) { toast(e.message, { err: true }); }
+  }));
+}
+$("#bulkClear").addEventListener("click", () => { bulkSel.ids.clear(); $("#bulkbar").hidden = true; $$('input[data-bulk], input[data-bulk-all]').forEach((cb) => { cb.checked = false; }); });
 
 function renderComingSoon(name) { return function () { $("#view").innerHTML = '<h1 class="page">' + escapeHtml(name) + '</h1><section class="card"><p class="empty">Coming in the next iteration of the dashboard.</p></section>'; }; }
 
@@ -1085,6 +1345,153 @@ export function adminDashboardRouter(): Hono {
 
   // ── Step 2: System health ──────────────────────────────────────
   r.get("/api/health", (c) => c.json(getSystemHealth()))
+
+  // ── Step 3: Bulk actions ───────────────────────────────────────
+  r.post("/api/licenses/bulk-revoke", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { ids?: string[]; reason?: string }
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      return c.json({ error: "missing_ids" }, 400)
+    }
+    return c.json(bulkRevokeLicenses(body.ids, body.reason ?? null))
+  })
+
+  r.post("/api/orders/bulk-cancel", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] }
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      return c.json({ error: "missing_ids" }, 400)
+    }
+    return c.json(bulkCancelOrders(body.ids))
+  })
+
+  r.post("/api/customers/bulk-approve", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { ids?: string[]; trial_days?: number }
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      return c.json({ error: "missing_ids" }, 400)
+    }
+    const days = Math.max(1, Math.min(365, Number(body.trial_days ?? 7)))
+    const ok: string[] = []
+    const errors: Array<{ id: string; error: string }> = []
+    for (const id of body.ids) {
+      try {
+        const r = approveCustomer(id, { trialDays: days, approvedBy: "admin-panel:bulk" })
+        if (r) ok.push(id)
+        else errors.push({ id, error: "customer_not_found" })
+      } catch (err) {
+        errors.push({ id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    return c.json({ ok, errors, trial_days: days })
+  })
+
+  // ── Step 3: Settings ───────────────────────────────────────────
+  // GET returns the editable settings table joined with the in-code
+  // defaults so the UI can render a 'Reset to default' button when
+  // the operator has overridden a value.
+  r.get("/api/settings", (c) => {
+    const rows = listAppSettings()
+    const byKey: Record<string, { value: string; updated_at: number; updated_by: string | null }> = {}
+    for (const r2 of rows) {
+      byKey[r2.key] = { value: r2.value, updated_at: r2.updated_at, updated_by: r2.updated_by }
+    }
+    // Editable settings catalogue — keep in sync with whatever code reads
+    // via getAppSetting(). Each entry declares its default + type + a
+    // human-readable description for the dashboard.
+    const catalogue = [
+      {
+        key: "default_trial_days",
+        type: "number" as const,
+        default: 7,
+        description: "Trial length (days) granted when an admin approves a new signup without specifying.",
+      },
+      {
+        key: "signup_approval_required",
+        type: "boolean" as const,
+        default: true,
+        description: "If false, new signups skip the approval queue and start their trial immediately.",
+      },
+      {
+        key: "maintenance_mode",
+        type: "boolean" as const,
+        default: false,
+        description: "Shows a 'maintenance' banner across all client surfaces. Does not block requests.",
+      },
+      {
+        key: "maintenance_message",
+        type: "string" as const,
+        default: "Manutenzione programmata. Tornerà tutto online tra poco.",
+        description: "Message shown when maintenance_mode is on.",
+      },
+    ]
+    return c.json({
+      catalogue: catalogue.map((entry) => ({
+        ...entry,
+        current_value: byKey[entry.key]?.value ?? null,
+        updated_at: byKey[entry.key]?.updated_at ?? null,
+        updated_by: byKey[entry.key]?.updated_by ?? null,
+      })),
+      // Read-only settings (env-backed, plan prices, admin user ids count) —
+      // surfaced so the operator sees the full picture, can't be edited
+      // here (they'd need a redeploy with new secrets/code).
+      env_readonly: {
+        plan_prices_usd: { monthly: 20, annual: 200, lifetime: 500 },
+        admin_user_ids_count: ((process.env.TELEGRAM_ADMIN_USER_IDS ?? "").split(/[,\s]+/).filter(Boolean).length)
+          + (process.env.OPENCODE_ADMIN_CHAT_ID ? 1 : 0),
+        crypoverse_enabled: Boolean(process.env.CRYPOVERSE_API_KEY),
+        sentry_enabled: Boolean(process.env.SENTRY_DSN),
+        backup_enabled: Boolean(
+          process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || process.env.LICENSE_BACKUP_BUCKET,
+        ),
+      },
+    })
+  })
+
+  r.put("/api/settings/:key", async (c) => {
+    const key = c.req.param("key")
+    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown }
+    if (body.value === undefined) return c.json({ error: "missing_value" }, 400)
+    try {
+      // Stringify booleans/numbers consistently — the getter parses them
+      // back to the correct type based on the in-code default's type.
+      const v =
+        typeof body.value === "object" && body.value !== null
+          ? (body.value as object)
+          : (String(body.value) as string)
+      setAppSetting(key, v, "admin-panel")
+      return c.json({ ok: true, key, value: v })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  // ── Step 3: Audit log (advanced) ───────────────────────────────
+  r.get("/api/audit", (c) => {
+    const q = c.req.query
+    return c.json(
+      listAuditAdvanced({
+        actor: q("actor") || undefined,
+        action: q("action") || undefined,
+        since: q("since") ? Number(q("since")) : undefined,
+        until: q("until") ? Number(q("until")) : undefined,
+        query: q("q") || undefined,
+        limit: q("limit") ? Number(q("limit")) : 100,
+        offset: q("offset") ? Number(q("offset")) : 0,
+      }),
+    )
+  })
+
+  r.get("/api/audit/export.csv", (c) => {
+    const q = c.req.query
+    const csv = audtCsvExport({
+      actor: q("actor") || undefined,
+      action: q("action") || undefined,
+      since: q("since") ? Number(q("since")) : undefined,
+      until: q("until") ? Number(q("until")) : undefined,
+      query: q("q") || undefined,
+    })
+    c.header("Content-Type", "text/csv; charset=utf-8")
+    c.header("Content-Disposition", 'attachment; filename="audit-' + new Date().toISOString().slice(0, 10) + '.csv"')
+    return c.body(csv)
+  })
 
   return r
 }
