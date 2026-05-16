@@ -80,7 +80,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>CrimeCode • Admin Console</title>
+<title>CrimeCode &#x2022; Admin Console</title>
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%23ff5722"/><text x="16" y="22" text-anchor="middle" font-family="ui-monospace,monospace" font-size="14" font-weight="800" fill="%2307070a">CC</text></svg>' />
 <style>
   :root { color-scheme: dark; --o: #ff5722; --bg: #07070a; --panel: #15151a; --border: rgba(255,255,255,0.08); --muted: #888; --text: #f5f5f5; }
@@ -104,7 +104,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
   .search { flex: 1; max-width: 560px; position: relative; }
   .search input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 9px 14px 9px 36px; border-radius: 9px; font: inherit; transition: border-color 0.15s; }
   .search input:focus { outline: none; border-color: var(--o); }
-  .search::before { content: "🔍"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); opacity: 0.55; pointer-events: none; }
+  .search::before { content: "&#x1F50D;"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); opacity: 0.55; pointer-events: none; }
   .search-results { position: absolute; top: 44px; left: 0; right: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; max-height: 60vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 20; }
   .search-results .group { padding: 8px 12px 4px; font-size: 10px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
   .search-results a { display: flex; gap: 10px; padding: 8px 14px; color: var(--text); text-decoration: none; font-size: 12px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.04); }
@@ -176,7 +176,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
   .crumb { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
   .crumb a { color: var(--muted); }
   .crumb a:hover { color: var(--o); }
-  /* Bulk action bar — slides in from bottom when at least one row selected. */
+  /* Bulk action bar &#x2014; slides in from bottom when at least one row selected. */
   #bulkbar { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--o); border-radius: 10px; padding: 10px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 14px; z-index: 90; min-width: 320px; }
   #bulkbar[hidden] { display: none; }
   #bulkbar .count { font-weight: 700; color: var(--o); }
@@ -219,35 +219,35 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
     </div>
     <nav id="nav">
       <div class="sect">Overview</div>
-      <a href="#overview" data-route="overview"><span class="ic">📊</span>Dashboard</a>
-      <a href="#revenue"  data-route="revenue"><span class="ic">💰</span>Revenue</a>
+      <a href="#overview" data-route="overview"><span class="ic">&#x1F4CA;</span>Dashboard</a>
+      <a href="#revenue"  data-route="revenue"><span class="ic">&#x1F4B0;</span>Revenue</a>
       <div class="sect">People</div>
-      <a href="#customers" data-route="customers"><span class="ic">👤</span>Customers</a>
-      <a href="#pending"   data-route="pending"><span class="ic">⏳</span>Pending approvals<span class="badge" id="nav-pending-count" hidden>0</span></a>
+      <a href="#customers" data-route="customers"><span class="ic">&#x1F464;</span>Customers</a>
+      <a href="#pending"   data-route="pending"><span class="ic">&#x23F3;</span>Pending approvals<span class="badge" id="nav-pending-count" hidden>0</span></a>
       <div class="sect">Money</div>
-      <a href="#orders"     data-route="orders"><span class="ic">📦</span>Orders<span class="badge" id="nav-orders-count" hidden>0</span></a>
-      <a href="#licenses"   data-route="licenses"><span class="ic">🎟️</span>Licenses</a>
-      <a href="#crypoverse" data-route="crypoverse"><span class="ic">💳</span>Crypoverse</a>
+      <a href="#orders"     data-route="orders"><span class="ic">&#x1F4E6;</span>Orders<span class="badge" id="nav-orders-count" hidden>0</span></a>
+      <a href="#licenses"   data-route="licenses"><span class="ic">&#x1F39F;&#xFE0F;</span>Licenses</a>
+      <a href="#crypoverse" data-route="crypoverse"><span class="ic">&#x1F4B3;</span>Crypoverse</a>
       <div class="sect">Workspace</div>
-      <a href="#teams"      data-route="teams"><span class="ic">👥</span>Teams</a>
+      <a href="#teams"      data-route="teams"><span class="ic">&#x1F465;</span>Teams</a>
       <div class="sect">System</div>
-      <a href="#health"     data-route="health"><span class="ic">📡</span>Health</a>
+      <a href="#health"     data-route="health"><span class="ic">&#x1F4E1;</span>Health</a>
       <div class="sect">Operations</div>
-      <a href="#audit"      data-route="audit"><span class="ic">📋</span>Audit log</a>
-      <a href="#comms"      data-route="comms"><span class="ic">📢</span>Communications</a>
-      <a href="#settings"   data-route="settings"><span class="ic">⚙️</span>Settings</a>
+      <a href="#audit"      data-route="audit"><span class="ic">&#x1F4CB;</span>Audit log</a>
+      <a href="#comms"      data-route="comms"><span class="ic">&#x1F4E2;</span>Communications</a>
+      <a href="#settings"   data-route="settings"><span class="ic">&#x2699;&#xFE0F;</span>Settings</a>
       <div class="sect">Coming soon</div>
-      <a href="#payments"   data-route="payments" style="opacity:0.55"><span class="ic">💼</span>Payments</a>
+      <a href="#payments"   data-route="payments" style="opacity:0.55"><span class="ic">&#x1F4BC;</span>Payments</a>
     </nav>
   </aside>
   <div>
     <header class="topbar">
       <div class="search">
-        <input id="searchbox" placeholder="Search customers, orders, licenses, teams… (id, @handle, email, tx_hash)" autocomplete="off" />
+        <input id="searchbox" placeholder="Search customers, orders, licenses, teams&#x2026; (id, @handle, email, tx_hash)" autocomplete="off" />
         <div id="search-results" class="search-results" hidden></div>
       </div>
       <div class="top-actions">
-        <span class="pill-env" title="Production">● PROD</span>
+        <span class="pill-env" title="Production">&#x25CF; PROD</span>
       </div>
     </header>
     <main id="view"></main>
@@ -256,7 +256,7 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
 <div id="toast" class="toast" hidden></div>
 <div id="bulkbar" hidden>
   <span><span class="count" id="bulkCount">0</span> selected</span>
-  <span class="sep">·</span>
+  <span class="sep">&#xB7;</span>
   <span id="bulkActions"></span>
   <button class="ghost" id="bulkClear">Clear</button>
 </div>
@@ -264,16 +264,16 @@ const DASHBOARD_HTML = String.raw`<!doctype html>
 <script>
 "use strict";
 
-// ── tiny helpers ──────────────────────────────────────────────────────
+// &#x2500;&#x2500; tiny helpers &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 const $ = (s, p = document) => p.querySelector(s);
 const $$ = (s, p = document) => Array.from(p.querySelectorAll(s));
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-const fmtNum = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : "—");
-const fmtUsd = (n) => (typeof n === "number" ? "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—");
-const fmtTs  = (ts) => ts ? new Date(ts * 1000).toLocaleString("en-GB", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
-const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+const fmtNum = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : "&#x2014;");
+const fmtUsd = (n) => (typeof n === "number" ? "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "&#x2014;");
+const fmtTs  = (ts) => ts ? new Date(ts * 1000).toLocaleString("en-GB", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" }) : "&#x2014;";
+const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) : "&#x2014;";
 const fmtRel = (ts) => {
-  if (!ts) return "—";
+  if (!ts) return "&#x2014;";
   const sec = Math.floor(Date.now()/1000) - ts;
   if (sec < 60) return sec + "s ago";
   if (sec < 3600) return Math.floor(sec/60) + "m ago";
@@ -290,7 +290,7 @@ function toast(msg, opts = {}) {
 }
 let api = async function (path, opts = {}) {
   // Auto-attach the cached admin OTP (set by the 2FA wizard / login
-  // prompt). The server only requires it when 2FA is enabled — for
+  // prompt). The server only requires it when 2FA is enabled &#x2014; for
   // un-2FA'd setups it's a harmless extra header.
   const cachedOtp = sessionStorage.getItem("admin_otp");
   const baseHeaders = Object.assign({ "Content-Type": "application/json" }, cachedOtp ? { "x-admin-otp": cachedOtp } : {});
@@ -303,9 +303,9 @@ let api = async function (path, opts = {}) {
   let text = await res.text();
   let body;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-  // OTP required → prompt + retry once. Caches the new code for the tab.
+  // OTP required &#x2192; prompt + retry once. Caches the new code for the tab.
   if (res.status === 401 && body && body.error === "otp_required") {
-    const code = prompt("Two-factor required — enter your 6-digit code:");
+    const code = prompt("Two-factor required &#x2014; enter your 6-digit code:");
     if (!code) throw new Error("otp_cancelled");
     sessionStorage.setItem("admin_otp", code);
     res = await doFetch({ "x-admin-otp": code });
@@ -319,7 +319,7 @@ let api = async function (path, opts = {}) {
   return body;
 };
 
-// ── routing (hash-based) ──────────────────────────────────────────────
+// &#x2500;&#x2500; routing (hash-based) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 const ROUTES = {
   overview:  renderOverview,
   revenue:   renderRevenue,
@@ -347,17 +347,17 @@ function route() {
 }
 window.addEventListener("hashchange", route);
 
-// ── Overview ──────────────────────────────────────────────────────────
-let renderOverview = async function () {
+// &#x2500;&#x2500; Overview &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+async function renderOverview() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">Dashboard</h1><div class="kpi-grid" id="kpis"></div><section class="card"><h2>Revenue · last 30 days</h2><div class="chart-wrap"><canvas id="chart-overview"></canvas><div class="chart-tip" hidden></div></div><div class="chart-legend"><span><span class="legend-dot" style="background:#ff5722"></span>Revenue (USD)</span><span><span class="legend-dot" style="background:rgba(255,87,34,0.4)"></span>Orders</span></div></section>';
+  view.innerHTML = '<h1 class="page">Dashboard</h1><div class="kpi-grid" id="kpis"></div><section class="card"><h2>Revenue &#xB7; last 30 days</h2><div class="chart-wrap"><canvas id="chart-overview"></canvas><div class="chart-tip" hidden></div></div><div class="chart-legend"><span><span class="legend-dot" style="background:#ff5722"></span>Revenue (USD)</span><span><span class="legend-dot" style="background:rgba(255,87,34,0.4)"></span>Orders</span></div></section>';
   try {
     const o = await api("/overview");
     refreshNavBadges(o);
     $("#kpis").innerHTML = [
       kpi("MRR", fmtUsd(o.analytics.mrr_usd), "monthly recurring"),
       kpi("Revenue 30d", fmtUsd(o.analytics.revenue_30d_usd), o.analytics.orders_30d + " orders"),
-      kpi("Active licenses", fmtNum(o.analytics.licenses_active), o.analytics.licenses_expired + " expired · " + o.analytics.licenses_revoked + " revoked"),
+      kpi("Active licenses", fmtNum(o.analytics.licenses_active), o.analytics.licenses_expired + " expired &#xB7; " + o.analytics.licenses_revoked + " revoked"),
       kpi("Customers", fmtNum(o.stats.customers), "total signups"),
       kpi("Pending orders", fmtNum(o.stats.orders_pending), "awaiting payment"),
       kpi("Conversion", o.analytics.conversion_rate_pct + "%", "confirmed / created"),
@@ -377,7 +377,7 @@ let renderOverview = async function () {
   $("#view").insertAdjacentHTML("beforeend", '<section class="card"><h2>Live activity feed</h2><div id="live-feed"></div></section>');
   renderLiveFeedWidget();
   startLiveFeed();
-};
+}
 const kpi = (label, value, delta) => '<div class="kpi"><div class="label">' + escapeHtml(label) + '</div><div class="value">' + value + '</div>' + (delta ? '<div class="delta">' + escapeHtml(delta) + "</div>" : "") + "</div>";
 
 function refreshNavBadges(o) {
@@ -387,12 +387,12 @@ function refreshNavBadges(o) {
   const np = $("#nav-pending-count"); if (np) { np.textContent = pPending; np.hidden = pPending === 0; }
 }
 
-// ── Revenue ───────────────────────────────────────────────────────────
+// &#x2500;&#x2500; Revenue &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderRevenue() {
   const view = $("#view");
   view.innerHTML = '<h1 class="page">Revenue</h1>'
     + '<div class="kpi-grid" id="kpis"></div>'
-    + '<section class="card"><h2>Revenue · last 90 days</h2><div style="margin-bottom:8px"><button class="ghost" data-days="7">7d</button> <button class="ghost" data-days="30">30d</button> <button class="ghost" data-days="90">90d</button> <button class="ghost" data-days="365">1y</button></div><div class="chart-wrap"><canvas id="chart-rev"></canvas><div class="chart-tip" hidden></div></div><div class="chart-legend"><span><span class="legend-dot" style="background:#ff5722"></span>Revenue (USD)</span><span><span class="legend-dot" style="background:rgba(255,87,34,0.4)"></span>Orders</span></div></section>';
+    + '<section class="card"><h2>Revenue &#xB7; last 90 days</h2><div style="margin-bottom:8px"><button class="ghost" data-days="7">7d</button> <button class="ghost" data-days="30">30d</button> <button class="ghost" data-days="90">90d</button> <button class="ghost" data-days="365">1y</button></div><div class="chart-wrap"><canvas id="chart-rev"></canvas><div class="chart-tip" hidden></div></div><div class="chart-legend"><span><span class="legend-dot" style="background:#ff5722"></span>Revenue (USD)</span><span><span class="legend-dot" style="background:rgba(255,87,34,0.4)"></span>Orders</span></div></section>';
   let data = null;
   try {
     const o = await api("/overview");
@@ -417,41 +417,41 @@ async function renderRevenue() {
   }));
 }
 
-// ── Customers list ────────────────────────────────────────────────────
+// &#x2500;&#x2500; Customers list &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderCustomersList() {
   const view = $("#view");
   view.innerHTML = '<h1 class="page">Customers</h1>'
-    + '<section class="card"><table id="t"><thead><tr><th>ID</th><th>Telegram</th><th>Email</th><th>Status</th><th>Signed up</th></tr></thead><tbody><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table></section>';
+    + '<section class="card"><table id="t"><thead><tr><th>ID</th><th>Telegram</th><th>Email</th><th>Status</th><th>Signed up</th></tr></thead><tbody><tr><td colspan="5" class="empty">Loading&#x2026;</td></tr></tbody></table></section>';
   try {
     const res = await api("/customers?limit=100");
     const tbody = $("#t tbody");
     if (!res.customers.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">No customers yet.</td></tr>'; return; }
     tbody.innerHTML = res.customers.map((c) => '<tr class="click" onclick="location.hash=\'customers/' + escapeHtml(c.id) + "'\">"
       + '<td class="mono">' + escapeHtml(c.id) + "</td>"
-      + "<td>" + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : '<span style="color:#666">—</span>') + "</td>"
-      + "<td>" + (c.email ? escapeHtml(c.email) : '<span style="color:#666">—</span>') + "</td>"
+      + "<td>" + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : '<span style="color:#666">&#x2014;</span>') + "</td>"
+      + "<td>" + (c.email ? escapeHtml(c.email) : '<span style="color:#666">&#x2014;</span>') + "</td>"
       + '<td><span class="pill ' + escapeHtml(c.approval_status) + '">' + escapeHtml(c.approval_status) + "</span></td>"
       + "<td>" + escapeHtml(fmtDate(c.created_at)) + "</td>"
       + "</tr>").join("");
   } catch (err) { toast(err.message, { err: true }); }
 }
 
-// ── Customer detail ───────────────────────────────────────────────────
+// &#x2500;&#x2500; Customer detail &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderCustomerDetail(id) {
   const view = $("#view");
-  view.innerHTML = '<div class="crumb"><a href="#customers" class="link">← Customers</a></div><section class="card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<div class="crumb"><a href="#customers" class="link">&#x2190; Customers</a></div><section class="card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const d = await api("/customers/" + encodeURIComponent(id));
     const initial = (d.customer.telegram || d.customer.email || d.customer.id).replace(/^@/, "").charAt(0).toUpperCase();
     view.innerHTML =
-        '<div class="crumb"><a href="#customers" class="link">← Customers</a></div>'
+        '<div class="crumb"><a href="#customers" class="link">&#x2190; Customers</a></div>'
       + '<section class="card"><div class="detail-hero">'
       + '<div class="avatar">' + escapeHtml(initial) + "</div>"
       + '<div style="flex:1">'
       +   "<h1>" + (d.customer.telegram ? "@" + escapeHtml(d.customer.telegram.replace(/^@/, "")) : escapeHtml(d.customer.email || d.customer.id)) + "</h1>"
-      +   '<div class="sub">' + escapeHtml(d.customer.id) + " · signed up " + escapeHtml(fmtDate(d.customer.created_at)) + ' · <span class="pill ' + escapeHtml(d.customer.approval_status) + '">' + escapeHtml(d.customer.approval_status) + "</span></div>"
-      +   '<div class="sub" style="margin-top:8px">Lifetime spend: <strong>' + fmtUsd(d.spend_total_usd) + "</strong> · "
-      +     d.orders.length + " orders · " + d.licenses.length + " licenses · " + d.sessions.length + " sessions · " + d.team_memberships.length + " teams"
+      +   '<div class="sub">' + escapeHtml(d.customer.id) + " &#xB7; signed up " + escapeHtml(fmtDate(d.customer.created_at)) + ' &#xB7; <span class="pill ' + escapeHtml(d.customer.approval_status) + '">' + escapeHtml(d.customer.approval_status) + "</span></div>"
+      +   '<div class="sub" style="margin-top:8px">Lifetime spend: <strong>' + fmtUsd(d.spend_total_usd) + "</strong> &#xB7; "
+      +     d.orders.length + " orders &#xB7; " + d.licenses.length + " licenses &#xB7; " + d.sessions.length + " sessions &#xB7; " + d.team_memberships.length + " teams"
       +   "</div>"
       + "</div></div>"
       + '<div class="tabs">'
@@ -486,7 +486,7 @@ function renderOrdersTable(orders, opts) {
         + '<td><span class="pill ' + escapeHtml(o.status) + '">' + escapeHtml(o.status) + "</span></td>"
         + "<td>" + escapeHtml(fmtTs(o.created_at)) + "</td>"
         + "<td>" + escapeHtml(fmtTs(o.confirmed_at)) + "</td>"
-        + '<td class="mono" style="font-size:11px">' + (o.tx_hash ? escapeHtml(o.tx_hash.slice(0,12)) + "…" : "—") + "</td>"
+        + '<td class="mono" style="font-size:11px">' + (o.tx_hash ? escapeHtml(o.tx_hash.slice(0,12)) + "&#x2026;" : "&#x2014;") + "</td>"
         + (opts && opts.showActions && o.status === "pending"
             ? '<td class="actions-row"><button class="ghost" data-confirm="' + escapeHtml(o.id) + '">Confirm</button> <button class="danger" data-cancel="' + escapeHtml(o.id) + '">Cancel</button></td>'
             : (opts && opts.showActions ? "<td></td>" : "")) + "</tr>",
@@ -547,10 +547,10 @@ function renderAuditTable(audit) {
     + "</tbody></table>";
 }
 
-// ── Orders (top-level page) ──────────────────────────────────────────
+// &#x2500;&#x2500; Orders (top-level page) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderOrders() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">Pending orders</h1><section class="card" id="orders-card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<h1 class="page">Pending orders</h1><section class="card" id="orders-card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const orders = await api("/orders/pending");
     const checkboxes = orders.length > 0;
@@ -560,7 +560,7 @@ async function renderOrders() {
             '<tr><td><input type="checkbox" data-bulk="orders" value="' + escapeHtml(o.id) + '" /></td>'
             + '<td class="mono">' + escapeHtml(o.id) + "</td>"
             + "<td>" + escapeHtml(o.interval) + "</td>"
-            + "<td>" + (o.customer_telegram ? "@" + escapeHtml(o.customer_telegram.replace(/^@/, "")) : "—") + "</td>"
+            + "<td>" + (o.customer_telegram ? "@" + escapeHtml(o.customer_telegram.replace(/^@/, "")) : "&#x2014;") + "</td>"
             + "<td>" + escapeHtml(fmtTs(o.created_at)) + "</td>"
             + '<td class="actions-row"><button class="ghost" data-confirm="' + escapeHtml(o.id) + '">Confirm</button> <button class="danger" data-cancel="' + escapeHtml(o.id) + '">Cancel</button></td>'
             + "</tr>").join("")
@@ -576,7 +576,7 @@ async function renderOrders() {
 
 async function renderLicenses() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">Licenses</h1><section class="card" id="lic-card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<h1 class="page">Licenses</h1><section class="card" id="lic-card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const licenses = await api("/licenses?limit=200");
     const nowSec = Math.floor(Date.now()/1000);
@@ -606,7 +606,7 @@ async function renderLicenses() {
 
 async function renderPendingApprovals() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">Pending approvals</h1><section class="card" id="pa-card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<h1 class="page">Pending approvals</h1><section class="card" id="pa-card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const list = await api("/customers/pending");
     if (!list.length) { $("#pa-card").innerHTML = '<p class="empty">No pending approvals.</p>'; return; }
@@ -614,9 +614,9 @@ async function renderPendingApprovals() {
       + list.map((c) =>
           '<tr><td><input type="checkbox" data-bulk="pending" value="' + escapeHtml(c.id) + '" /></td>'
           + '<td class="mono">' + escapeHtml(c.id) + "</td>"
-          + "<td>" + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : "—") + "</td>"
-          + "<td>" + escapeHtml(c.email || "—") + "</td>"
-          + "<td>" + escapeHtml(c.method || "—") + "</td>"
+          + "<td>" + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : "&#x2014;") + "</td>"
+          + "<td>" + escapeHtml(c.email || "&#x2014;") + "</td>"
+          + "<td>" + escapeHtml(c.method || "&#x2014;") + "</td>"
           + "<td>" + escapeHtml(fmtTs(c.created_at)) + "</td>"
           + '<td class="actions-row"><button data-approve="' + escapeHtml(c.id) + '" data-days="2">Approve 2d</button>'
           +   '<button data-approve="' + escapeHtml(c.id) + '" data-days="7">Approve 7d</button>'
@@ -640,7 +640,7 @@ async function renderPendingApprovals() {
   } catch (err) { toast(err.message, { err: true }); }
 }
 
-// ── Crypoverse invoices ───────────────────────────────────────────────
+// &#x2500;&#x2500; Crypoverse invoices &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderCrypoverseList() {
   const view = $("#view");
   view.innerHTML = '<h1 class="page">Crypoverse invoices</h1>'
@@ -649,14 +649,14 @@ async function renderCrypoverseList() {
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
     +   '<select id="cv-filter-status" class="ghost" style="background:#0d0d12;color:#ccc;padding:7px 10px;border-radius:7px;border:1px solid rgba(255,255,255,0.15);font:inherit">'
     +     '<option value="all">All statuses</option>'
-    +     '<option value="open">🟡 Open (initiated/pending)</option>'
-    +     '<option value="paid">✅ Paid</option>'
-    +     '<option value="failed">❌ Failed / expired</option>'
+    +     '<option value="open">&#x1F7E1; Open (initiated/pending)</option>'
+    +     '<option value="paid">&#x2705; Paid</option>'
+    +     '<option value="failed">&#x274C; Failed / expired</option>'
     +   '</select>'
-    +   '<input id="cv-filter-q" placeholder="Search by tx, order, @handle…" style="flex:1;min-width:240px;background:#0d0d12;color:#ccc;padding:7px 12px;border-radius:7px;border:1px solid rgba(255,255,255,0.15);font:inherit" />'
-    +   '<button class="ghost" id="cv-reload">↻ Reload</button>'
+    +   '<input id="cv-filter-q" placeholder="Search by tx, order, @handle&#x2026;" style="flex:1;min-width:240px;background:#0d0d12;color:#ccc;padding:7px 12px;border-radius:7px;border:1px solid rgba(255,255,255,0.15);font:inherit" />'
+    +   '<button class="ghost" id="cv-reload">&#x21BB; Reload</button>'
     + '</div>'
-    + '<div id="cv-table"><p class="empty">Loading…</p></div></section>';
+    + '<div id="cv-table"><p class="empty">Loading&#x2026;</p></div></section>';
   async function reload() {
     try {
       const [stats, list] = await Promise.all([
@@ -669,7 +669,7 @@ async function renderCrypoverseList() {
         kpi("Open invoices", fmtNum(stats.open_invoices)),
         kpi("Failed", fmtNum(stats.failed_invoices)),
         kpi("Conversion", stats.conversion_rate_pct + "%"),
-        kpi("Avg time-to-pay", stats.avg_time_to_pay_minutes ? stats.avg_time_to_pay_minutes + " min" : "—"),
+        kpi("Avg time-to-pay", stats.avg_time_to_pay_minutes ? stats.avg_time_to_pay_minutes + " min" : "&#x2014;"),
         kpi("Listeners active", fmtNum(stats.listeners_active), "SSE streams"),
       ].join("");
       const invoices = list.invoices;
@@ -680,9 +680,9 @@ async function renderCrypoverseList() {
                         : ["expired","cancelled","canceled","failed","refunded"].includes(i.status) ? "revoked"
                         : "pending";
               return '<tr class="click" onclick="location.hash=\'crypoverse/' + escapeHtml(i.transaction_id) + "'\">"
-                + '<td class="mono" style="font-size:11px">' + escapeHtml(i.transaction_id.slice(0,16)) + '…</td>'
+                + '<td class="mono" style="font-size:11px">' + escapeHtml(i.transaction_id.slice(0,16)) + '&#x2026;</td>'
                 + '<td class="mono">' + escapeHtml(i.order_id) + "</td>"
-                + "<td>" + (i.customer_telegram ? "@" + escapeHtml(i.customer_telegram.replace(/^@/, "")) : '<span style="color:#666">—</span>') + "</td>"
+                + "<td>" + (i.customer_telegram ? "@" + escapeHtml(i.customer_telegram.replace(/^@/, "")) : '<span style="color:#666">&#x2014;</span>') + "</td>"
                 + "<td><strong>" + fmtUsd(i.amount_usd) + "</strong></td>"
                 + '<td><span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span></td>"
                 + "<td>" + escapeHtml(fmtTs(i.created_at)) + "</td>"
@@ -703,35 +703,35 @@ async function renderCrypoverseList() {
 
 async function renderCrypoverseDetail(tx) {
   const view = $("#view");
-  view.innerHTML = '<div class="crumb"><a href="#crypoverse" class="link">← Crypoverse invoices</a></div><section class="card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<div class="crumb"><a href="#crypoverse" class="link">&#x2190; Crypoverse invoices</a></div><section class="card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const i = await api("/crypoverse/invoices/" + encodeURIComponent(tx));
     const cls = ["paid","confirmed","completed","succeeded"].includes(i.status) ? "valid"
               : ["expired","cancelled","canceled","failed","refunded"].includes(i.status) ? "revoked"
               : "pending";
-    const lastEv = i.last_event_parsed ? JSON.stringify(i.last_event_parsed, null, 2) : (i.last_event_payload || "—");
+    const lastEv = i.last_event_parsed ? JSON.stringify(i.last_event_parsed, null, 2) : (i.last_event_payload || "&#x2014;");
     view.innerHTML =
-        '<div class="crumb"><a href="#crypoverse" class="link">← Crypoverse invoices</a></div>'
+        '<div class="crumb"><a href="#crypoverse" class="link">&#x2190; Crypoverse invoices</a></div>'
       + '<section class="card">'
       + '<h1 class="page" style="margin-bottom:6px">Invoice <span class="mono" style="font-size:14px;color:#888">' + escapeHtml(i.transaction_id) + "</span></h1>"
-      + '<div style="color:#888;margin-bottom:18px">Order <a href="#customers" class="link mono">' + escapeHtml(i.order_id) + "</a> · <strong>" + fmtUsd(i.amount_usd) + "</strong> · "
-      +   'Status <span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span> · Created " + escapeHtml(fmtTs(i.created_at)) + "</div>"
+      + '<div style="color:#888;margin-bottom:18px">Order <a href="#customers" class="link mono">' + escapeHtml(i.order_id) + "</a> &#xB7; <strong>" + fmtUsd(i.amount_usd) + "</strong> &#xB7; "
+      +   'Status <span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span> &#xB7; Created " + escapeHtml(fmtTs(i.created_at)) + "</div>"
       + '<table style="margin-bottom:18px">'
       +   '<tr><th>Internal id</th><td class="mono">' + escapeHtml(i.id) + "</td></tr>"
       +   '<tr><th>Transaction id</th><td class="mono">' + escapeHtml(i.transaction_id) + "</td></tr>"
       +   '<tr><th>Order id</th><td class="mono">' + escapeHtml(i.order_id) + "</td></tr>"
       +   "<tr><th>Amount</th><td><strong>" + fmtUsd(i.amount_usd) + "</strong></td></tr>"
       +   '<tr><th>Status</th><td><span class="pill ' + cls + '">' + escapeHtml(i.status) + "</span></td></tr>"
-      +   "<tr><th>Order status</th><td>" + (i.order_status ? '<span class="pill ' + escapeHtml(i.order_status) + '">' + escapeHtml(i.order_status) + "</span>" : "—") + "</td></tr>"
+      +   "<tr><th>Order status</th><td>" + (i.order_status ? '<span class="pill ' + escapeHtml(i.order_status) + '">' + escapeHtml(i.order_status) + "</span>" : "&#x2014;") + "</td></tr>"
       +   "<tr><th>Created</th><td>" + escapeHtml(fmtTs(i.created_at)) + "</td></tr>"
       +   "<tr><th>Last event</th><td>" + escapeHtml(fmtRel(i.last_event_at)) + "</td></tr>"
       +   "<tr><th>Paid</th><td>" + escapeHtml(fmtTs(i.paid_at)) + "</td></tr>"
-      +   "<tr><th>Paid tx hash</th><td class=\"mono\" style=\"font-size:11px;word-break:break-all\">" + escapeHtml(i.paid_tx_hash || "—") + "</td></tr>"
+      +   "<tr><th>Paid tx hash</th><td class=\"mono\" style=\"font-size:11px;word-break:break-all\">" + escapeHtml(i.paid_tx_hash || "&#x2014;") + "</td></tr>"
       +   "<tr><th>Pay URL</th><td><a class=\"link mono\" href=\"" + escapeHtml(i.redirect_url) + "\" target=\"_blank\" rel=\"noopener\">" + escapeHtml(i.redirect_url) + "</a></td></tr>"
       + "</table>"
       + '<h2>Last SSE event payload</h2>'
       + '<pre class="mono" style="background:#0d0d12;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;overflow:auto;max-height:260px;font-size:11px">' + escapeHtml(lastEv) + "</pre>"
-      + '<div style="margin-top:14px"><button id="cv-retry">🔄 Retry SSE listener</button> <button class="ghost" onclick="location.reload()">↻ Reload page</button></div>'
+      + '<div style="margin-top:14px"><button id="cv-retry">&#x1F504; Retry SSE listener</button> <button class="ghost" onclick="location.reload()">&#x21BB; Reload page</button></div>'
       + "</section>";
     $("#cv-retry").addEventListener("click", async () => {
       try {
@@ -742,10 +742,10 @@ async function renderCrypoverseDetail(tx) {
   } catch (err) { view.innerHTML = '<section class="card"><p class="empty">' + escapeHtml(err.message) + "</p></section>"; }
 }
 
-// ── Teams ─────────────────────────────────────────────────────────────
+// &#x2500;&#x2500; Teams &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderTeamsList() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">Teams</h1><section class="card" id="teams-card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<h1 class="page">Teams</h1><section class="card" id="teams-card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const r = await api("/teams?limit=200");
     if (!r.teams.length) { $("#teams-card").innerHTML = '<p class="empty">No teams yet.</p>'; return; }
@@ -756,7 +756,7 @@ async function renderTeamsList() {
           + '<td class="mono" style="font-size:11px">' + escapeHtml(t.id) + "</td>"
           + "<td>" + escapeHtml(t.owner_display || t.owner_customer_id) + "</td>"
           + "<td>" + fmtNum(t.member_count) + "</td>"
-          + "<td>" + (t.active_session_count > 0 ? '<span class="pill valid">' + t.active_session_count + " live</span>" : '<span style="color:#666">—</span>') + "</td>"
+          + "<td>" + (t.active_session_count > 0 ? '<span class="pill valid">' + t.active_session_count + " live</span>" : '<span style="color:#666">&#x2014;</span>') + "</td>"
           + "<td>" + escapeHtml(fmtDate(t.created_at)) + "</td>"
           + "</tr>").join("")
       + "</tbody></table>";
@@ -765,24 +765,24 @@ async function renderTeamsList() {
 
 async function renderTeamDetail(id) {
   const view = $("#view");
-  view.innerHTML = '<div class="crumb"><a href="#teams" class="link">← Teams</a></div><section class="card"><p class="empty">Loading…</p></section>';
+  view.innerHTML = '<div class="crumb"><a href="#teams" class="link">&#x2190; Teams</a></div><section class="card"><p class="empty">Loading&#x2026;</p></section>';
   try {
     const d = await api("/teams/" + encodeURIComponent(id));
     view.innerHTML =
-        '<div class="crumb"><a href="#teams" class="link">← Teams</a></div>'
+        '<div class="crumb"><a href="#teams" class="link">&#x2190; Teams</a></div>'
       + '<section class="card">'
       +   '<h1 class="page" style="margin-bottom:4px">' + escapeHtml(d.team.name) + "</h1>"
-      +   '<div style="color:#888;margin-bottom:18px"><span class="mono">' + escapeHtml(d.team.id) + "</span> · created " + escapeHtml(fmtDate(d.team.created_at)) + " · "
-      +     d.members.length + " members · " + d.invites.length + " invites · " + d.active_sessions.length + " active sessions</div>"
+      +   '<div style="color:#888;margin-bottom:18px"><span class="mono">' + escapeHtml(d.team.id) + "</span> &#xB7; created " + escapeHtml(fmtDate(d.team.created_at)) + " &#xB7; "
+      +     d.members.length + " members &#xB7; " + d.invites.length + " invites &#xB7; " + d.active_sessions.length + " active sessions</div>"
       +   '<h2>Members</h2>'
       +   '<table style="margin-bottom:18px"><thead><tr><th>Customer</th><th>Display</th><th>Telegram</th><th>Role</th><th>Joined</th><th>Transfer ownership</th></tr></thead><tbody>'
       +     d.members.map((m) =>
               '<tr><td class="mono" style="font-size:11px">' + escapeHtml(m.customer_id) + "</td>"
-              + "<td>" + escapeHtml(m.display || "—") + "</td>"
-              + "<td>" + (m.telegram ? "@" + escapeHtml(m.telegram.replace(/^@/, "")) : "—") + "</td>"
+              + "<td>" + escapeHtml(m.display || "&#x2014;") + "</td>"
+              + "<td>" + (m.telegram ? "@" + escapeHtml(m.telegram.replace(/^@/, "")) : "&#x2014;") + "</td>"
               + "<td><strong>" + escapeHtml(m.role) + "</strong></td>"
               + "<td>" + escapeHtml(fmtDate(m.added_at)) + "</td>"
-              + "<td>" + (m.role !== "owner" ? '<button class="ghost" data-transfer="' + escapeHtml(m.customer_id) + '">→ Make owner</button>' : '<span style="color:#666">owner</span>') + "</td>"
+              + "<td>" + (m.role !== "owner" ? '<button class="ghost" data-transfer="' + escapeHtml(m.customer_id) + '">&#x2192; Make owner</button>' : '<span style="color:#666">owner</span>') + "</td>"
               + "</tr>").join("")
       +   "</tbody></table>"
       +   '<h2>Active sessions (' + d.active_sessions.length + ")</h2>"
@@ -792,7 +792,7 @@ async function renderTeamDetail(id) {
             + d.active_sessions.map((s) =>
                 '<tr><td class="mono" style="font-size:11px">' + escapeHtml(s.id) + "</td>"
                 + '<td class="mono" style="font-size:11px">' + escapeHtml(s.host_customer_id) + "</td>"
-                + "<td>" + escapeHtml(s.title || "—") + "</td>"
+                + "<td>" + escapeHtml(s.title || "&#x2014;") + "</td>"
                 + "<td>" + escapeHtml(fmtTs(s.created_at)) + "</td>"
                 + "<td>" + escapeHtml(fmtRel(s.last_heartbeat_at)) + "</td>"
                 + "</tr>").join("")
@@ -821,10 +821,10 @@ async function renderTeamDetail(id) {
   } catch (err) { view.innerHTML = '<section class="card"><p class="empty">' + escapeHtml(err.message) + "</p></section>"; }
 }
 
-// ── System health ─────────────────────────────────────────────────────
+// &#x2500;&#x2500; System health &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderHealth() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">System health</h1><div id="hc"><p class="empty">Loading…</p></div>';
+  view.innerHTML = '<h1 class="page">System health</h1><div id="hc"><p class="empty">Loading&#x2026;</p></div>';
   try {
     const h = await api("/health");
     const fmtBytes = (b) => {
@@ -843,7 +843,7 @@ async function renderHealth() {
       '<div class="kpi-grid">'
       + kpi("Uptime", fmtUptime(h.process.uptime_seconds), "pid " + h.process.pid)
       + kpi("RSS memory", fmtBytes(h.process.rss_bytes), "heap " + fmtBytes(h.process.heap_used_bytes) + " / " + fmtBytes(h.process.heap_total_bytes))
-      + kpi("DB size", h.db ? fmtBytes(h.db.file_size_bytes) : "—", h.db ? h.db.page_count + " pages · " + h.db.journal_mode : "")
+      + kpi("DB size", h.db ? fmtBytes(h.db.file_size_bytes) : "&#x2014;", h.db ? h.db.page_count + " pages &#xB7; " + h.db.journal_mode : "")
       + kpi("Crypoverse SSE", h.workers.crypoverse_listeners_active + "", "active listeners")
       + "</div>"
       + sub("Background workers", '<table>'
@@ -853,8 +853,8 @@ async function renderHealth() {
           + "<tr><th>Backup scheduler</th><td>" + okBadge(h.workers.backup_scheduler_enabled) + "</td></tr>"
           + "<tr><th>Last backup</th><td>" + (h.workers.last_backup
               ? (h.workers.last_backup.ok
-                  ? '<span class="pill valid">ok</span> ' + escapeHtml(fmtRel(h.workers.last_backup.at)) + " · " + fmtBytes(h.workers.last_backup.size || 0)
-                  : '<span class="pill revoked">failed</span> ' + escapeHtml(fmtRel(h.workers.last_backup.at)) + " · " + escapeHtml(h.workers.last_backup.error || ""))
+                  ? '<span class="pill valid">ok</span> ' + escapeHtml(fmtRel(h.workers.last_backup.at)) + " &#xB7; " + fmtBytes(h.workers.last_backup.size || 0)
+                  : '<span class="pill revoked">failed</span> ' + escapeHtml(fmtRel(h.workers.last_backup.at)) + " &#xB7; " + escapeHtml(h.workers.last_backup.error || ""))
               : '<span style="color:#666">never (no backup since boot)</span>') + "</td></tr>"
           + "</table>")
       + sub("Environment", '<table>'
@@ -862,7 +862,7 @@ async function renderHealth() {
           + "</table>")
       + sub("Database", h.db ? '<table>'
           + "<tr><th>File size</th><td>" + fmtBytes(h.db.file_size_bytes) + "</td></tr>"
-          + "<tr><th>Pages</th><td>" + fmtNum(h.db.page_count) + " × " + fmtBytes(h.db.page_size) + "</td></tr>"
+          + "<tr><th>Pages</th><td>" + fmtNum(h.db.page_count) + " &#xD7; " + fmtBytes(h.db.page_size) + "</td></tr>"
           + "<tr><th>Journal mode</th><td>" + escapeHtml(h.db.journal_mode) + "</td></tr>"
           + "<tr><th>Customers</th><td>" + fmtNum(h.db.customers) + "</td></tr>"
           + "<tr><th>Orders</th><td>" + fmtNum(h.db.orders) + "</td></tr>"
@@ -879,7 +879,7 @@ async function renderHealth() {
                 + "</tr>").join("")
             + "</tbody></table>")
       + sub("Runtime", '<table>'
-          + "<tr><th>Bun</th><td>" + escapeHtml(h.process.bun_version || "—") + "</td></tr>"
+          + "<tr><th>Bun</th><td>" + escapeHtml(h.process.bun_version || "&#x2014;") + "</td></tr>"
           + "<tr><th>Node</th><td>" + escapeHtml(h.process.node_version) + "</td></tr>"
           + "<tr><th>PID</th><td>" + h.process.pid + "</td></tr>"
           + "<tr><th>Started</th><td>" + escapeHtml(fmtTs(h.process.started_at)) + "</td></tr>"
@@ -887,10 +887,10 @@ async function renderHealth() {
   } catch (err) { $("#hc").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
 }
 
-// ── Settings ──────────────────────────────────────────────────────────
-let renderSettings = async function () {
+// &#x2500;&#x2500; Settings &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+async function renderSettings() {
   const view = $("#view");
-  view.innerHTML = '<h1 class="page">Settings</h1><div id="settings-wrap"><p class="empty">Loading…</p></div>';
+  view.innerHTML = '<h1 class="page">Settings</h1><div id="settings-wrap"><p class="empty">Loading&#x2026;</p></div>';
   try {
     const data = await api("/settings");
     let html = '<section class="card"><h2>Runtime-editable</h2>';
@@ -920,15 +920,15 @@ let renderSettings = async function () {
     html += "</section>";
     html += '<section class="card"><h2>Read-only (env-backed)</h2><table>'
       + '<tr><th>Plan prices (USD)</th><td>monthly: $' + data.env_readonly.plan_prices_usd.monthly
-      + " · annual: $" + data.env_readonly.plan_prices_usd.annual
-      + " · lifetime: $" + data.env_readonly.plan_prices_usd.lifetime + "</td></tr>"
+      + " &#xB7; annual: $" + data.env_readonly.plan_prices_usd.annual
+      + " &#xB7; lifetime: $" + data.env_readonly.plan_prices_usd.lifetime + "</td></tr>"
       + '<tr><th>Admin user ids</th><td>' + data.env_readonly.admin_user_ids_count + " configured</td></tr>"
       + '<tr><th>Crypoverse</th><td>' + (data.env_readonly.crypoverse_enabled ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>') + "</td></tr>"
       + '<tr><th>Sentry</th><td>' + (data.env_readonly.sentry_enabled ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>') + "</td></tr>"
       + '<tr><th>S3 backup</th><td>' + (data.env_readonly.backup_enabled ? '<span class="pill valid">ON</span>' : '<span class="pill revoked">OFF</span>') + "</td></tr>"
-      + '</table><p style="color:var(--muted);font-size:11px;margin-top:10px">These are sourced from env vars / Fly secrets — change them with <code>fly secrets set KEY=value</code> followed by a deploy.</p></section>';
+      + '</table><p style="color:var(--muted);font-size:11px;margin-top:10px">These are sourced from env vars / Fly secrets &#x2014; change them with <code>fly secrets set KEY=value</code> followed by a deploy.</p></section>';
     $("#settings-wrap").innerHTML = html;
-    // Wire toggles (boolean — auto-save on click)
+    // Wire toggles (boolean &#x2014; auto-save on click)
     $$('div[data-toggle]').forEach((el) => el.addEventListener("click", async () => {
       const key = el.dataset.toggle;
       const on = el.dataset.on === "true";
@@ -937,25 +937,25 @@ let renderSettings = async function () {
         await api("/settings/" + encodeURIComponent(key), { method: "PUT", body: JSON.stringify({ value: next }) });
         el.classList.toggle("on", next);
         el.dataset.on = String(next);
-        toast("Saved · " + key + " = " + next);
+        toast("Saved &#xB7; " + key + " = " + next);
       } catch (e) { toast(e.message, { err: true }); }
     }));
-    // Wire save buttons (number/string — explicit save)
+    // Wire save buttons (number/string &#x2014; explicit save)
     $$('button[data-save]').forEach((b) => b.addEventListener("click", async () => {
       const key = b.dataset.save;
       const input = $('input[data-input="' + key + '"]');
       try {
         await api("/settings/" + encodeURIComponent(key), { method: "PUT", body: JSON.stringify({ value: input.value }) });
-        toast("Saved · " + key);
+        toast("Saved &#xB7; " + key);
         renderSettings();
       } catch (e) { toast(e.message, { err: true }); }
     }));
   } catch (err) { $("#settings-wrap").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
   // Step 4: 2FA card appended below the editable + read-only sections.
   await append2faCard();
-};
+}
 
-// ── Audit log (advanced) ──────────────────────────────────────────────
+// &#x2500;&#x2500; Audit log (advanced) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 const auditState = { offset: 0, limit: 50 };
 async function renderAudit() {
   const view = $("#view");
@@ -964,17 +964,17 @@ async function renderAudit() {
     + '<div class="filters">'
     +   '<input id="a-actor" placeholder="Actor / customer id" />'
     +   '<input id="a-action" placeholder="Action prefix (e.g. license.)" />'
-    +   '<input id="a-q" placeholder="Free text search…" />'
+    +   '<input id="a-q" placeholder="Free text search&#x2026;" />'
     +   '<input id="a-since" type="date" />'
     +   '<input id="a-until" type="date" />'
     +   '<button id="a-apply">Apply</button>'
-    +   '<button class="ghost" id="a-csv">↓ Export CSV</button>'
+    +   '<button class="ghost" id="a-csv">&#x2193; Export CSV</button>'
     + "</div>"
-    + '<div id="a-table"><p class="empty">Loading…</p></div>'
+    + '<div id="a-table"><p class="empty">Loading&#x2026;</p></div>'
     + '<div style="margin-top:14px;display:flex;gap:8px;align-items:center">'
-    +   '<button class="ghost" id="a-prev">← Prev</button>'
+    +   '<button class="ghost" id="a-prev">&#x2190; Prev</button>'
     +   '<span id="a-page" style="color:var(--muted);font-size:12px"></span>'
-    +   '<button class="ghost" id="a-next">Next →</button>'
+    +   '<button class="ghost" id="a-next">Next &#x2192;</button>'
     + "</div></section>";
   function qstring() {
     const p = [];
@@ -992,7 +992,7 @@ async function renderAudit() {
   async function reload() {
     try {
       const r = await api("/audit?" + qstring());
-      $("#a-page").textContent = "Showing " + (r.rows.length === 0 ? "0" : (auditState.offset+1) + "–" + (auditState.offset + r.rows.length)) + " of " + r.total;
+      $("#a-page").textContent = "Showing " + (r.rows.length === 0 ? "0" : (auditState.offset+1) + "&#x2013;" + (auditState.offset + r.rows.length)) + " of " + r.total;
       $("#a-prev").disabled = auditState.offset === 0;
       $("#a-next").disabled = auditState.offset + r.rows.length >= r.total;
       $("#a-table").innerHTML = r.rows.length === 0
@@ -1017,7 +1017,7 @@ async function renderAudit() {
   reload();
 }
 
-// ── Bulk selection system ─────────────────────────────────────────────
+// &#x2500;&#x2500; Bulk selection system &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 // Tables that opt in render <input type="checkbox" data-bulk="<scope>"
 // value="<id>" /> and call rebindBulkSelection(scope). The bar shows
 // scope-specific actions and posts to the corresponding bulk endpoint.
@@ -1071,7 +1071,7 @@ function refreshBulkBar(actions) {
 }
 $("#bulkClear").addEventListener("click", () => { bulkSel.ids.clear(); $("#bulkbar").hidden = true; $$('input[data-bulk], input[data-bulk-all]').forEach((cb) => { cb.checked = false; }); });
 
-// ── Communications (broadcast) ────────────────────────────────────────
+// &#x2500;&#x2500; Communications (broadcast) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function renderComms() {
   const view = $("#view");
   view.innerHTML = '<h1 class="page">Communications</h1>'
@@ -1079,15 +1079,15 @@ async function renderComms() {
     + '<h2>Push broadcast via Telegram bot</h2>'
     + '<div class="setting-row" style="display:block;border:0;padding-top:0">'
     +   '<label class="k" for="cm-segment" style="display:block;margin-bottom:6px">Segment</label>'
-    +   '<select id="cm-segment" style="width:100%;max-width:520px;background:var(--bg);color:var(--text);padding:9px 12px;border-radius:7px;border:1px solid var(--border);font:inherit"><option value="">Loading segments…</option></select>'
+    +   '<select id="cm-segment" style="width:100%;max-width:520px;background:var(--bg);color:var(--text);padding:9px 12px;border-radius:7px;border:1px solid var(--border);font:inherit"><option value="">Loading segments&#x2026;</option></select>'
     + '</div>'
     + '<div class="setting-row" style="display:block;border:0">'
     +   '<label class="k" for="cm-msg" style="display:block;margin-bottom:6px">Message (max 4000 chars, Markdown supported)</label>'
-    +   '<textarea id="cm-msg" rows="6" placeholder="Hi @user! …" style="width:100%;background:var(--bg);color:var(--text);padding:10px 12px;border-radius:7px;border:1px solid var(--border);font:inherit;resize:vertical"></textarea>'
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px"><span id="cm-count" style="color:var(--muted);font-size:11px">0 / 4000</span> <button id="cm-send">📢 Send broadcast</button></div>'
+    +   '<textarea id="cm-msg" rows="6" placeholder="Hi @user! &#x2026;" style="width:100%;background:var(--bg);color:var(--text);padding:10px 12px;border-radius:7px;border:1px solid var(--border);font:inherit;resize:vertical"></textarea>'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px"><span id="cm-count" style="color:var(--muted);font-size:11px">0 / 4000</span> <button id="cm-send">&#x1F4E2; Send broadcast</button></div>'
     + '</div>'
     + '</section>'
-    + '<section class="card"><h2>Recent broadcasts</h2><div id="cm-history"><p class="empty">Loading…</p></div></section>';
+    + '<section class="card"><h2>Recent broadcasts</h2><div id="cm-history"><p class="empty">Loading&#x2026;</p></div></section>';
   // Populate segments
   try {
     const seg = await api("/broadcasts/segments");
@@ -1103,7 +1103,7 @@ async function renderComms() {
     const segText = $("#cm-segment").options[$("#cm-segment").selectedIndex].text;
     if (!confirm("Send this broadcast to: " + segText + " ?\n\nThis cannot be undone.")) return;
     $("#cm-send").disabled = true;
-    $("#cm-send").textContent = "Sending…";
+    $("#cm-send").textContent = "Sending&#x2026;";
     try {
       const r = await api("/broadcasts", { method: "POST", body: JSON.stringify({ segment, message, parse_mode: "Markdown" }) });
       toast("Broadcast: " + r.broadcast.delivered + "/" + r.broadcast.total + " delivered" + (r.broadcast.failed ? " (" + r.broadcast.failed + " failed)" : ""));
@@ -1111,7 +1111,7 @@ async function renderComms() {
       $("#cm-count").textContent = "0 / 4000";
       loadHistory();
     } catch (e) { toast(e.message, { err: true }); }
-    finally { $("#cm-send").disabled = false; $("#cm-send").textContent = "📢 Send broadcast"; }
+    finally { $("#cm-send").disabled = false; $("#cm-send").textContent = "&#x1F4E2; Send broadcast"; }
   });
   async function loadHistory() {
     try {
@@ -1124,7 +1124,7 @@ async function renderComms() {
               + "<td>" + escapeHtml(b.sent_by) + "</td>"
               + "<td><strong>" + fmtNum(b.delivered) + "</strong> / " + fmtNum(b.total) + "</td>"
               + "<td>" + (b.failed > 0 ? '<span class="pill revoked">' + b.failed + "</span>" : "<span style=\"color:#666\">0</span>") + "</td>"
-              + '<td style="max-width:380px;color:var(--muted);font-size:11px;word-break:break-word">' + escapeHtml(b.message.slice(0,180)) + (b.message.length > 180 ? "…" : "") + "</td>"
+              + '<td style="max-width:380px;color:var(--muted);font-size:11px;word-break:break-word">' + escapeHtml(b.message.slice(0,180)) + (b.message.length > 180 ? "&#x2026;" : "") + "</td>"
               + "</tr>").join("")
           + "</tbody></table>";
     } catch (err) { $("#cm-history").innerHTML = '<p class="empty">' + escapeHtml(err.message) + "</p>"; }
@@ -1132,13 +1132,13 @@ async function renderComms() {
   loadHistory();
 }
 
-// ── Live activity feed (subscribed once globally) ────────────────────
+// &#x2500;&#x2500; Live activity feed (subscribed once globally) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 const liveFeed = { events: [], lastId: 0, source: null, maxKeep: 100 };
 function startLiveFeed() {
   if (liveFeed.source) return;
   try {
     const otp = sessionStorage.getItem("admin_otp");
-    // EventSource can't set headers — for the SSE we rely on BasicAuth
+    // EventSource can't set headers &#x2014; for the SSE we rely on BasicAuth
     // cookies and the OTP being already established via prior /api/
     // calls. If 2FA is on AND the operator hasn't unlocked it yet, the
     // SSE 401s; we silently retry on the next nav.
@@ -1163,25 +1163,25 @@ function startLiveFeed() {
   } catch (_) { liveFeed.source = null; }
 }
 function eventIcon(t) {
-  return ({ signup:"🆕", order_created:"📦", order_paid:"💰", order_cancelled:"🚫",
-            license_issued:"🎟️", license_revoked:"⛔", crypoverse_paid:"💳",
-            crypoverse_failed:"❌", team_created:"👥", broadcast_sent:"📢",
-            system_error:"🚨" }[t]) || "•";
+  return ({ signup:"&#x1F195;", order_created:"&#x1F4E6;", order_paid:"&#x1F4B0;", order_cancelled:"&#x1F6AB;",
+            license_issued:"&#x1F39F;&#xFE0F;", license_revoked:"&#x26D4;", crypoverse_paid:"&#x1F4B3;",
+            crypoverse_failed:"&#x274C;", team_created:"&#x1F465;", broadcast_sent:"&#x1F4E2;",
+            system_error:"&#x1F6A8;" }[t]) || "&#x2022;";
 }
 function renderLiveFeedWidget() {
   const widget = $("#live-feed");
   if (!widget) return;
   widget.innerHTML = liveFeed.events.length === 0
-    ? '<p class="empty">Waiting for live events…</p>'
+    ? '<p class="empty">Waiting for live events&#x2026;</p>'
     : '<ul style="list-style:none;padding:0;margin:0;max-height:380px;overflow-y:auto">'
       + liveFeed.events.slice(0, 30).map((ev) => {
           const handle = ev.payload.customer_telegram ? "@" + String(ev.payload.customer_telegram).replace(/^@/, "") : "";
           const detail = (ev.type === "order_paid" || ev.type === "crypoverse_paid")
-              ? handle + " · " + (ev.payload.amount_usd ? "$" + ev.payload.amount_usd : "")
+              ? handle + " &#xB7; " + (ev.payload.amount_usd ? "$" + ev.payload.amount_usd : "")
               : ev.type === "order_created"
-                ? handle + " · " + (ev.payload.interval || "") + " · " + (ev.payload.amount_usd ? "$" + ev.payload.amount_usd : "") + " · " + (ev.payload.method || "")
+                ? handle + " &#xB7; " + (ev.payload.interval || "") + " &#xB7; " + (ev.payload.amount_usd ? "$" + ev.payload.amount_usd : "") + " &#xB7; " + (ev.payload.method || "")
                 : ev.type === "broadcast_sent"
-                  ? ev.payload.segment + " · " + ev.payload.delivered + "/" + ev.payload.total
+                  ? ev.payload.segment + " &#xB7; " + ev.payload.delivered + "/" + ev.payload.total
                   : JSON.stringify(ev.payload).slice(0,80);
           return '<li style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:10px;align-items:center;font-size:12px">'
             + '<span style="font-size:18px">' + eventIcon(ev.type) + "</span>"
@@ -1193,7 +1193,7 @@ function renderLiveFeedWidget() {
 }
 // Live feed widget is appended directly inside the renderOverview body.
 
-// ── 2FA wizard (rendered inside Settings via injection) ──────────────
+// &#x2500;&#x2500; 2FA wizard (rendered inside Settings via injection) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 async function append2faCard() {
   try {
     const status = await api("/2fa/status");
@@ -1206,8 +1206,8 @@ async function append2faCard() {
       + (status.enabled
           ? '<p style="color:var(--muted);margin-bottom:14px"><span class="pill valid">ENABLED</span> Admin requests must include a 6-digit OTP in the <code>X-Admin-OTP</code> header. The dashboard prompts for it after login and caches it for the tab.</p>'
             + '<div><input id="tfa-disable-code" placeholder="6-digit code" maxlength="6" style="background:var(--bg);color:var(--text);padding:8px 12px;border-radius:7px;border:1px solid var(--border)" /> <button class="danger" id="tfa-disable">Disable 2FA</button></div>'
-          : '<p style="color:var(--muted);margin-bottom:14px"><span class="pill revoked">OFF</span> Recommended for production. Once enabled, BasicAuth alone is no longer enough — every admin call must also carry a current 6-digit TOTP code.</p>'
-            + '<button id="tfa-setup">⚙️ Set up 2FA now</button>'
+          : '<p style="color:var(--muted);margin-bottom:14px"><span class="pill revoked">OFF</span> Recommended for production. Once enabled, BasicAuth alone is no longer enough &#x2014; every admin call must also carry a current 6-digit TOTP code.</p>'
+            + '<button id="tfa-setup">&#x2699;&#xFE0F; Set up 2FA now</button>'
             + '<div id="tfa-wizard" hidden style="margin-top:18px"></div>');
     wrap.appendChild(card);
     if (status.enabled) {
@@ -1243,7 +1243,7 @@ async function append2faCard() {
             if (!/^\d{6}$/.test(code)) { toast("Need a 6-digit code", { err: true }); return; }
             try {
               await api("/2fa/enable", { method: "POST", body: JSON.stringify({ secret: s.secret, code }) });
-              toast("✅ 2FA enabled — keep your authenticator app safe!");
+              toast("&#x2705; 2FA enabled &#x2014; keep your authenticator app safe!");
               sessionStorage.setItem("admin_otp", code);
               renderSettings();
             } catch (e) { toast(e.message, { err: true }); }
@@ -1254,12 +1254,12 @@ async function append2faCard() {
   } catch (_) {}
 }
 // 2FA card is appended directly inside the renderSettings body.
-// api() handles OTP injection inline (see its body — reads sessionStorage
+// api() handles OTP injection inline (see its body &#x2014; reads sessionStorage
 // and on otp_required prompts + retries once).
 
 function renderComingSoon(name) { return function () { $("#view").innerHTML = '<h1 class="page">' + escapeHtml(name) + '</h1><section class="card"><p class="empty">Coming in the next iteration of the dashboard.</p></section>'; }; }
 
-// ── action bindings (delegated) ──────────────────────────────────────
+// &#x2500;&#x2500; action bindings (delegated) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 function bindOrderActions() {
   $$('button[data-confirm]').forEach((b) => b.addEventListener("click", async () => {
     if (!confirm("Confirm order " + b.dataset.confirm + "?")) return;
@@ -1284,7 +1284,7 @@ function bindSessionActions() {
   }));
 }
 
-// ── Search (global, debounced) ───────────────────────────────────────
+// &#x2500;&#x2500; Search (global, debounced) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 let searchT = null;
 const sb = $("#searchbox"), sr = $("#search-results");
 sb.addEventListener("input", () => {
@@ -1295,9 +1295,9 @@ sb.addEventListener("input", () => {
     try {
       const r = await api("/search?q=" + encodeURIComponent(q));
       const sections = [];
-      if (r.customers.length) sections.push('<div class="group">Customers</div>' + r.customers.map((c) => '<a href="#customers/' + escapeHtml(c.id) + '"><strong>' + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : escapeHtml(c.email || c.id)) + '</strong> <span class="meta">' + escapeHtml(c.id) + " · " + escapeHtml(c.approval_status) + "</span></a>").join(""));
-      if (r.orders.length) sections.push('<div class="group">Orders</div>' + r.orders.map((o) => '<a href="#orders"><strong class="mono">' + escapeHtml(o.id) + '</strong> <span class="meta">' + escapeHtml(o.interval) + " · " + escapeHtml(o.status) + (o.customer_telegram ? " · " + escapeHtml(o.customer_telegram) : "") + "</span></a>").join(""));
-      if (r.licenses.length) sections.push('<div class="group">Licenses</div>' + r.licenses.map((l) => '<a href="#customers/' + escapeHtml(l.customer_id) + '"><strong class="mono">' + escapeHtml(l.id) + '</strong> <span class="meta">' + escapeHtml(l.interval) + (l.revoked_at ? " · revoked" : "") + "</span></a>").join(""));
+      if (r.customers.length) sections.push('<div class="group">Customers</div>' + r.customers.map((c) => '<a href="#customers/' + escapeHtml(c.id) + '"><strong>' + (c.telegram ? "@" + escapeHtml(c.telegram.replace(/^@/, "")) : escapeHtml(c.email || c.id)) + '</strong> <span class="meta">' + escapeHtml(c.id) + " &#xB7; " + escapeHtml(c.approval_status) + "</span></a>").join(""));
+      if (r.orders.length) sections.push('<div class="group">Orders</div>' + r.orders.map((o) => '<a href="#orders"><strong class="mono">' + escapeHtml(o.id) + '</strong> <span class="meta">' + escapeHtml(o.interval) + " &#xB7; " + escapeHtml(o.status) + (o.customer_telegram ? " &#xB7; " + escapeHtml(o.customer_telegram) : "") + "</span></a>").join(""));
+      if (r.licenses.length) sections.push('<div class="group">Licenses</div>' + r.licenses.map((l) => '<a href="#customers/' + escapeHtml(l.customer_id) + '"><strong class="mono">' + escapeHtml(l.id) + '</strong> <span class="meta">' + escapeHtml(l.interval) + (l.revoked_at ? " &#xB7; revoked" : "") + "</span></a>").join(""));
       if (r.teams.length) sections.push('<div class="group">Teams</div>' + r.teams.map((t) => '<a href="#teams"><strong>' + escapeHtml(t.name) + '</strong> <span class="meta">' + escapeHtml(t.id) + "</span></a>").join(""));
       sr.innerHTML = sections.length ? sections.join("") : '<div class="group">No matches</div>';
       sr.hidden = false;
@@ -1309,7 +1309,7 @@ document.addEventListener("click", (e) => {
 });
 sb.addEventListener("focus", () => { if (sr.innerHTML) sr.hidden = false; });
 
-// ── Mini chart (canvas, no deps) ─────────────────────────────────────
+// &#x2500;&#x2500; Mini chart (canvas, no deps) &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 function drawChart(canvas, points) {
   if (!canvas || !points || points.length === 0) return;
   const dpr = window.devicePixelRatio || 1;
@@ -1369,7 +1369,7 @@ function drawChart(canvas, points) {
     const idx = Math.round(((mx - padL) / innerW) * Math.max(1, points.length - 1));
     if (idx < 0 || idx >= points.length) { tip.hidden = true; return; }
     const p = points[idx];
-    tip.innerHTML = "<strong>" + p.day + "</strong><br>" + fmtUsd(p.revenue_usd) + " · " + p.orders + " orders";
+    tip.innerHTML = "<strong>" + p.day + "</strong><br>" + fmtUsd(p.revenue_usd) + " &#xB7; " + p.orders + " orders";
     tip.style.left = (padL + (innerW * idx) / Math.max(1, points.length - 1)) + "px";
     tip.style.top = (padT + innerH - (p.revenue_usd / revMax) * innerH) + "px";
     tip.hidden = false;
