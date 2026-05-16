@@ -31,7 +31,12 @@ import { confirmOrderAndIssue, cancelOrder } from "./store"
 import { newId } from "./token"
 import { Log } from "../util/log"
 import { captureException } from "./sentry"
-import { sendCustomerTokenCrypoverse } from "./telegram-notify"
+import {
+  notifyAdminOrderConfirmed,
+  notifyAdminOrderCancelled,
+  notifyAdminOrderCreated,
+  sendCustomerTokenCrypoverse,
+} from "./telegram-notify"
 import { makeToken } from "./token"
 
 const log = Log.create({ service: "license-crypoverse" })
@@ -178,6 +183,19 @@ export async function initiateInvoice(opts: {
     log.error("subscriber crashed at startup", { transaction_id: invoice.transaction_id, error: String(err) })
     captureException(err, { tags: { context: "crypoverse.initiateInvoice.subscribe" } })
   })
+  // Admin notification — fires once per invoice as soon as it lands in the
+  // queue. Closing notification (paid / cancelled) handled in onPaid /
+  // onFailed below.
+  void notifyAdminOrderCreated({
+    order_id: order.id,
+    interval: order.interval,
+    amount_usd: opts.amountUsd,
+    method: "crypoverse",
+    customer_telegram: order.customer_telegram,
+    customer_user_id: order.customer_user_id,
+    customer_id: null,
+    created_at: order.created_at,
+  }).catch(() => undefined)
   return { invoice, redirectUrl }
 }
 
@@ -422,6 +440,19 @@ async function onPaid(transactionId: string, txHash: string | null): Promise<voi
     customer_id: result.customer.id,
     amount_usd: invoice.amount_usd,
   })
+  // Push admin notification — closes the loop on whichever "ordine creato"
+  // ping fired when the order entered the queue. Best-effort: doesn't block
+  // license issuance if Telegram is unreachable.
+  void notifyAdminOrderConfirmed({
+    order_id: invoice.order_id,
+    license_id: result.license.id,
+    interval: result.license.interval,
+    customer_telegram: result.customer.telegram,
+    customer_id: result.customer.id,
+    amount_usd: invoice.amount_usd,
+    method: "crypoverse",
+    tx_hash: txHash,
+  }).catch(() => undefined)
   // Push the license token to the user on Telegram, mirroring what the
   // on-chain poller does. Best-effort: we don't fail license issuance
   // just because Telegram is down — the user can always /token to
@@ -482,6 +513,13 @@ function onFailed(transactionId: string, status: string): void {
       transaction_id: transactionId,
       status,
     })
+    void notifyAdminOrderCancelled({
+      order_id: order.id,
+      interval: order.interval,
+      customer_telegram: order.customer_telegram,
+      customer_id: null,
+      reason: `Crypoverse terminal status: ${status}`,
+    }).catch(() => undefined)
   }
 }
 

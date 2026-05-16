@@ -144,6 +144,178 @@ export async function notifyAdminNewPendingUser(opts: {
 }
 
 /**
+ * Ping every admin chat when a new order is created (still pending payment).
+ * Lets the operator see the funnel in real time without watching the DB —
+ * "order ord_X for monthly $20 from @user, awaiting payment via <method>".
+ *
+ * `method` distinguishes the rails so an admin can tell at a glance whether
+ * the order is going through the on-chain poller (BTC/LTC/ETH wallets) or
+ * the Crypoverse hosted gateway. Inline keyboard offers a one-click cancel
+ * + status pull so the admin can intervene without leaving the chat.
+ */
+export async function notifyAdminOrderCreated(opts: {
+  order_id: string
+  interval: "monthly" | "annual" | "lifetime"
+  amount_usd: number
+  method: "onchain" | "crypoverse"
+  customer_telegram: string | null
+  customer_user_id: number | null
+  customer_id: string | null
+  created_at: number
+}): Promise<void> {
+  const chatIds = adminChatIds()
+  if (chatIds.length === 0) return
+  const when = new Date(opts.created_at * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC"
+  const handle = opts.customer_telegram
+    ? "@" + opts.customer_telegram.replace(/^@/, "")
+    : opts.customer_user_id
+    ? "user " + opts.customer_user_id
+    : opts.customer_id ?? "unknown"
+  const methodLabel = opts.method === "crypoverse" ? "💳 Crypoverse" : "⛓️ on-chain"
+  const body = [
+    "🆕 *Nuovo ordine in attesa*",
+    "",
+    "*Order:* `" + opts.order_id + "`",
+    "*Piano:* " + opts.interval + "  ·  *$" + opts.amount_usd + "*",
+    "*Metodo:* " + methodLabel,
+    "*Customer:* " + handle,
+    "*Creato:* " + when,
+  ].join("\n")
+  const keyboard: InlineKeyboard = [
+    [
+      { text: "🔍 Status", callback_data: `adm:orderstatus:${opts.order_id}` },
+      { text: "❌ Cancel", callback_data: `adm:ordcancel:${opts.order_id}` },
+    ],
+  ]
+  log.info("notify admin order created", { order_id: opts.order_id, method: opts.method, admins: chatIds.length })
+  await Promise.all(
+    chatIds.map((chatId) =>
+      sendTelegramMessage(chatId, body, "Markdown", { inline_keyboard: keyboard }).catch((err) =>
+        log.warn("notifyAdminOrderCreated failed", {
+          chatId,
+          order_id: opts.order_id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      ),
+    ),
+  )
+}
+
+/**
+ * Ping admins when a license is actually issued (order → confirmed). Closes
+ * the loop on the previous "nuovo ordine in attesa" notification — without
+ * this the admin sees orders pile up in `pending` but never finds out which
+ * ones actually paid through.
+ */
+export async function notifyAdminOrderConfirmed(opts: {
+  order_id: string
+  license_id: string
+  interval: string
+  customer_telegram: string | null
+  customer_id: string
+  amount_usd: number | null
+  method: "onchain" | "crypoverse" | "admin"
+  tx_hash: string | null
+}): Promise<void> {
+  const chatIds = adminChatIds()
+  if (chatIds.length === 0) return
+  const handle = opts.customer_telegram ? "@" + opts.customer_telegram.replace(/^@/, "") : opts.customer_id
+  const methodLabel =
+    opts.method === "crypoverse" ? "💳 Crypoverse" : opts.method === "admin" ? "👑 admin grant" : "⛓️ on-chain"
+  const lines = [
+    "✅ *Licenza emessa*",
+    "",
+    "*Order:* `" + opts.order_id + "`",
+    "*License:* `" + opts.license_id + "`",
+    "*Piano:* " + opts.interval + (opts.amount_usd ? "  ·  *$" + opts.amount_usd + "*" : ""),
+    "*Metodo:* " + methodLabel,
+    "*Customer:* " + handle,
+  ]
+  if (opts.tx_hash) lines.push("*Tx:* `" + opts.tx_hash + "`")
+  log.info("notify admin order confirmed", { order_id: opts.order_id, license_id: opts.license_id })
+  await Promise.all(
+    chatIds.map((chatId) =>
+      sendTelegramMessage(chatId, lines.join("\n"), "Markdown").catch((err) =>
+        log.warn("notifyAdminOrderConfirmed failed", {
+          chatId,
+          order_id: opts.order_id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      ),
+    ),
+  )
+}
+
+/**
+ * Ping admins when an order is cancelled (user request, Crypoverse expire,
+ * admin intervention). Helps operator see churn + know when to nudge a
+ * customer who abandoned mid-flow.
+ */
+export async function notifyAdminOrderCancelled(opts: {
+  order_id: string
+  interval: string
+  customer_telegram: string | null
+  customer_id: string | null
+  reason: string
+}): Promise<void> {
+  const chatIds = adminChatIds()
+  if (chatIds.length === 0) return
+  const handle = opts.customer_telegram
+    ? "@" + opts.customer_telegram.replace(/^@/, "")
+    : opts.customer_id ?? "unknown"
+  const body = [
+    "🚫 *Ordine cancellato*",
+    "",
+    "*Order:* `" + opts.order_id + "`",
+    "*Piano:* " + opts.interval,
+    "*Customer:* " + handle,
+    "*Motivo:* " + opts.reason,
+  ].join("\n")
+  await Promise.all(
+    chatIds.map((chatId) =>
+      sendTelegramMessage(chatId, body, "Markdown").catch((err) =>
+        log.warn("notifyAdminOrderCancelled failed", {
+          chatId,
+          order_id: opts.order_id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      ),
+    ),
+  )
+}
+
+/**
+ * Critical-error notifier — fires when something operator-visible breaks:
+ * the on-chain poller crashes for the Nth time in a row, the Crypoverse
+ * listener can't reconnect, the backup scheduler fails. Throttled in the
+ * caller (most callsites attach a backoff to avoid notification spam).
+ */
+export async function notifyAdminCriticalError(opts: {
+  surface: string
+  message: string
+  detail?: string
+}): Promise<void> {
+  const chatIds = adminChatIds()
+  if (chatIds.length === 0) return
+  const body = [
+    "🚨 *Errore critico*",
+    "",
+    "*Surface:* `" + opts.surface + "`",
+    "*Messaggio:* " + opts.message,
+    opts.detail ? "*Dettaglio:* `" + opts.detail.slice(0, 500) + "`" : "",
+    "",
+    "_Apri i log Fly per la traccia completa: `fly logs -a crimecode-api`_",
+  ]
+    .filter(Boolean)
+    .join("\n")
+  await Promise.all(
+    chatIds.map((chatId) =>
+      sendTelegramMessage(chatId, body, "Markdown").catch(() => undefined),
+    ),
+  )
+}
+
+/**
  * Diagnostic helper used by the /notify_test admin command — sends a
  * "is the channel alive" message to every configured admin and returns
  * how many slots received it.

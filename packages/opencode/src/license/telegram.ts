@@ -14,6 +14,9 @@ import {
   notifyUserApproved,
   notifyUserRejected,
   pingAdminsForTest,
+  notifyAdminOrderCreated,
+  notifyAdminOrderConfirmed,
+  notifyAdminOrderCancelled,
 } from "./telegram-notify"
 import { listTeamsForCustomer } from "./teams"
 import { helpUser, orderCreatedMessage, pickLang, recallLang, rememberLang, type Lang } from "./telegram-i18n"
@@ -207,6 +210,28 @@ const PRICE_USD: Record<"monthly" | "annual" | "lifetime", number> = {
   monthly: 20,
   annual: 200,
   lifetime: 500,
+}
+
+/**
+ * Fire the admin "nuovo ordine in attesa" ping for any bot-originated
+ * order. Always fire-and-forget — order creation must not block on
+ * Telegram availability. Inferred method from the caller (most bot flows
+ * are on-chain BTC/LTC/ETH; Crypoverse uses its own dedicated helper).
+ */
+function notifyAdminOrderCreatedFromBot(
+  o: { id: string; interval: string; customer_telegram: string | null; customer_user_id: number | null; created_at: number },
+  method: "onchain" | "crypoverse",
+): void {
+  void notifyAdminOrderCreated({
+    order_id: o.id,
+    interval: o.interval as "monthly" | "annual" | "lifetime",
+    amount_usd: PRICE_USD[o.interval as "monthly" | "annual" | "lifetime"] ?? 0,
+    method,
+    customer_telegram: o.customer_telegram,
+    customer_user_id: o.customer_user_id,
+    customer_id: null,
+    created_at: o.created_at,
+  }).catch(() => undefined)
 }
 
 const PAY_WINDOW_MINUTES = 60
@@ -438,6 +463,18 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
           "Markdown",
         )
       }
+      // Broadcast to *other* admins — the acting admin sees the toast,
+      // but second/third operators need a chat message to stay in sync.
+      void notifyAdminOrderConfirmed({
+        order_id: r.order.id,
+        license_id: r.license.id,
+        interval: r.license.interval,
+        customer_telegram: r.customer.telegram,
+        customer_id: r.customer.id,
+        amount_usd: PRICE_USD[r.license.interval as "monthly" | "annual" | "lifetime"] ?? null,
+        method: "admin",
+        tx_hash: null,
+      }).catch(() => undefined)
       await ack(`✅ Confermato → ${r.license.id}`)
       await editOriginal(`✅ Confermato → license \`${r.license.id}\``)
       return
@@ -445,6 +482,13 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
     if (verb === "ordcancel" && a1) {
       const o = cancelOrder(a1)
       if (!o) return ack("Order not found / not pending", true)
+      void notifyAdminOrderCancelled({
+        order_id: o.id,
+        interval: o.interval,
+        customer_telegram: o.customer_telegram,
+        customer_id: null,
+        reason: `admin-cancelled by ${fromUsername ?? fromId}`,
+      }).catch(() => undefined)
       await ack("Cancelled")
       await editOriginal(`🚫 Cancelled \`${o.id}\``)
       return
@@ -486,6 +530,13 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
       }
       const cancelled = cancelOrder(a1)
       if (!cancelled) return ack("Ordine non in pending — non si può cancellare", true)
+      void notifyAdminOrderCancelled({
+        order_id: a1,
+        interval: o.interval,
+        customer_telegram: o.customer_telegram,
+        customer_id: null,
+        reason: `user-cancelled by ${fromUsername ?? fromId}`,
+      }).catch(() => undefined)
       await ack("Ordine cancellato")
       await editOriginal(`🚫 Ordine \`${a1}\` cancellato`)
       return
@@ -567,6 +618,7 @@ async function handleCallbackQuery(update: TgUpdate): Promise<void> {
         customer_user_id: fromId,
         interval: a1,
       })
+      notifyAdminOrderCreatedFromBot(o, "onchain")
       await sendNew(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang))
       await ack("Ordine creato")
       return
@@ -738,6 +790,7 @@ async function handle(update: TgUpdate) {
           customer_user_id: userId,
           interval: deepLinkInterval as "monthly" | "annual" | "lifetime",
         })
+        notifyAdminOrderCreatedFromBot(o, "onchain")
         await send(chatId, await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang), "Markdown")
         return
       }
@@ -802,6 +855,7 @@ async function handle(update: TgUpdate) {
         customer_user_id: userId,
         interval: interval as "monthly" | "annual" | "lifetime",
       })
+      notifyAdminOrderCreatedFromBot(o, "onchain")
       await send(
         chatId,
         await newOrderMessage(o.id, o.interval as keyof typeof PRICE_USD, lang),

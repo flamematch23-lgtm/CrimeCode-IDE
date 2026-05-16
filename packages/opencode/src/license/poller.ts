@@ -11,7 +11,7 @@ import {
   markOfferSeen,
 } from "./store"
 import { getWallets } from "./wallets"
-import { notifyPaymentSeen, sendCustomerToken } from "./telegram-notify"
+import { notifyAdminCriticalError, notifyAdminOrderConfirmed, notifyPaymentSeen, sendCustomerToken } from "./telegram-notify"
 
 const log = Log.create({ service: "license-poller" })
 
@@ -136,6 +136,19 @@ async function pollOnce(): Promise<void> {
         currency,
         tx: tx.txid,
       })
+      // Ping admin chats — closes the loop on the "nuovo ordine in attesa"
+      // notification that fired when the order was created. Fire-and-forget:
+      // if Telegram is down we don't block license issuance.
+      void notifyAdminOrderConfirmed({
+        order_id: issued.order.id,
+        license_id: issued.license.id,
+        interval: issued.license.interval,
+        customer_telegram: issued.customer.telegram,
+        customer_id: issued.customer.id,
+        amount_usd: null,
+        method: "onchain",
+        tx_hash: tx.txid,
+      }).catch(() => undefined)
       // Cancel sibling offers (other currencies) — order is already paid.
       for (const sibling of getOffersForOrder(match.order_id)) {
         if (sibling.id !== match.id && !sibling.matched_tx_hash) {
@@ -167,13 +180,26 @@ export function startPaymentPoller(): void {
     return
   }
   log.info("starting payment poller", { wallets: getWallets().map((w) => w.currency) })
+  // Throttled critical-error counter: ping admins only after 5 consecutive
+  // failures (~2.5 min of total outage) so a one-off mempool.space timeout
+  // doesn't trigger a Telegram notification — but a sustained problem does.
+  let consecutiveFailures = 0
   const tick = async () => {
     if (stopped) return
     try {
       await pollOnce()
+      consecutiveFailures = 0
     } catch (err) {
       log.warn("pollOnce error", { error: err instanceof Error ? err.message : String(err) })
       captureException(err, { tags: { surface: "payment-poller" } })
+      consecutiveFailures++
+      if (consecutiveFailures === 5) {
+        void notifyAdminCriticalError({
+          surface: "payment-poller",
+          message: "On-chain payment poller has failed 5 consecutive cycles (~2.5 min). Payments may be missed.",
+          detail: err instanceof Error ? err.message : String(err),
+        }).catch(() => undefined)
+      }
     }
     timer = setTimeout(tick, POLL_INTERVAL_MS)
   }
