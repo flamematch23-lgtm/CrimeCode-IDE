@@ -15,3 +15,10 @@
 
 /*.css
   Content-Type: text/css
+
+# Crypoverse domain verification — explicit text/plain so the verifier doesn't
+# get confused by Cloudflare's default octet-stream for .txt under some configs.
+/platform-verification.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+  X-Robots-Tag: noindex
