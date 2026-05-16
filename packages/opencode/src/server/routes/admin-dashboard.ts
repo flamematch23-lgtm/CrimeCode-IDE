@@ -64,6 +64,7 @@ import {
   getRecentEvents,
   subscribeAdminEvents,
 } from "../../license/admin-event-bus"
+import { getDb } from "../../license/db"
 import {
   disable2fa,
   enable2fa,
@@ -1454,10 +1455,9 @@ export function adminDashboardRouter(): Hono {
 
   r.get("/api/customers", (c) => {
     const limit = Math.max(1, Math.min(500, Number.parseInt(c.req.query("limit") ?? "100", 10) || 100))
-    // Reuse listLicenses' underlying join shape — for the v1 we expose all
-    // customers in the password-accounts table + the recent telegram ones
-    // via getDb. Simpler: just paginate raw customers.
-    const { getDb } = require("../../license/db") as typeof import("../../license/db")
+    // Direct SQL — paginate raw customers ordered by signup time.
+    // (getDb is imported statically so the single-file Bun build doesn't
+    // trip on require() against modules with top-level await.)
     const rows = getDb()
       .prepare<{ id: string; telegram: string | null; email: string | null; approval_status: string; created_at: number }, [number]>(
         "SELECT id, telegram, email, approval_status, created_at FROM customers ORDER BY created_at DESC LIMIT ?",
