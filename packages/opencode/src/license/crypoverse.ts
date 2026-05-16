@@ -131,17 +131,17 @@ export async function initiateInvoice(opts: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // The /documentation page is incomplete — actual field names per
-      // live API probe:
+      // live API probe (each surfaced by a 400 from the previous attempt):
       //   - platformApiKey (body, not header)
       //   - transactionType: "default" | "pos"   (required)
       //   - currencyAmount: number               (required, NOT "amountUsd")
-      //   - currency: "USD" (assumed; only USD listed in dashboard pricing)
+      //   - currencyCode: "USD"                  (required string, NOT "currency")
       // Verified end-to-end against api.crypoverse.com on 2026-05-16.
       body: JSON.stringify({
         platformApiKey: API_KEY,
         transactionType: "default",
         currencyAmount: opts.amountUsd,
-        currency: "USD",
+        currencyCode: "USD",
       }),
       signal: ctrl.signal,
     })
