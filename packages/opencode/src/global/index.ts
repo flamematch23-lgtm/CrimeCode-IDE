@@ -79,26 +79,20 @@ await Promise.all([
 {
   "$schema": "https://opencode.ai/config.json",
 
-  // Provider pre-elencati e visibili nel selector di modello.
-  // - 'opencode' (OpenCode Zen): hub modelli curati. Accedi via UI per
-  //   ottenere API key e usare tutti i modelli inclusi.
-  // - 'crimeopus' (CrimeCode Cloud): gateway con failover Together/Groq/
-  //   Modal. Già configurato verso https://ai.crimecode.cc.
-  // - 'groq': free tier generoso (LLaMA, Mixtral, Gemma).
-  // - 'cerebras': free tier API (LLaMA 3.1 70B, 8B).
-  // - 'together': accesso a modelli open-source (Qwen, DeepSeek, LLaMA).
-  // - 'google': Gemini 2.0/2.5 Flash con free tier.
-  "enabled_providers": [
-    "opencode",
-    "crimeopus",
-    "groq",
-    "cerebras",
-    "together",
-    "google",
-    "anthropic",
-    "openai",
-    "openrouter"
-  ],
+  // Lista provider visibili nel "Connetti provider" picker.
+  //
+  // Storicamente questa chiave era una whitelist hard-coded a 9 provider —
+  // ma significava che su un'installazione fresca, l'utente vedeva SOLO
+  // quei 9 nel picker, nascondendo i ~200 provider (Mistral, DeepSeek,
+  // Together, xAI, Fireworks, Vercel, Bedrock, ecc.) caricati dallo
+  // snapshot models.dev. Adesso la chiave è commentata: usiamo invece
+  // 'disabled_providers' per nascondere selettivamente quello che NON
+  // vuoi mostrare, lasciando tutti gli altri disponibili. Decommentala
+  // (e ripopolala) solo se ti serve una whitelist esplicita.
+  //
+  //   "enabled_providers": ["opencode","crimeopus","groq", ...],
+  //
+  // "disabled_providers": ["abacus","fake-provider"],
 
   // Configurazione provider. Aggiungi 'apiKey' nel blocco 'options' per
   // attivare il provider. Senza apiKey il provider rimane visibile nel
