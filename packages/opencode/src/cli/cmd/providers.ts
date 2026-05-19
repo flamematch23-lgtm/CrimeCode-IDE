@@ -308,7 +308,8 @@ export const ProvidersLoginCommand = cmd({
         const config = await Config.get()
 
         const disabled = new Set(config.disabled_providers ?? [])
-        const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
+        const resolved = Config.resolveEnabledProviders(config.enabled_providers)
+        const enabled = resolved ? new Set(resolved) : undefined
 
         const providers = await ModelsDev.get().then((x) => {
           const filtered: Record<string, (typeof x)[string]> = {}

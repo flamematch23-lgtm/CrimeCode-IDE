@@ -1147,7 +1147,8 @@ export namespace Provider {
     const database = mapValues(modelsDev, fromModelsDevProvider)
 
     const disabled = new Set(config.disabled_providers ?? [])
-    const enabled = config.enabled_providers ? new Set(config.enabled_providers) : null
+    const resolved = Config.resolveEnabledProviders(config.enabled_providers)
+    const enabled = resolved ? new Set(resolved) : null
 
     function isProviderAllowed(providerID: ProviderID): boolean {
       if (enabled && !enabled.has(providerID)) return false

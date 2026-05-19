@@ -41,7 +41,8 @@ export const ProviderRoutes = lazy(() =>
       async (c) => {
         const config = await Config.get()
         const disabled = new Set(config.disabled_providers ?? [])
-        const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
+        const resolved = Config.resolveEnabledProviders(config.enabled_providers)
+        const enabled = resolved ? new Set(resolved) : undefined
 
         const allProviders = await ModelsDev.get()
         const filteredProviders: Record<string, (typeof allProviders)[string]> = {}

@@ -47,6 +47,57 @@ export namespace Config {
 
   const log = Log.create({ service: "config" })
 
+  // ── Stale-whitelist detection ────────────────────────────────────
+  // Through ≤ v2.44.0 the seed config in global/index.ts hard-coded
+  // `enabled_providers` to a 9-item whitelist. Users who installed
+  // those builds (or upgraded from them) still carry that array on
+  // disk, which on the server side filters the 200+ providers loaded
+  // from models-snapshot.js down to just those 9 — exactly the bug
+  // reported in the Connetti-provider screenshot.
+  //
+  // We can't safely rewrite the user's config.json (they might have
+  // edited it on purpose), so we keep it intact and instead detect
+  // the legacy fingerprint at every read site: if the set is
+  // *exactly* the historical whitelist, treat it as undefined and
+  // expose every provider. Any divergence (added entry, removed
+  // entry, custom provider) keeps the whitelist active.
+  const LEGACY_ENABLED_PROVIDERS = Object.freeze([
+    "opencode",
+    "crimeopus",
+    "groq",
+    "cerebras",
+    "together",
+    "google",
+    "anthropic",
+    "openai",
+    "openrouter",
+  ])
+  let staleNoticeLogged = false
+  /**
+   * Returns the user's enabled_providers as-given UNLESS it matches the
+   * legacy whitelist verbatim, in which case it returns `undefined` to
+   * disable filtering. Call this at every site that consumes
+   * `config.enabled_providers` so the fix is universal.
+   */
+  export function resolveEnabledProviders(value: readonly string[] | null | undefined): string[] | undefined {
+    if (!value || value.length === 0) return undefined
+    if (value.length === LEGACY_ENABLED_PROVIDERS.length) {
+      const sorted = [...value].sort().join(",")
+      const legacySorted = [...LEGACY_ENABLED_PROVIDERS].sort().join(",")
+      if (sorted === legacySorted) {
+        if (!staleNoticeLogged) {
+          staleNoticeLogged = true
+          log.info(
+            "ignoring stale legacy enabled_providers whitelist — surfacing all providers from models snapshot",
+            { length: value.length },
+          )
+        }
+        return undefined
+      }
+    }
+    return [...value]
+  }
+
   // Managed settings directory for enterprise deployments (highest priority, admin-controlled)
   // These settings override all user and project settings
   function systemManagedConfigDir(): string {
