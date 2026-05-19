@@ -78,10 +78,35 @@ export interface LicenseSnapshot {
   trialDaysRemaining: number | null
 }
 
+export type SidecarSpawnAttempt = {
+  attempt: number
+  port: number
+  ts: number
+  code: number | null
+  signal: number | null
+}
+
+export type SidecarDiagnostics = {
+  binaryPath: string | null
+  binaryExists: boolean
+  url: string | null
+  killedIntentionally: boolean
+  spawnAttempts: SidecarSpawnAttempt[]
+  recentStderr: string[]
+  lastError: string | null
+  logFolder: string
+  appVersion: string
+  platform: NodeJS.Platform
+  electronVersion: string
+}
+
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
   toggleProxy: (enabled: boolean, target?: string, auth?: string, proxyUrl?: string) => Promise<void>
   installCli: () => Promise<string>
+  getSidecarDiagnostics: () => Promise<SidecarDiagnostics>
+  openLogFolder: () => Promise<void>
+  restartApp: () => Promise<void>
   awaitInitialization: (onStep: (step: InitStep) => void) => Promise<ServerReadyData>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

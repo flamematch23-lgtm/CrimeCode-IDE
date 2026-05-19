@@ -64,6 +64,60 @@ let sidecar: CommandChild | null = null
 let sidecarKilledIntentionally = false
 const loadingComplete = defer<void>()
 
+// ── Sidecar diagnostics state ────────────────────────────────────────
+// Rolling buffers feed the renderer's ConnectionError dialog so the user
+// sees what went wrong (path, last stderr, exit code) instead of a
+// generic "server unreachable" message that's impossible to debug
+// without the Electron log file. Capped at MAX_STDERR_LINES to bound
+// memory in case the sidecar starts log-spamming.
+const MAX_STDERR_LINES = 200
+export interface SidecarSpawnAttempt {
+  attempt: number
+  port: number
+  ts: number
+  code: number | null
+  signal: number | null
+}
+const sidecarStderrBuffer: string[] = []
+const sidecarSpawnAttempts: SidecarSpawnAttempt[] = []
+let lastSidecarBinaryPath: string | null = null
+let lastSidecarUrl: string | null = null
+let lastSidecarError: string | null = null
+function pushStderr(line: string) {
+  sidecarStderrBuffer.push(line)
+  if (sidecarStderrBuffer.length > MAX_STDERR_LINES) {
+    sidecarStderrBuffer.splice(0, sidecarStderrBuffer.length - MAX_STDERR_LINES)
+  }
+}
+export interface SidecarDiagnostics {
+  binaryPath: string | null
+  binaryExists: boolean
+  url: string | null
+  killedIntentionally: boolean
+  spawnAttempts: SidecarSpawnAttempt[]
+  recentStderr: string[]
+  lastError: string | null
+  logFolder: string
+  appVersion: string
+  platform: NodeJS.Platform
+  electronVersion: string
+}
+export function getSidecarDiagnostics(): SidecarDiagnostics {
+  return {
+    binaryPath: lastSidecarBinaryPath,
+    binaryExists: lastSidecarBinaryPath ? existsSync(lastSidecarBinaryPath) : false,
+    url: lastSidecarUrl,
+    killedIntentionally: sidecarKilledIntentionally,
+    spawnAttempts: [...sidecarSpawnAttempts],
+    recentStderr: sidecarStderrBuffer.slice(-50),
+    lastError: lastSidecarError,
+    logFolder: app.getPath("logs"),
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    electronVersion: process.versions.electron,
+  }
+}
+
 const pendingDeepLinks: string[] = []
 
 const serverReady = defer<ServerReadyData>()
@@ -240,7 +294,9 @@ async function initialize() {
   const password = randomUUID()
 
   const binary = getSidecarPath()
+  lastSidecarBinaryPath = binary
   if (!existsSync(binary)) {
+    lastSidecarError = `sidecar binary not found at ${binary}`
     logger.error("sidecar binary not found", { path: binary })
     dialog.showErrorBox(
       "OpenCode — Fatal Error",
@@ -277,11 +333,14 @@ async function initialize() {
   const onStderr = (line: string) => {
     const trimmed = line.trimEnd()
     stderrLines.push(trimmed)
+    pushStderr(trimmed)
     logger.log("sidecar stderr", { line: trimmed })
   }
   const onError = (msg: string) => {
     logger.error("sidecar spawn error", { error: msg, binary })
     stderrLines.push(`[spawn error] ${msg}`)
+    pushStderr(`[spawn error] ${msg}`)
+    lastSidecarError = msg
   }
   const onSqlite = (progress: SqliteMigrationProgress) => {
     setInitStep({ phase: "sqlite_waiting" })
@@ -299,6 +358,7 @@ async function initialize() {
   for (let attempt = 1; attempt <= maxSpawnAttempts; attempt += 1) {
     port = await getSidecarPort()
     url = `http://${hostname}:${port}`
+    lastSidecarUrl = url
     if (attempt === 1) perf.mark("port_allocated")
 
     logger.log("spawning sidecar", { url, binary, attempt, maxSpawnAttempts })
@@ -335,6 +395,14 @@ async function initialize() {
     }
 
     lastDeathCode = death.code
+    sidecarSpawnAttempts.push({
+      attempt,
+      port,
+      ts: Math.floor(Date.now() / 1000),
+      code: death.code,
+      signal: death.signal,
+    })
+    lastSidecarError = `sidecar exited (code=${death.code ?? "?"}, signal=${death.signal ?? "?"}) on port ${port}`
     logger.log("sidecar died before becoming healthy — retrying with a fresh port", {
       port,
       attempt,
@@ -541,6 +609,12 @@ function wireMenu() {
 registerIpcHandlers({
   killSidecar: () => killSidecar(),
   installCli: async () => installCli(),
+  getSidecarDiagnostics: () => getSidecarDiagnostics(),
+  restartApp: () => {
+    logger.log("restart requested via IPC")
+    app.relaunch()
+    app.exit(0)
+  },
   awaitInitialization: async (sendStep) => {
     sendStep(initStep)
     const listener = (step: InitStep) => sendStep(step)

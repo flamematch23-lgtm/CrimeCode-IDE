@@ -5,6 +5,9 @@ const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   toggleProxy: (enabled, target, auth, proxyUrl) => ipcRenderer.invoke("toggle-proxy", enabled, target, auth, proxyUrl),
   installCli: () => ipcRenderer.invoke("install-cli"),
+  getSidecarDiagnostics: () => ipcRenderer.invoke("get-sidecar-diagnostics"),
+  openLogFolder: () => ipcRenderer.invoke("open-log-folder"),
+  restartApp: () => ipcRenderer.invoke("restart-app"),
   awaitInitialization: (onStep) => {
     const handler = (_: unknown, step: InitStep) => onStep(step)
     ipcRenderer.on("init-step", handler)

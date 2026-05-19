@@ -34,6 +34,8 @@ const pickerFilters = (ext?: string[]) => {
 type Deps = {
   killSidecar: () => void
   installCli: () => Promise<string>
+  getSidecarDiagnostics: () => unknown
+  restartApp: () => void
   awaitInitialization: (sendStep: (step: InitStep) => void) => Promise<ServerReadyData>
   getDefaultServerUrl: () => Promise<string | null> | string | null
   setDefaultServerUrl: (url: string | null) => Promise<void> | void
@@ -83,6 +85,17 @@ function resolveDir(path: string) {
 export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("kill-sidecar", () => deps.killSidecar())
   ipcMain.handle("install-cli", () => deps.installCli())
+  // Diagnostics + recovery for the ConnectionError dialog: the renderer
+  // pulls sidecar binary path / last stderr / spawn attempts, opens the
+  // log folder for the user to share, or relaunches the whole app when
+  // a respawn-without-restart isn't enough.
+  ipcMain.handle("get-sidecar-diagnostics", () => deps.getSidecarDiagnostics())
+  ipcMain.handle("open-log-folder", () => {
+    shell.openPath(app.getPath("logs")).catch(() => undefined)
+  })
+  ipcMain.handle("restart-app", () => {
+    deps.restartApp()
+  })
   ipcMain.handle(
     "toggle-proxy",
     (
