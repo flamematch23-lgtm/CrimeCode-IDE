@@ -46,7 +46,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Install flyctl with a 3-attempt retry. The official action
+      # downloads the binary from a Fly-hosted CDN that has flaked
+      # with 503 Service Unavailable a few times — when that happens
+      # the whole deploy fails before it even starts. Retrying the
+      # download three times with a 30s gap recovers from any
+      # transient CDN hiccup without needing to re-trigger the job
+      # by hand.
+      - name: Install flyctl (with retry)
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if curl -fsSL https://fly.io/install.sh | sh; then
+              echo "flyctl installed on attempt $attempt"
+              echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+            echo "flyctl install attempt $attempt failed — retrying in 30s..."
+            sleep 30
+          done
+          echo "::error::flyctl install failed after 3 attempts"
+          exit 1
 
       - name: Deploy to Fly.io (remote builder)
         env:
