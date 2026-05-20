@@ -49,6 +49,7 @@ import {
   shouldFocusTerminalOnKeyDown,
 } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/message-timeline"
+import { ComponentErrorBoundary, type ErrorFallbackProps } from "@/components/error-boundary"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
@@ -1785,7 +1786,33 @@ export default function Page() {
                     </div>
                   }
                 >
-                  <MessageTimeline
+                  {/* Older sessions can carry messages whose tool-call /
+                      tool-result shape predates the current renderer
+                      (input was object, output was undefined, etc.). One
+                      malformed message used to crash the entire timeline
+                      and leave the main panel completely blank — the
+                      symptom users were reporting when reopening old
+                      conversations. Wrap the timeline so a crash now
+                      surfaces a recoverable fallback with the actual
+                      error and a quick path to start a new session. */}
+                  <ComponentErrorBoundary
+                    fallback={(fbp) => (
+                      <SessionTimelineFallback
+                        error={fbp.error}
+                        reset={fbp.reset}
+                        sessionId={params.id ?? ""}
+                      />
+                    )}
+                    onError={(err) => {
+                      // eslint-disable-next-line no-console
+                      console.error("session timeline render error", {
+                        session_id: params.id,
+                        error: err instanceof Error ? err.message : String(err),
+                        stack: err instanceof Error ? err.stack : undefined,
+                      })
+                    }}
+                  >
+                    <MessageTimeline
                     mobileChanges={mobileChanges()}
                     mobileFallback={reviewContent({
                       diffStyle: "unified",
@@ -1825,6 +1852,7 @@ export default function Page() {
                     renderedUserMessages={historyWindow.renderedUserMessages()}
                     anchor={anchor}
                   />
+                  </ComponentErrorBoundary>
                 </Show>
               </Match>
               <Match when={true}>
@@ -1909,6 +1937,83 @@ export default function Page() {
       </div>
 
       <TerminalPanel />
+    </div>
+  )
+}
+
+/**
+ * Fallback rendered when MessageTimeline throws (legacy message shape,
+ * malformed tool-call payload, etc.). Shows the actual error, lets the
+ * user retry the render after a hot-reload of the timeline state, and
+ * provides escape hatches: start a new session, or copy the diagnostic.
+ *
+ * Without this the panel went completely blank — see screenshot in the
+ * v2.44.4 bug report. The error boundary above forwards the caught
+ * exception here so the operator can paste it back to support.
+ */
+function SessionTimelineFallback(props: { error: unknown; reset: () => void; sessionId: string }) {
+  const message = () => {
+    const e = props.error
+    if (e instanceof Error) return e.message
+    if (typeof e === "string") return e
+    try {
+      return JSON.stringify(e, null, 2)
+    } catch {
+      return "Unknown error rendering session timeline"
+    }
+  }
+  const stack = () => (props.error instanceof Error ? props.error.stack ?? "" : "")
+  const copyDiagnostic = () => {
+    const body = [
+      `session_id: ${props.sessionId}`,
+      `error: ${message()}`,
+      stack() ? `\n${stack()}` : "",
+    ].join("\n")
+    try {
+      void navigator.clipboard?.writeText(body)
+    } catch {
+      // clipboard blocked — nothing we can do silently
+    }
+  }
+  return (
+    <div class="h-full overflow-auto flex flex-col items-center justify-center text-center gap-4 p-8">
+      <div class="text-text-strong text-14-medium">⚠️ Couldn't render this session</div>
+      <p class="text-12-regular text-text-weak max-w-md">
+        Most often this happens when an old conversation was saved with a tool-call shape that
+        the current client no longer understands. Your data is safe — the session file isn't
+        touched; only its in-memory render failed.
+      </p>
+      <div class="text-11-regular text-text-danger-base font-mono max-w-2xl break-all bg-surface-base rounded-md p-3 text-left">
+        {message()}
+      </div>
+      <details class="text-11-regular text-text-weak max-w-2xl w-full">
+        <summary class="cursor-pointer">Show stack trace</summary>
+        <pre class="text-left bg-surface-base rounded-md p-3 mt-2 overflow-auto max-h-64 whitespace-pre-wrap break-all">
+          {stack() || "(no stack available)"}
+        </pre>
+      </details>
+      <div class="flex gap-2 flex-wrap justify-center">
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-md text-12-medium bg-surface-raised-base hover:bg-surface-raised-base-hover border border-border-base"
+          onClick={() => props.reset()}
+        >
+          Try render again
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-md text-12-medium bg-surface-raised-base hover:bg-surface-raised-base-hover border border-border-base"
+          onClick={copyDiagnostic}
+        >
+          Copy diagnostic
+        </button>
+        <a
+          href="/"
+          class="px-3 py-1.5 rounded-md text-12-medium bg-icon-warning-base text-background-base font-semibold hover:opacity-90"
+        >
+          New session
+        </a>
+      </div>
     </div>
   )
 }
